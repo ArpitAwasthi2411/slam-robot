@@ -129,6 +129,11 @@ Also measure where the LiDAR sits relative to the axle midpoint → `laser_x`, `
 5. Touch the RC sticks during a goal: the ESP32 switches to RC immediately (chip shows RC OVERRIDE).
 6. Map the room in a loop, then **Save map** in the dashboard → `~/maps/<name>.yaml`.
 
+## 9. Navigation app (after odometry is calibrated)
+
+See [navigation.md](navigation.md): map once → Save map → relaunch with
+`slam_mode:=localization map:=~/maps/<name>.pbstream` → Position OK → save places → Go / commands.
+
 ## Optional: start on boot
 
 ```bash

@@ -41,3 +41,7 @@ Thumbs.db
 secrets*
 *.pem
 id_rsa*
+
+# simulator / test output
+maps/sim_*
+maps/test_room.*

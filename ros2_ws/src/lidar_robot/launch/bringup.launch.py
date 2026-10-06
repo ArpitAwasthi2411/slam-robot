@@ -1,14 +1,22 @@
 """One launch file for the whole robot.
 
-  ros2 launch lidar_robot bringup.launch.py                       # SLAM + encoders + controller + dashboard
-  ros2 launch lidar_robot bringup.launch.py use_odometry:=false   # LiDAR-only SLAM (ESP32 not needed for mapping)
+  # 1) build a map (drive around), then press "Save map" in the dashboard
+  ros2 launch lidar_robot bringup.launch.py
+  # 2) every later run: localise on the saved map -> saved places stay valid
+  ros2 launch lidar_robot bringup.launch.py slam_mode:=localization map:=~/maps/cse_floor.pbstream
+
+  ros2 launch lidar_robot bringup.launch.py use_odometry:=false   # LiDAR-only SLAM (no ESP32 odometry)
   ros2 launch lidar_robot bringup.launch.py slam:=false           # just drive: bridge + dashboard (+ lidar)
+  ros2 launch lidar_robot bringup.launch.py nav_mode:=direct      # old straight-line goal controller
 
 Arguments
-  use_odometry  true   fuse ESP32 encoder odometry into Cartographer
-  slam          true   start Cartographer + occupancy grid
-  controller    true   start the go-to-goal controller (RViz 2D Goal Pose)
-  dashboard     true   web dashboard on http://<pi>:8080
+  use_odometry  true        fuse ESP32 encoder odometry into Cartographer
+  slam          true        start Cartographer + occupancy grid
+  slam_mode     mapping     mapping | localization (needs map:=<file>.pbstream, odometry on)
+  map           ''          saved Cartographer state for localization
+  nav_mode      planner     planner (navigator: A* routes, places, missions) | direct (goal_controller) | none
+  dashboard     true        web dashboard on http://<pi>:8080
+  places        ~/maps/places.json
   lidar_port    /dev/ttyUSB0   (or /dev/rplidar after installing the udev rules)
   esp32_port    auto           (/dev/esp32, /dev/ttyACM* [S3], /dev/ttyUSB* except lidar_port [classic])
   laser_x/y/z/yaw              LiDAR pose on the robot (base_link -> laser)
@@ -32,8 +40,21 @@ def _setup(context):
     cfg = lambda n: LaunchConfiguration(n).perform(context)  # noqa: E731
 
     use_odom = _truthy(cfg('use_odometry'))
-    actions = [LogInfo(msg=f'[bringup] use_odometry={use_odom} slam={cfg("slam")} '
-                           f'controller={cfg("controller")} dashboard={cfg("dashboard")}')]
+    slam = _truthy(cfg('slam'))
+    slam_mode = cfg('slam_mode')
+    map_file = os.path.expanduser(cfg('map'))
+    nav_mode = cfg('nav_mode')
+    places = os.path.expanduser(cfg('places'))
+
+    if slam and slam_mode == 'localization':
+        if not map_file or not os.path.isfile(map_file):
+            raise RuntimeError(f'slam_mode:=localization needs map:=<file>.pbstream (got "{map_file}"). '
+                               'Save one from the dashboard ("Save map") while mapping.')
+        if not use_odom:
+            raise RuntimeError('localization mode is configured with wheel odometry; use use_odometry:=true')
+
+    actions = [LogInfo(msg=f'[bringup] odom={use_odom} slam={slam} slam_mode={slam_mode} '
+                           f'map={map_file or "-"} nav_mode={nav_mode} dashboard={cfg("dashboard")}')]
 
     actions.append(Node(
         package='tf2_ros', executable='static_transform_publisher', name='base_to_laser',
@@ -53,21 +74,31 @@ def _setup(context):
         parameters=[params, {'serial_port': cfg('esp32_port'), 'publish_tf': use_odom,
                              'exclude_ports': cfg('lidar_port')}]))
 
-    if _truthy(cfg('slam')):
-        lua = 'cartographer_odom.lua' if use_odom else 'cartographer_lidar_only.lua'
+    if slam:
+        if slam_mode == 'localization':
+            lua = 'cartographer_localization.lua'
+            extra = [f'-load_state_filename={map_file}', '-load_frozen_state=true']
+        else:
+            lua = 'cartographer_odom.lua' if use_odom else 'cartographer_lidar_only.lua'
+            extra = []
         actions.append(Node(
             package='cartographer_ros', executable='cartographer_node', name='cartographer_node',
             output='screen',
             arguments=['-configuration_directory', os.path.join(share, 'config'),
-                       '-configuration_basename', lua],
+                       '-configuration_basename', lua] + extra,
             remappings=[('scan', '/scan'), ('odom', '/odom')]))
         actions.append(Node(
             package='cartographer_ros', executable='cartographer_occupancy_grid_node',
             name='cartographer_occupancy_grid_node', output='screen',
             arguments=['-resolution', '0.05', '-publish_period_sec', '1.0']))
 
-    goal_frame = 'map' if _truthy(cfg('slam')) else 'odom'
-    if _truthy(cfg('controller')):
+    goal_frame = 'map' if slam else 'odom'
+    if nav_mode == 'planner':
+        actions.append(Node(
+            package='lidar_robot', executable='navigator', name='navigator', output='screen',
+            parameters=[params, {'global_frame': goal_frame, 'places_file': places,
+                                 'require_localization_confirm': slam and slam_mode == 'localization'}]))
+    elif nav_mode == 'direct':
         actions.append(Node(
             package='lidar_robot', executable='goal_controller', name='goal_controller',
             output='screen', parameters=[params, {'global_frame': goal_frame}]))
@@ -75,13 +106,14 @@ def _setup(context):
     if _truthy(cfg('dashboard')):
         actions.append(Node(
             package='lidar_robot', executable='dashboard', name='dashboard', output='screen',
-            parameters=[params, {'global_frame': goal_frame}]))
+            parameters=[params, {'global_frame': goal_frame, 'nav_mode': nav_mode}]))
     return actions
 
 
 def generate_launch_description():
     args = [
-        ('use_odometry', 'true'), ('slam', 'true'), ('controller', 'true'), ('dashboard', 'true'),
+        ('use_odometry', 'true'), ('slam', 'true'), ('slam_mode', 'mapping'), ('map', ''),
+        ('nav_mode', 'planner'), ('dashboard', 'true'), ('places', '~/maps/places.json'),
         ('lidar_port', '/dev/ttyUSB0'), ('esp32_port', 'auto'),
         ('laser_x', '0.0'), ('laser_y', '0.0'), ('laser_z', '0.10'), ('laser_yaw', '0.0'),
     ]
