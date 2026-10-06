@@ -29,6 +29,15 @@ are flash pins on a classic ESP32. The serial monitor's first line tells you whi
 Enter → `INFO,robot_esp32 v2.1 ...`. Move the RC sticks → last field becomes `1`.
 Type `E` → last field becomes `3` and the RC sticks no longer move the wheels; `R` releases it.
 
+### 1a. RC calibration (after any board or receiver change)
+
+```bash
+python3 tools/serial_probe.py --rc      # laptop or Pi, ESP32 on USB, transmitter ON
+```
+Sticks centred for the first 3 s, then sweep both sticks to their full ends. Paste the printed
+`#define`s into the sketch and re-flash. Pulses more than 100 us outside MIN..MAX count as
+"receiver lost", so stale numbers can make full stick act like a stop.
+
 ### 1b. Receiver failsafe (safety — do this once)
 
 By default a FlySky receiver **keeps outputting the last stick position** when the transmitter is
