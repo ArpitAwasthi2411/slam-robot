@@ -1,0 +1,43 @@
+# ROS 2 / colcon build output — never commit
+build/
+install/
+log/
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+
+# Arduino / PlatformIO build output
+*.bin
+*.elf
+*.hex
+*.map
+.pio/
+build-*/
+
+# Recordings & big data (use GitHub Releases or Git LFS if you want to share them)
+*.db3
+*.mcap
+rosbag2_*/
+*.bag
+*.pbstream
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit Wi-Fi passwords, tokens, SSH keys
+*.env
+.env*
+secrets*
+*.pem
+id_rsa*
