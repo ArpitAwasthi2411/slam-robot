@@ -1,5 +1,5 @@
 /*
- * robot_esp32  v2.0  —  ESP32-S3 low-level controller
+ * robot_esp32  v2.1  —  ESP32-S3 / classic ESP32 low-level controller
  * -----------------------------------------------------------------------------
  *  - Reads 2 quadrature encoders and streams raw tick deltas to the Pi (50 Hz)
  *  - Accepts wheel-velocity commands from the Pi and closes a PI speed loop
@@ -59,18 +59,39 @@
 #define FW_VERSION "2.1"
 
 // ============================ PINS ============================================
-#define RC_STEERING_PIN  4    // CH1
-#define RC_THROTTLE_PIN  7    // CH2
-
-#define LEFT_RPWM   5
-#define LEFT_LPWM   6
-#define RIGHT_RPWM  9
-#define RIGHT_LPWM  10
-
-#define ENC_LEFT_A   15
-#define ENC_LEFT_B   16
-#define ENC_RIGHT_A  17
-#define ENC_RIGHT_B  18
+// The right map is picked automatically from the board selected in the Arduino IDE.
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  // ---- ESP32-S3 (original wiring) ----
+  #define BOARD_NAME   "ESP32-S3"
+  #define RC_STEERING_PIN  4    // CH1
+  #define RC_THROTTLE_PIN  7    // CH2
+  #define LEFT_RPWM   5
+  #define LEFT_LPWM   6
+  #define RIGHT_RPWM  9
+  #define RIGHT_LPWM  10
+  #define ENC_LEFT_A   15
+  #define ENC_LEFT_B   16
+  #define ENC_RIGHT_A  17
+  #define ENC_RIGHT_B  18
+#elif defined(CONFIG_IDF_TARGET_ESP32)
+  // ---- Classic ESP32 (ESP32-WROOM-32 DevKit) ----
+  // GPIO 6-11 = internal SPI flash (never use). 0/2/5/12/15 = boot strapping pins (avoided).
+  // 1/3 = USB serial to the Pi. 34/35 are input-only (no pull-ups): fine for RC receiver signals.
+  // 21/22 kept free for an I2C IMU later, 36 free for a battery-voltage divider.
+  #define BOARD_NAME   "ESP32"
+  #define RC_STEERING_PIN  34   // CH1
+  #define RC_THROTTLE_PIN  35   // CH2
+  #define LEFT_RPWM   25
+  #define LEFT_LPWM   26
+  #define RIGHT_RPWM  32
+  #define RIGHT_LPWM  33
+  #define ENC_LEFT_A   18
+  #define ENC_LEFT_B   19
+  #define ENC_RIGHT_A  4
+  #define ENC_RIGHT_B  13
+#else
+  #error "No pin map for this chip: select 'ESP32S3 Dev Module' or 'ESP32 Dev Module'"
+#endif
 
 // ============================ DIRECTION FIXES =================================
 // Test 1 (robot on blocks): send "P,120,120" with tools/serial_probe.py.
@@ -282,8 +303,8 @@ void handleLine(char *line) {
       estop_latched = false;
       break;
     case '?':
-      LINK.printf("INFO,robot_esp32 v%s core%d mm_per_tick=%.5f max_mms=%.0f pwm_min=%.0f kp=%.3f ki=%.3f\n",
-                  FW_VERSION, ESP_ARDUINO_VERSION_MAJOR, MM_PER_TICK, MAX_WHEEL_SPEED_MMS, PWM_MIN, KP, KI);
+      LINK.printf("INFO,robot_esp32 v%s %s core%d mm_per_tick=%.5f max_mms=%.0f pwm_min=%.0f kp=%.3f ki=%.3f\n",
+                  FW_VERSION, BOARD_NAME, ESP_ARDUINO_VERSION_MAJOR, MM_PER_TICK, MAX_WHEEL_SPEED_MMS, PWM_MIN, KP, KI);
       break;
     default:
       break;
@@ -331,7 +352,7 @@ void setup() {
 
   delay(300);
   last_control_ms = millis();
-  LINK.printf("INFO,READY,robot_esp32 v%s\n", FW_VERSION);
+  LINK.printf("INFO,READY,robot_esp32 v%s %s\n", FW_VERSION, BOARD_NAME);
 }
 
 // ============================ LOOP ============================================

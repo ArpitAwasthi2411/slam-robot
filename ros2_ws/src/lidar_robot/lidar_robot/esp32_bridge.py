@@ -12,7 +12,6 @@ Publishes
   TF odom->base_link                      only if publish_tf (i.e. Cartographer uses odometry)
   /robot/status     std_msgs/String       JSON, 2 Hz (used by the dashboard)
 """
-import glob
 import json
 import math
 import threading
@@ -28,12 +27,12 @@ from tf2_ros import TransformBroadcaster
 
 import serial
 
+from lidar_robot.ports import pick_esp32_port
 from lidar_robot.kinematics import (DiffDriveOdometry, quaternion_from_yaw,
                                     twist_to_wheels, limit_wheels)
 from lidar_robot.protocol import (parse_line, OdomPacket, InfoPacket, MODE_NAMES, MODE_ESTOP,
                                   format_velocity, format_stop, format_estop)
 
-PORT_CANDIDATES = ['/dev/esp32', '/dev/ttyACM*']
 
 
 class Esp32Bridge(Node):
@@ -41,6 +40,7 @@ class Esp32Bridge(Node):
         super().__init__('esp32_bridge')
         p = self.declare_parameter
         p('serial_port', 'auto')
+        p('exclude_ports', '/dev/ttyUSB0')   # comma list; the launch passes the LiDAR port
         p('baud_rate', 115200)
         p('wheel_radius', 0.0625)
         p('wheel_separation', 0.30)
@@ -55,6 +55,8 @@ class Esp32Bridge(Node):
         g = lambda n: self.get_parameter(n).value  # noqa: E731
 
         self.port_param = g('serial_port')
+        self.exclude_ports = [x for x in str(g('exclude_ports')).split(',') if x.strip()]
+        self.warned_fallback = False
         self.baud = int(g('baud_rate'))
         self.publish_tf = bool(g('publish_tf'))
         self.odom_frame = g('odom_frame')
@@ -113,11 +115,14 @@ class Esp32Bridge(Node):
     def _resolve_port(self):
         if self.port_param != 'auto':
             return self.port_param
-        for pattern in PORT_CANDIDATES:
-            hits = sorted(glob.glob(pattern))
-            if hits:
-                return hits[0]
-        return None
+        port, fallback = pick_esp32_port(self.exclude_ports)
+        if fallback and not self.warned_fallback:
+            self.get_logger().warn(
+                f'Guessing ESP32 = {port} (classic ESP32 / USB-UART board), skipping LiDAR port(s) '
+                f'{self.exclude_ports}. ttyUSB numbers can swap at boot: install the udev rules '
+                '(/dev/esp32) to make this reliable.')
+            self.warned_fallback = True
+        return port
 
     def _open(self):
         port = self._resolve_port()
@@ -160,7 +165,7 @@ class Esp32Bridge(Node):
                     if not self._open():
                         if not warned_missing:
                             self.get_logger().error(
-                                'No ESP32 serial port found (tried /dev/esp32, /dev/ttyACM*). '
+                                'No ESP32 serial port found (tried /dev/esp32, /dev/ttyACM*, /dev/ttyUSB*). '
                                 'Is the USB cable in? Retrying every 2 s.')
                             warned_missing = True
                         time.sleep(2.0)

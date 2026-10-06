@@ -12,6 +12,7 @@ Needs only pyserial:  sudo apt install python3-serial
 import argparse
 import glob
 import math
+import os
 import sys
 import time
 
@@ -29,7 +30,19 @@ def find_port(p):
         hits = sorted(glob.glob(pat))
         if hits:
             return hits[0]
-    sys.exit('No ESP32 port found (/dev/esp32, /dev/ttyACM*). Is the USB cable plugged in?')
+    # classic ESP32 = /dev/ttyUSB*, same family as the RPLiDAR -> don't guess between several
+    lidar = os.path.realpath('/dev/rplidar') if os.path.exists('/dev/rplidar') else None
+    usb = [u for u in sorted(glob.glob('/dev/ttyUSB*')) if os.path.realpath(u) != lidar]
+    if len(usb) == 1:
+        return usb[0]
+    if usb:
+        from serial.tools import list_ports
+        print('Several USB-serial devices — which one is the ESP32?')
+        for i in list_ports.comports():
+            if i.device in usb:
+                print(f'  {i.device}: {i.description}  VID:PID={i.vid:04x}:{i.pid:04x}  serial={i.serial_number}  usb-path={i.location}')
+        sys.exit('Run again with --port /dev/ttyUSBx  (unplug the LiDAR USB to be sure which is which).')
+    sys.exit('No ESP32 port found (/dev/esp32, /dev/ttyACM*, /dev/ttyUSB*). Is the USB cable plugged in?')
 
 
 def open_port(port):
@@ -101,7 +114,8 @@ def cmd_watch(s, secs):
     if st.n == 0:
         print('\nNOTHING RECEIVED. Check, in order:\n'
               ' 1. Firmware v2 flashed? (Arduino IDE serial monitor should show ODM lines)\n'
-              ' 2. Arduino IDE: Tools > USB CDC On Boot, USB Mode = Hardware CDC and JTAG\n'
+              ' 2. ESP32-S3: Arduino IDE Tools > USB Mode = Hardware CDC and JTAG\n'
+              '    classic ESP32: is this really the ESP32 port and not the LiDAR? (--port)\n'
               ' 3. Press the ESP32 RESET (RST) button, run this again\n'
               ' 4. sudo systemctl stop ModemManager   (it grabs /dev/ttyACM* devices)\n'
               ' 5. Try the other USB socket on the ESP32 board (UART vs USB)')

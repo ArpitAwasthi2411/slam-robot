@@ -14,12 +14,16 @@ After this, unplugging the cable no longer loses `169.254.1.1`. Use `ssh arpit@1
 
 Arduino IDE → open `firmware/robot_esp32/robot_esp32.ino`.
 
-| Tools menu | Value |
-|---|---|
-| Board | ESP32S3 Dev Module |
-| USB Mode | Hardware CDC and JTAG |
-| USB CDC On Boot | **Enabled** (the sketch also works if Disabled) |
-| Upload port | the ESP32's **USB** socket |
+| Tools menu | ESP32-S3 | Classic ESP32 |
+|---|---|---|
+| Board | ESP32S3 Dev Module | ESP32 Dev Module |
+| USB Mode | Hardware CDC and JTAG | — |
+| USB CDC On Boot | **Enabled** (also works if Disabled) | — |
+| Upload port | the board's **USB** socket | the only socket (hold BOOT while uploading if it fails) |
+
+Classic ESP32: rewire to the classic pin map in `hardware/README.md` first. The S3 pins 6/7/9/10
+are flash pins on a classic ESP32. The serial monitor's first line tells you which map is active:
+`INFO,READY,robot_esp32 v2.1 ESP32` or `... ESP32-S3`.
 
 **Check:** Serial Monitor at 115200 shows `ODM,0,0,20,0` lines ~50 per second. Type `?` +
 Enter → `INFO,robot_esp32 v2.1 ...`. Move the RC sticks → last field becomes `1`.
@@ -58,6 +62,8 @@ Plug the ESP32 into the Pi.
 ```bash
 python3 ~/slam-robot/tools/serial_probe.py
 ```
+Classic ESP32: it's a `/dev/ttyUSB*` like the LiDAR. If the probe lists two devices, unplug the
+LiDAR to see which is which, then set up `/dev/esp32` in `udev/99-robot.rules` (option a or b).
 **Check:** `~50 Hz`, `modes={'0': ...}`, and an `INFO,robot_esp32 v2.0` line. If it says
 NOTHING RECEIVED, follow the checklist it prints (that is yesterday's bug).
 
