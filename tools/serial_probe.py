@@ -6,6 +6,7 @@
   python3 serial_probe.py --vel 200 200         # closed-loop test: 200 mm/s both wheels
   python3 serial_probe.py --calibrate           # robot ON BLOCKS: sweep PWM, suggest firmware constants
   python3 serial_probe.py --push                # roll the robot 1 m by hand, prints ticks per wheel
+  python3 serial_probe.py --rc                  # RC calibration: centre 3 s, then full stick sweeps
 
 Needs only pyserial:  sudo apt install python3-serial
 """
@@ -189,6 +190,68 @@ def cmd_push(s):
         print('-> negative ticks while rolling forward: flip that wheel\'s ENC_DIR in the firmware.')
 
 
+def cmd_rc(s, secs):
+    print('RC calibration. Transmitter ON.')
+    print('  1) leave BOTH sticks centred (hands off) for 3 s')
+    print(f'  2) then move steering and throttle stick to their full ends, several times, for {secs - 3:.0f} s\n')
+    samples = []          # (t, steer, thr)
+    t0 = time.time()
+    buf = b''
+    nxt = 0.0
+    while time.time() - t0 < secs:
+        if time.time() >= nxt:
+            s.write(b'C\n')
+            nxt = time.time() + 0.05
+        buf += s.read(256)
+        while b'\n' in buf:
+            line, buf = buf.split(b'\n', 1)
+            line = line.decode('ascii', 'replace').strip()
+            if line.startswith('INFO,RC,'):
+                try:
+                    _, _, st, th = line.split(',')
+                    samples.append((time.time() - t0, int(st), int(th)))
+                except ValueError:
+                    pass
+        el = time.time() - t0
+        if samples and int(el * 4) != int((el - 0.05) * 4):
+            _, st, th = samples[-1]
+            phase = 'CENTRE' if el < 3 else 'SWEEP '
+            print(f'\r  [{phase}] steering {st:5d} us   throttle {th:5d} us   ', end='', flush=True)
+    print('\n')
+    if not samples:
+        sys.exit('No RC replies: firmware older than v2.1 with the C command? Re-flash.')
+    if all(st == 0 and th == 0 for _, st, th in samples):
+        sys.exit('Both channels 0 = no pulses. Receiver bound and powered? Signal wires on GPIO 34/35 (classic) or 4/7 (S3)?')
+    centre = [x for x in samples if x[0] < 3 and x[1] and x[2]]
+    allv = [x for x in samples if x[1] and x[2]]
+    if not centre or not allv:
+        sys.exit('One channel had no signal. Check that wire.')
+
+    def stats(idx):
+        c = sorted(v[idx] for v in centre)
+        med = c[len(c) // 2]
+        noise = c[-1] - c[0]
+        vals = [v[idx] for v in allv]
+        return min(vals), med, max(vals), noise
+    smin, smid, smax, snoise = stats(1)
+    tmin, tmid, tmax, tnoise = stats(2)
+    dead = max(40, 2 * max(snoise, tnoise) + 20)
+    print(f'steering: min {smin}  centre {smid}  max {smax}   (centre jitter {snoise} us)')
+    print(f'throttle: min {tmin}  centre {tmid}  max {tmax}   (centre jitter {tnoise} us)')
+    for name, lo, mid, hi in (('steering', smin, smid, smax), ('throttle', tmin, tmid, tmax)):
+        if hi - mid < 150 or mid - lo < 150:
+            print(f'  WARNING: {name} range looks small: did you sweep the stick fully both ways?')
+    print('\nPut these in firmware/robot_esp32/robot_esp32.ino (RC CALIBRATION) and re-flash:\n')
+    print(f'#define STEERING_MIN     {smin}')
+    print(f'#define STEERING_CENTER  {smid}')
+    print(f'#define STEERING_MAX     {smax}')
+    print(f'#define THROTTLE_MIN     {tmin}')
+    print(f'#define THROTTLE_CENTER  {tmid}')
+    print(f'#define THROTTLE_MAX     {tmax}')
+    print(f'#define RC_DEADZONE      {dead}')
+    print('\nThen test the failsafe: drive slowly, switch the transmitter OFF -> wheels must stop.')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--port', default='auto')
@@ -198,6 +261,7 @@ def main():
     g.add_argument('--vel', nargs=2, type=int, metavar=('L_MMS', 'R_MMS'))
     g.add_argument('--calibrate', action='store_true')
     g.add_argument('--push', action='store_true')
+    g.add_argument('--rc', action='store_true')
     a = ap.parse_args()
 
     port = find_port(a.port)
@@ -212,6 +276,8 @@ def main():
             cmd_calibrate(s)
         elif a.push:
             cmd_push(s)
+        elif a.rc:
+            cmd_rc(s, max(a.secs, 15.0))
         else:
             cmd_watch(s, a.secs)
     except KeyboardInterrupt:

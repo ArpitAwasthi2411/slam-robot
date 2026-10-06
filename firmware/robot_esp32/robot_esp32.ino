@@ -19,6 +19,7 @@
  *    S                              stop now
  *    E                              e-stop latch ON  (motors off, RC ignored)
  *    R                              release e-stop latch
+ *    C                              print raw RC pulse widths (for calibration)
  *    ?                              print config
  *
  * ARDUINO IDE SETTINGS (Tools menu) for ESP32-S3 Dev Module, board on the
@@ -302,6 +303,14 @@ void handleLine(char *line) {
     case 'R':
       estop_latched = false;
       break;
+    case 'C': {   // RC calibration readout: raw pulse widths in microseconds (0 = no signal)
+      unsigned long now_us = micros();
+      unsigned long sp = steering_pw, tp = throttle_pw, sl = steering_last, tl = throttle_last;
+      LINK.printf("INFO,RC,%lu,%lu\n",
+                  (sl && now_us - sl < RC_TIMEOUT_US) ? sp : 0UL,
+                  (tl && now_us - tl < RC_TIMEOUT_US) ? tp : 0UL);
+      break;
+    }
     case '?':
       LINK.printf("INFO,robot_esp32 v%s %s core%d mm_per_tick=%.5f max_mms=%.0f pwm_min=%.0f kp=%.3f ki=%.3f\n",
                   FW_VERSION, BOARD_NAME, ESP_ARDUINO_VERSION_MAJOR, MM_PER_TICK, MAX_WHEEL_SPEED_MMS, PWM_MIN, KP, KI);
