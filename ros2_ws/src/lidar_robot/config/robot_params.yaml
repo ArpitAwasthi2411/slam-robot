@@ -22,9 +22,9 @@ goal_controller:
     min_angular: 0.25
     xy_tolerance: 0.08
     yaw_tolerance: 0.08
-    stop_distance: 0.35          # measured from robot centre
+    stop_distance: 0.38          # measured from robot centre (440 mm chassis)
     slow_distance: 0.75
-    robot_half_width: 0.20
+    robot_half_width: 0.25         # 440 mm chassis + wheels
     front_cone_deg: 25.0
     goal_timeout: 120.0
 
@@ -36,3 +36,23 @@ dashboard:
     max_linear: 0.30
     max_angular: 1.2
     scan_decimation: 3
+
+navigator:
+  ros__parameters:
+    global_frame: map
+    base_frame: base_link
+    rate: 20.0
+    robot_radius: 0.27           # keep-out radius used by the planner (m)
+    soft_radius: 0.60            # prefer this much clearance where possible (corridor centre)
+    allow_unknown: false         # plan only through mapped free space
+    max_linear: 0.22
+    max_angular: 0.9
+    stop_distance: 0.38
+    slow_distance: 0.80
+    robot_half_width: 0.25
+    front_cone_deg: 25.0
+    dwell_s: 3.0                 # wait at each intermediate stop (s)
+    auto_return_s: 0.0           # >0: drive home after this many idle seconds
+    max_replans: 3
+    pose_timeout: 1.0
+    llm_model: llama-3.1-8b-instant   # used only if GROQ_API_KEY is set and there is internet

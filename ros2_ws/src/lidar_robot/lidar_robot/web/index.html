@@ -8,7 +8,7 @@
   :root {
     --bg: #0d1014; --panel: #151a20; --panel-2: #1b2129; --line: #262d37; --line-2: #313a46;
     --text: #dde3ea; --muted: #7f8a98; --dim: #56606d;
-    --teal: #38d1b0; --amber: #f3b545; --red: #f0524f; --blue: #5fa8ff;
+    --teal: #38d1b0; --amber: #f3b545; --red: #f0524f; --blue: #5fa8ff; --violet: #b28cff;
     --map-unknown: #1d2229; --map-free: #c8d0d9; --map-occ: #07090b;
     --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
@@ -17,6 +17,7 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 var(--sans); }
   body { display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
   button { font: inherit; color: inherit; cursor: pointer; }
+  input { font: inherit; }
 
   /* ---------- header ---------- */
   header { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
@@ -35,26 +36,79 @@
   @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(240,82,79,.25); } }
 
   /* ---------- layout ---------- */
-  main { display: grid; grid-template-columns: 1fr 360px; min-height: 0; }
+  main { display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
   #mapwrap { position: relative; min-height: 0; background: var(--map-unknown); }
   #map { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
-  aside { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tab { flex: 1; padding: 12px 8px; background: none; border: 0; border-bottom: 2px solid transparent; font: 600 12px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .tab.on { color: var(--text); border-bottom-color: var(--teal); }
+  .pane { display: none; overflow-y: auto; padding: 12px; flex-direction: column; gap: 12px; min-height: 0; flex: 1; }
+  .pane.on { display: flex; }
   .card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
-  .card h2 { margin: 0 0 10px; font: 600 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  .card h2 { margin: 0 0 10px; font: 600 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 
   /* ---------- map overlay ---------- */
-  .toolbar { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .toolbar { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; flex-wrap: wrap; max-width: calc(100% - 24px); }
   .tbtn { padding: 7px 11px; border-radius: 8px; border: 1px solid var(--line-2); background: rgba(21,26,32,.92); font: 500 12px/1 var(--mono); color: var(--text); }
   .tbtn:hover { border-color: var(--dim); }
   .tbtn.on { border-color: var(--teal); color: var(--teal); }
   .readout { position: absolute; left: 12px; bottom: 12px; padding: 6px 10px; border-radius: 8px; background: rgba(21,26,32,.88); border: 1px solid var(--line); font: 12px/1.3 var(--mono); color: var(--muted); }
   .hint { position: absolute; right: 12px; bottom: 12px; padding: 6px 10px; border-radius: 8px; background: rgba(21,26,32,.88); border: 1px solid var(--line); font: 12px/1.3 var(--mono); color: var(--muted); max-width: 60%; text-align: right; }
   #nomap { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font: 13px/1.6 var(--mono); text-align: center; pointer-events: none; }
-  #offline { position: absolute; top: 12px; right: 12px; padding: 8px 12px; border-radius: 8px; background: var(--red); color: #fff; font: 600 12px/1 var(--mono); display: none; }
+  #offline { position: absolute; top: 56px; right: 12px; padding: 8px 12px; border-radius: 8px; background: var(--red); color: #fff; font: 600 12px/1 var(--mono); display: none; }
+  #routecard { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); display: none; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 10px; background: rgba(21,26,32,.95); border: 1px solid #5a4520; font: 12px/1.3 var(--mono); max-width: calc(100% - 24px); }
+  #routecard b { color: var(--amber); font-weight: 600; }
+  #routecard .btn { flex: 0 0 auto; }
+
+  /* ---------- go tab ---------- */
+  .cmd { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; min-width: 0; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); color: var(--text); font-size: 13px; }
+  input[type=text]:focus { outline: none; border-color: var(--teal); }
+  .interp { margin-top: 8px; font: 12px/1.45 var(--mono); color: var(--muted); min-height: 17px; }
+  .interp .src { padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line-2); font-size: 10px; letter-spacing: .08em; margin-right: 6px; }
+  .interp .src.llm { color: var(--violet); border-color: #4d3c73; }
+  .interp .src.rules { color: var(--blue); border-color: #234a73; }
+  .list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; max-height: 260px; overflow-y: auto; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 9px; background: var(--panel); border: 1px solid var(--line); }
+  .row .name { flex: 1; min-width: 0; }
+  .row .name b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .name small { color: var(--dim); font: 11px var(--mono); }
+  .ibtn { padding: 6px 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--panel-2); font: 500 11px/1 var(--mono); color: var(--text); }
+  .ibtn:hover { border-color: var(--dim); }
+  .ibtn.go { border-color: #1e5a4d; color: var(--teal); }
+  .ibtn.x { color: var(--dim); }
+  .ibtn.x:hover { color: var(--red); border-color: #5c2423; }
+  .empty { color: var(--dim); font: 12px/1.5 var(--mono); padding: 6px 2px; }
+  .newplace { display: none; margin-top: 10px; padding: 10px; border-radius: 9px; border: 1px dashed var(--amber); }
+  .newplace.on { display: block; }
+  .newplace .row2 { display: flex; gap: 8px; margin-top: 8px; }
+
+  .state { padding: 3px 8px; border-radius: 6px; font: 600 11px/1 var(--mono); letter-spacing: .08em; background: var(--panel); border: 1px solid var(--line-2); color: var(--muted); }
+  .state.DRIVING, .state.PLANNING, .state.ROTATE, .state.DRIVE, .state.ALIGN { color: var(--teal); border-color: #1e5a4d; }
+  .state.DWELL, .state.SUCCEEDED { color: var(--blue); border-color: #234a73; }
+  .state.WAITING, .state.ABORTED, .state.blocked, .state.HOLD { color: var(--amber); border-color: #5a4520; }
+  .stops { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .stop { padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line-2); font: 12px var(--mono); color: var(--muted); }
+  .stop.done { color: var(--dim); text-decoration: line-through; }
+  .stop.cur { color: var(--teal); border-color: #1e5a4d; }
+  .prio { padding: 1px 6px; border-radius: 5px; font: 600 10px/1.4 var(--mono); border: 1px solid var(--line-2); color: var(--muted); }
+  .prio.p3 { color: var(--red); border-color: #5c2423; } .prio.p2 { color: var(--amber); border-color: #5a4520; } .prio.p0 { color: var(--dim); }
+  .msg { font: 12px/1.4 var(--mono); color: var(--muted); min-height: 17px; margin: 6px 0; }
+  .rowbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { flex: 1; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); font: 500 12px/1 var(--mono); white-space: nowrap; }
+  .btn:hover { border-color: var(--dim); }
+  .btn.primary { border-color: #1e5a4d; color: var(--teal); }
+  .btn.warn { border-color: #5a4520; color: var(--amber); }
+  .btn.on { background: #123a32; border-color: var(--teal); color: var(--teal); }
+  .events { font: 11px/1.5 var(--mono); color: var(--muted); max-height: 200px; overflow-y: auto; }
+  .events div { padding: 2px 0; border-bottom: 1px solid var(--line); }
+  .events .warn { color: var(--amber); } .events .error { color: var(--red); }
+  .events time { color: var(--dim); margin-right: 6px; }
 
   /* ---------- drive ---------- */
   .drive { display: grid; grid-template-columns: 1fr; justify-items: center; gap: 10px; }
-  #joy { width: 210px; height: 210px; touch-action: none; border-radius: 50%; }
+  #joy { width: 230px; height: 230px; touch-action: none; border-radius: 50%; }
   .sliders { width: 100%; display: grid; gap: 8px; }
   .slider { display: grid; grid-template-columns: 74px 1fr 64px; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--muted); }
   .slider b { color: var(--text); font-weight: 500; text-align: right; }
@@ -69,19 +123,6 @@
   .kv div { font: 500 15px/1.2 var(--mono); font-variant-numeric: tabular-nums; }
   .kv small { color: var(--muted); font-size: 11px; }
 
-  /* ---------- goal / map ---------- */
-  .state { padding: 3px 8px; border-radius: 6px; font: 600 11px/1 var(--mono); letter-spacing: .08em; background: var(--panel); border: 1px solid var(--line-2); color: var(--muted); }
-  .state.ROTATE, .state.DRIVE, .state.ALIGN { color: var(--teal); border-color: #1e5a4d; }
-  .state.SUCCEEDED { color: var(--blue); border-color: #234a73; }
-  .state.ABORTED, .state.blocked { color: var(--amber); border-color: #5a4520; }
-  .msg { font: 12px/1.4 var(--mono); color: var(--muted); min-height: 17px; margin: 8px 0; }
-  .row { display: flex; gap: 8px; }
-  .btn { flex: 1; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); font: 500 12px/1 var(--mono); }
-  .btn:hover { border-color: var(--dim); }
-  .btn.primary { border-color: #1e5a4d; color: var(--teal); }
-  .btn.on { background: #123a32; border-color: var(--teal); color: var(--teal); }
-  input[type=text] { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); color: var(--text); font: 12px var(--mono); }
-
   #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(20px); opacity: 0; padding: 10px 14px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line-2); font: 12px var(--mono); transition: .2s; pointer-events: none; z-index: 10; max-width: 90vw; }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   #toast.err { border-color: var(--red); color: #ffd0cf; }
@@ -90,7 +131,8 @@
     body { overflow: auto; height: auto; }
     main { grid-template-columns: 1fr; }
     #mapwrap { height: 55vh; }
-    aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+    .pane { overflow: visible; }
     header { flex-wrap: wrap; }
     .hint { display: none; }
   }
@@ -102,7 +144,7 @@
   <div class="chips">
     <span class="chip" id="c-link"><i></i><span>LINK —</span></span>
     <span class="chip" id="c-mode"><i></i><span>MODE —</span></span>
-    <span class="chip" id="c-src"><i></i><span>CMD —</span></span>
+    <span class="chip" id="c-nav"><i></i><span>NAV —</span></span>
     <span class="chip" id="c-scan"><i></i><span>SCAN —</span></span>
     <span class="chip" id="c-pose"><i></i><span>POSE —</span></span>
   </div>
@@ -115,61 +157,103 @@
     <div id="nomap">waiting for /map …<br>start SLAM on the Pi</div>
     <div class="toolbar">
       <button class="tbtn on" id="t-pan">Pan</button>
-      <button class="tbtn" id="t-goal">Set goal <kbd>G</kbd></button>
+      <button class="tbtn" id="t-goal">Go here <kbd>G</kbd></button>
+      <button class="tbtn" id="t-place">Add place <kbd>P</kbd></button>
+      <button class="tbtn" id="t-find">Find robot <kbd>F</kbd></button>
       <button class="tbtn on" id="t-follow">Follow</button>
       <button class="tbtn" id="t-fit">Fit map</button>
       <button class="tbtn" id="t-trail">Clear trail</button>
     </div>
+    <div id="routecard"><span id="rc-text"></span><button class="ibtn go btn" id="rc-go">Go</button><button class="ibtn x btn" id="rc-x">✕</button></div>
     <div class="readout" id="readout">—</div>
     <div class="hint" id="hint">scroll to zoom · drag to pan</div>
     <div id="offline">DASHBOARD OFFLINE — robot will stop</div>
   </section>
 
   <aside>
-    <div class="card">
-      <h2>Drive <span id="drv-val" style="color:var(--text)">0.00 m/s · 0.00 rad/s</span></h2>
-      <div class="drive">
-        <canvas id="joy" width="420" height="420"></canvas>
-        <div class="sliders">
-          <div class="slider">max lin <input type="range" id="s-v" min="0.05" max="0.3" step="0.01" value="0.15"><b id="s-v-l">0.15</b></div>
-          <div class="slider">max ang <input type="range" id="s-w" min="0.2" max="1.2" step="0.05" value="0.7"><b id="s-w-l">0.70</b></div>
+    <div class="tabs">
+      <button class="tab on" data-tab="go">Go</button>
+      <button class="tab" data-tab="drive">Drive</button>
+      <button class="tab" data-tab="status">Status</button>
+    </div>
+
+    <!-- ======================= GO ======================= -->
+    <div class="pane on" id="pane-go">
+      <div class="card">
+        <h2>Tell the robot</h2>
+        <form class="cmd" id="cmdform" autocomplete="off">
+          <input type="text" id="cmd" placeholder="e.g. take this to the HOD office, then Lab 3">
+          <button class="btn primary" style="flex:0 0 auto">Send</button>
+        </form>
+        <div class="interp" id="interp">Plain English. Works offline; uses the LLM when the Pi has internet.</div>
+      </div>
+
+      <div class="card">
+        <h2>Places <span><button class="ibtn" id="b-here">Save here</button> <button class="ibtn" id="b-home">Set home</button></span></h2>
+        <input type="text" id="search" placeholder="Search places…  (hod, lab, library)">
+        <div class="list" id="places"></div>
+        <div class="newplace" id="newplace">
+          <div class="msg" id="np-where" style="margin:0">New place</div>
+          <div class="row2"><input type="text" id="np-name" placeholder="Name, e.g. HOD office"></div>
+          <div class="row2"><input type="text" id="np-alias" placeholder="Other names, comma separated (optional)"></div>
+          <div class="row2"><button class="btn primary" id="np-save">Save place</button><button class="btn" id="np-cancel">Cancel</button></div>
         </div>
-        <div class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> e-stop · RC sticks always override</div>
+      </div>
+
+      <div class="card">
+        <h2>Mission <span class="state" id="n-state">IDLE</span></h2>
+        <div id="m-active" class="empty">No active mission.</div>
+        <div class="msg" id="n-msg"></div>
+        <div class="rowbtns">
+          <button class="btn warn" id="b-resume" style="display:none">Resume missions</button>
+          <button class="btn warn" id="b-locok" style="display:none" title="Only press when the red scan points sit on the map walls">Position OK</button>
+          <button class="btn" id="b-gohome">Go home</button>
+          <button class="btn" id="b-cancelall">Cancel all</button>
+        </div>
+        <div class="list" id="queue" style="max-height:180px"></div>
       </div>
     </div>
 
-    <div class="card">
-      <h2>Telemetry</h2>
-      <div class="grid2">
-        <div class="kv"><label>x / y (m)</label><div id="t-xy">—</div></div>
-        <div class="kv"><label>heading</label><div id="t-yaw">—</div></div>
-        <div class="kv"><label>measured v / ω</label><div id="t-meas">—</div></div>
-        <div class="kv"><label>command v / ω</label><div id="t-cmd">—</div></div>
-        <div class="kv"><label>front clear</label><div id="t-front">—</div></div>
-        <div class="kv"><label>esp32 link</label><div id="t-link">—</div></div>
+    <!-- ======================= DRIVE ======================= -->
+    <div class="pane" id="pane-drive">
+      <div class="card">
+        <h2>Drive <span id="drv-val" style="color:var(--text)">0.00 m/s · 0.00 rad/s</span></h2>
+        <div class="drive">
+          <canvas id="joy" width="460" height="460"></canvas>
+          <div class="sliders">
+            <div class="slider">max lin <input type="range" id="s-v" min="0.05" max="0.3" step="0.01" value="0.15"><b id="s-v-l">0.15</b></div>
+            <div class="slider">max ang <input type="range" id="s-w" min="0.2" max="1.2" step="0.05" value="0.7"><b id="s-w-l">0.70</b></div>
+          </div>
+          <div class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> e-stop · RC sticks always override · driving cancels the current mission</div>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <h2>Goal <span class="state" id="g-state">IDLE</span></h2>
-      <div class="grid2">
-        <div class="kv"><label>target</label><div id="g-target">—</div></div>
-        <div class="kv"><label>distance</label><div id="g-dist">—</div></div>
+    <!-- ======================= STATUS ======================= -->
+    <div class="pane" id="pane-status">
+      <div class="card">
+        <h2>Telemetry</h2>
+        <div class="grid2">
+          <div class="kv"><label>x / y (m)</label><div id="t-xy">—</div></div>
+          <div class="kv"><label>heading</label><div id="t-yaw">—</div></div>
+          <div class="kv"><label>measured v / ω</label><div id="t-meas">—</div></div>
+          <div class="kv"><label>command v / ω</label><div id="t-cmd">—</div></div>
+          <div class="kv"><label>route left</label><div id="t-dist">—</div></div>
+          <div class="kv"><label>esp32 link</label><div id="t-link">—</div></div>
+        </div>
       </div>
-      <div class="msg" id="g-msg">Click “Set goal”, then click on the map and drag to set the heading.</div>
-      <div class="row">
-        <button class="btn primary" id="b-goal">Set goal on map</button>
-        <button class="btn" id="b-cancel">Cancel goal</button>
+      <div class="card">
+        <h2>Map <span id="m-size" style="color:var(--text)">—</span></h2>
+        <div class="cmd">
+          <input type="text" id="m-name" placeholder="map name, e.g. cse_floor">
+          <button class="btn primary" id="b-save" style="flex:0 0 auto">Save map</button>
+        </div>
+        <div class="msg" id="m-msg">Saves ~/maps/&lt;name&gt;.pgm/.yaml + .pbstream (for localization mode)</div>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>Map <span id="m-size" style="color:var(--text)">—</span></h2>
-      <div class="row">
-        <input type="text" id="m-name" placeholder="map name" value="">
-        <button class="btn primary" id="b-save" style="flex:0 0 auto">Save map</button>
+      <div class="card">
+        <h2>Activity</h2>
+        <div class="events" id="events"><div class="empty">nothing yet</div></div>
       </div>
-      <div class="msg" id="m-msg">Saves ~/maps/&lt;name&gt;.pgm + .yaml on the Pi</div>
     </div>
   </aside>
 </main>
@@ -179,31 +263,41 @@
 "use strict";
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const C = { free: css('--map-free'), occ: css('--map-occ'), unk: css('--map-unknown'),
-            teal: css('--teal'), amber: css('--amber'), red: css('--red'), blue: css('--blue') };
+const C = { free: css('--map-free'), occ: css('--map-occ'), unk: css('--map-unknown'), teal: css('--teal'),
+            amber: css('--amber'), red: css('--red'), blue: css('--blue'), violet: css('--violet') };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ACTIVE_NAV = ['PLANNING', 'DRIVING', 'DWELL', 'WAITING'];
 
 // ---------------------------------------------------------------- api
-async function post(path, body) {
+async function post(path, body, quiet) {
   try {
-    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify(body || {}) });
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     const j = await r.json();
-    if (!r.ok) throw new Error(j.error || r.status);
+    if (!r.ok || j.ok === false) throw new Error(j.error || r.status);
     return j;
-  } catch (e) { toast(String(e.message || e), true); throw e; }
+  } catch (e) { if (!quiet) toast(String(e.message || e), true); throw e; }
 }
+const nav = (req, quiet) => post('/api/nav', req, quiet);
 let toastT = null;
 function toast(msg, err) {
   const t = $('toast'); t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
-  clearTimeout(toastT); toastT = setTimeout(() => t.className = '', 2600);
+  clearTimeout(toastT); toastT = setTimeout(() => t.className = '', 2800);
+}
+
+// ---------------------------------------------------------------- tabs
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + name));
 }
 
 // ---------------------------------------------------------------- state
-let S = null, lastOk = 0, mapVer = -1, mapBusy = false;
+let S = null, lastOk = 0, mapVer = -1, mapBusy = false, placesVer = -2;
 const map = { meta: null, img: document.createElement('canvas') };
 const view = { x: 0, y: 0, scale: 60, follow: true, fitted: false };
-let toolMode = 'pan';
+let toolMode = 'pan', preview = null, pendingPlace = null, findPulse = 0;
 const trail = [];
+const plannerMode = () => S && S.nav_mode === 'planner';
 
 async function poll() {
   try {
@@ -213,9 +307,9 @@ async function poll() {
     if (S.map && S.map.version !== mapVer && !mapBusy) loadMap();
     if (S.pose) {
       const p = S.pose, l = trail[trail.length - 1];
-      if (!l || Math.hypot(p.x - l[0], p.y - l[1]) > 0.03) { trail.push([p.x, p.y]); if (trail.length > 2000) trail.shift(); }
+      if (!l || Math.hypot(p.x - l[0], p.y - l[1]) > 0.03) { trail.push([p.x, p.y]); if (trail.length > 3000) trail.shift(); }
     }
-  } catch (e) { /* shown by offline banner */ }
+  } catch (e) {}
   $('offline').style.display = performance.now() - lastOk > 1200 ? 'block' : 'none';
   setTimeout(poll, 100);
 }
@@ -231,7 +325,7 @@ async function loadMap() {
       const ctx = cv.getContext('2d'), id = ctx.createImageData(w, h), px = id.data;
       const f = hex(C.free), o = hex(C.occ), u = hex(C.unk);
       for (let i = 0; i < w * h; i++) {
-        const v = raw.charCodeAt(i);              // 0 unknown, 1..101 = occupancy 0..100
+        const v = raw.charCodeAt(i);
         let c;
         if (v === 0) c = u;
         else { const occ = v - 1; c = occ >= 65 ? o : occ <= 25 ? f : mix(f, o, (occ - 25) / 40); }
@@ -240,7 +334,7 @@ async function loadMap() {
       ctx.putImageData(id, 0, 0);
       map.meta = m; mapVer = m.version;
       $('nomap').style.display = 'none';
-      $('m-size').textContent = `${(w * m.resolution).toFixed(1)} × ${(h * m.resolution).toFixed(1)} m · ${Math.round(m.resolution * 100)} cm`;
+      $('m-size').textContent = `${(w * m.resolution).toFixed(1)} × ${(h * m.resolution).toFixed(1)} m`;
       if (!view.fitted) { fitMap(); view.fitted = true; }
     }
   } catch (e) {}
@@ -252,6 +346,9 @@ const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 // ---------------------------------------------------------------- panels
 function chip(id, cls, text) { const c = $(id); c.className = 'chip ' + cls; c.lastElementChild.textContent = text; }
 const f2 = v => (v == null ? '—' : (+v).toFixed(2));
+const fmtDist = d => d == null ? '—' : d < 10 ? d.toFixed(1) + ' m' : Math.round(d) + ' m';
+const fmtEta = s => s == null ? '' : s < 60 ? `~${s}s` : `~${Math.round(s / 60)} min`;
+
 function updatePanels() {
   const L = S.link || {};
   if (!S.bridge_alive) chip('c-link', 'bad', 'BRIDGE OFF');
@@ -264,8 +361,13 @@ function updatePanels() {
   else if (m === 'RC') chip('c-mode', 'warn', 'RC OVERRIDE'); else if (m === 'AUTO') chip('c-mode', 'ok', 'AUTO');
   else if (m === 'IDLE') chip('c-mode', '', 'IDLE'); else chip('c-mode', '', 'MODE —');
 
-  const src = S.estop ? 'estop' : (L.cmd_source || 'none');
-  chip('c-src', src === 'estop' ? 'bad' : src === 'none' ? '' : 'info', 'CMD ' + src.toUpperCase());
+  const N = S.nav;
+  if (!plannerMode()) chip('c-nav', '', 'NAV ' + (S.nav_mode || '—').toUpperCase());
+  else if (!N) chip('c-nav', 'bad', 'NAV OFF');
+  else if (N.hold) chip('c-nav', 'warn', 'NAV HOLD');
+  else if (N.localized === false) chip('c-nav', 'warn', 'NOT LOCALIZED');
+  else chip('c-nav', ACTIVE_NAV.includes(N.state) ? 'ok' : '', 'NAV ' + N.state);
+
   const hz = S.scan ? S.scan.hz : 0;
   chip('c-scan', hz > 4 ? 'ok' : hz > 0 ? 'warn' : 'bad', `SCAN ${hz.toFixed(1)} Hz`);
   chip('c-pose', S.pose ? (S.pose.frame === 'map' ? 'ok' : 'warn') : 'bad', S.pose ? 'POSE ' + S.pose.frame : 'NO POSE');
@@ -279,31 +381,159 @@ function updatePanels() {
   $('t-yaw').innerHTML = p ? `${(p.yaw * 180 / Math.PI).toFixed(1)}° <small>${p.yaw.toFixed(2)} rad</small>` : '—';
   $('t-meas').textContent = `${f2(S.odom && S.odom.v)} / ${f2(S.odom && S.odom.w)}`;
   $('t-cmd').textContent = `${f2(S.cmd && S.cmd.v)} / ${f2(S.cmd && S.cmd.w)}`;
-  const G = S.goal || {};
-  $('t-front').textContent = G.front_clearance != null ? G.front_clearance.toFixed(2) + ' m' : '—';
-  $('t-link').innerHTML = L.port ? `${L.port.replace('/dev/', '')} <small>bad ${L.bad_lines || 0}</small>` : '—';
+  $('t-link').innerHTML = L.port ? `${esc(L.port.replace('/dev/', ''))} <small>bad ${L.bad_lines || 0}</small>` : '—';
+  $('t-dist').innerHTML = N && N.distance != null ? `${fmtDist(N.distance)} <small>${fmtEta(N.eta_s)}</small>` : '—';
+  if (S.limits) { $('s-v').max = S.limits.max_v; $('s-w').max = S.limits.max_w; }
 
-  const st = G.state || 'IDLE', gs = $('g-state');
-  gs.textContent = G.blocked ? 'BLOCKED' : st; gs.className = 'state ' + (G.blocked ? 'blocked' : st);
-  $('g-target').textContent = G.goal ? `${G.goal.x.toFixed(2)}, ${G.goal.y.toFixed(2)}` : '—';
-  $('g-dist').textContent = G.distance != null ? G.distance.toFixed(2) + ' m' : '—';
-  if (G.message) $('g-msg').textContent = G.message;
-
-  if (S.limits) {
-    $('s-v').max = S.limits.max_v; $('s-w').max = S.limits.max_w;
-  }
+  if (S.places && S.places.version !== placesVer) { placesVer = S.places.version; renderPlaces(); }
+  renderMission();
 }
+
+// ---------------------------------------------------------------- places
+let searchResults = null, searchT = null;
+$('search').addEventListener('input', () => {
+  clearTimeout(searchT);
+  const q = $('search').value.trim();
+  if (!q) { searchResults = null; renderPlaces(); return; }
+  searchT = setTimeout(async () => {
+    if (!plannerMode()) return;
+    try { searchResults = (await nav({ type: 'search', q }, true)).results; } catch (e) { searchResults = []; }
+    renderPlaces();
+  }, 180);
+});
+$('search').addEventListener('keydown', ev => {
+  if (ev.key === 'Enter') { const first = document.querySelector('#places .ibtn.go'); if (first) first.click(); }
+});
+function renderPlaces() {
+  const box = $('places');
+  if (!plannerMode()) { box.innerHTML = '<div class="empty">Places need the navigator (bringup nav_mode:=planner).</div>'; return; }
+  let items = searchResults || (S.places ? S.places.places.slice() : []);
+  const P = S && S.pose;
+  const d = pl => P ? Math.hypot(pl.x - P.x, pl.y - P.y) : null;
+  if (!searchResults && P) items.sort((a, b) => d(a) - d(b));
+  if (!items.length) {
+    box.innerHTML = searchResults ? '<div class="empty">No match. Add it: click “Add place” on the map.</div>'
+                                  : '<div class="empty">No places yet. Drive somewhere and press “Save here”, or use “Add place” on the map.</div>';
+    return;
+  }
+  box.innerHTML = items.map(pl => `
+    <div class="row">
+      <div class="name"><b>${esc(pl.name)}</b><small>${pl.aliases && pl.aliases.length ? esc(pl.aliases.join(', ')) + ' · ' : ''}${d(pl) != null ? fmtDist(d(pl)) + ' away' : ''}</small></div>
+      <button class="ibtn" data-act="preview" data-name="${esc(pl.name)}">Route</button>
+      <button class="ibtn go" data-act="go" data-name="${esc(pl.name)}">Go</button>
+      <button class="ibtn x" data-act="del" data-name="${esc(pl.name)}" title="delete">✕</button>
+    </div>`).join('');
+}
+$('places').addEventListener('click', async ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  const name = b.dataset.name;
+  if (b.dataset.act === 'go') { await nav({ type: 'goto_place', name }).then(() => { toast('Going to ' + name); preview = null; }).catch(() => {}); }
+  if (b.dataset.act === 'preview') { showPreview({ type: 'preview', name }); }
+  if (b.dataset.act === 'del') {
+    if (b.dataset.armed) { await nav({ type: 'delete_place', name }).then(() => toast('Deleted ' + name)).catch(() => {}); }
+    else { b.dataset.armed = 1; b.textContent = 'sure?'; setTimeout(() => { b.textContent = '✕'; delete b.dataset.armed; }, 2500); }
+  }
+});
+async function showPreview(req) {
+  try {
+    const r = await nav(req, true);
+    preview = r; preview.req = req;
+    $('rc-text').innerHTML = `Route to <b>${esc(r.label)}</b> · ${fmtDist(r.length)} · ${fmtEta(r.eta_s)}${r.note ? ' · ' + esc(r.note) : ''}`;
+    $('routecard').style.display = 'flex';
+    view.follow = false; $('t-follow').classList.remove('on');
+    fitPath(r.path);
+  } catch (e) { toast('No route: ' + (e.message || e), true); }
+}
+$('rc-go').onclick = async () => {
+  if (!preview) return;
+  const q = preview.req;
+  const req = q.name ? { type: 'goto_place', name: q.name } : { type: 'goto_pose', x: q.x, y: q.y, yaw: q.yaw, label: 'map point' };
+  await nav(req).then(() => toast('Going to ' + preview.label)).catch(() => {});
+  preview = null; $('routecard').style.display = 'none';
+};
+$('rc-x').onclick = () => { preview = null; $('routecard').style.display = 'none'; };
+
+$('b-here').onclick = () => {
+  if (!S || !S.pose) return toast('Robot position unknown', true);
+  pendingPlace = { x: S.pose.x, y: S.pose.y, yaw: S.pose.yaw, here: true };
+  openNewPlace();
+};
+$('b-home').onclick = () => nav({ type: 'set_home', here: true }).then(() => toast('Home set to the robot position')).catch(() => {});
+function openNewPlace() {
+  showTab('go');
+  $('np-where').textContent = `New place at ${pendingPlace.x.toFixed(2)}, ${pendingPlace.y.toFixed(2)}`;
+  $('newplace').classList.add('on'); $('np-name').value = ''; $('np-alias').value = ''; $('np-name').focus();
+}
+$('np-cancel').onclick = () => { pendingPlace = null; $('newplace').classList.remove('on'); };
+$('np-save').onclick = async () => {
+  const name = $('np-name').value.trim();
+  if (!name) return toast('Give the place a name', true);
+  const aliases = $('np-alias').value.split(',').map(s => s.trim()).filter(Boolean);
+  const p = pendingPlace;
+  await nav({ type: 'add_place', name, aliases, x: p.x, y: p.y, yaw: p.yaw }).then(() => {
+    toast('Saved ' + name); pendingPlace = null; $('newplace').classList.remove('on');
+  }).catch(() => {});
+};
+$('np-name').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('np-save').click(); });
+
+// ---------------------------------------------------------------- command
+$('cmdform').onsubmit = async ev => {
+  ev.preventDefault();
+  const text = $('cmd').value.trim(); if (!text) return;
+  $('interp').textContent = 'thinking…';
+  try {
+    const r = await nav({ type: 'command', text });
+    const c = r.interpretation || {};
+    const tgt = (c.targets || []).length ? ' → ' + c.targets.map(esc).join(' → ') : '';
+    const pr = c.priority != null ? ` <span class="prio p${c.priority}">P${c.priority}</span>` : '';
+    const notes = (c.notes || []).length ? '<br>' + c.notes.map(esc).join('<br>') : '';
+    $('interp').innerHTML = `<span class="src ${c.source}">${c.source === 'llm' ? 'LLM' : 'OFFLINE'}</span>${esc(c.intent)}${tgt}${pr}<br>${esc(c.reply || r.status || '')}${notes}`;
+    if (c.intent !== 'unknown') $('cmd').value = '';
+  } catch (e) { $('interp').textContent = 'error: ' + (e.message || e); }
+};
+
+// ---------------------------------------------------------------- mission
+function renderMission() {
+  const N = S.nav;
+  const st = $('n-state');
+  if (!plannerMode() || !N) {
+    st.textContent = plannerMode() ? 'OFF' : (S.goal && S.goal.state) || 'IDLE';
+    $('n-msg').textContent = plannerMode() ? 'navigator not reachable' : ((S.goal && S.goal.message) || '');
+    return;
+  }
+  st.textContent = N.hold ? 'HOLD' : N.blocked ? 'BLOCKED' : N.state;
+  st.className = 'state ' + (N.hold ? 'HOLD' : N.blocked ? 'blocked' : N.state);
+  $('n-msg').textContent = N.message + (N.distance != null ? ` · ${fmtDist(N.distance)} ${fmtEta(N.eta_s)}` : '');
+  $('b-resume').style.display = N.hold && !N.estop ? '' : 'none';
+  $('b-locok').style.display = N.localized === false ? '' : 'none';
+  const M = N.missions || {};
+  const a = M.active;
+  $('m-active').innerHTML = a ? `<div class="stops">${a.stops.map((s, i) =>
+      `<span class="stop ${i < a.next_stop ? 'done' : i === a.next_stop ? 'cur' : ''}">${esc(s)}</span>`).join('')}</div>
+      <small class="empty" style="padding:0"><span class="prio p${a.priority}">P${a.priority}</span> #${a.id} · ${esc(a.source)}</small>`
+    : '<div class="empty">No active mission.</div>';
+  const rows = (M.queue || []).map(m => `<div class="row"><span class="prio p${m.priority}">P${m.priority}</span>
+      <div class="name"><b>${m.stops.map(esc).join(' → ')}</b><small>#${m.id} queued${m.message ? ' · ' + esc(m.message) : ''}</small></div>
+      <button class="ibtn x" data-cancel="${m.id}">✕</button></div>`)
+    .concat((M.history || []).slice(0, 4).map(m => `<div class="row" style="opacity:.6"><span class="prio">${m.state === 'DONE' ? '✓' : m.state === 'FAILED' ? '!' : '–'}</span>
+      <div class="name"><b>${m.stops.map(esc).join(' → ')}</b><small>${esc(m.state.toLowerCase())}${m.message && m.state !== 'DONE' ? ' · ' + esc(m.message) : ''}</small></div></div>`));
+  $('queue').innerHTML = rows.join('');
+  const ev = N.events || [];
+  $('events').innerHTML = ev.length ? ev.map(e => `<div class="${e.level}"><time>${new Date(e.t * 1000).toLocaleTimeString()}</time>${esc(e.text)}</div>`).join('') : '<div class="empty">nothing yet</div>';
+}
+$('queue').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-cancel]'); if (b) nav({ type: 'cancel', id: +b.dataset.cancel }).catch(() => {});
+});
+$('b-cancelall').onclick = () => nav({ type: 'cancel' }).then(() => toast('All missions canceled')).catch(() => {});
+$('b-gohome').onclick = () => nav({ type: 'go_home' }).then(() => toast('Going home')).catch(() => {});
+$('b-resume').onclick = () => nav({ type: 'resume' }).then(() => toast('Missions resumed')).catch(() => {});
+$('b-locok').onclick = () => nav({ type: 'confirm_localization' }).then(() => toast('Position confirmed')).catch(() => {});
 
 // ---------------------------------------------------------------- map canvas
 const cv = $('map'), ctx = cv.getContext('2d');
 let dpr = 1;
-function resize() {
-  dpr = window.devicePixelRatio || 1;
-  const r = cv.getBoundingClientRect();
-  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
-}
+function resize() { dpr = window.devicePixelRatio || 1; const r = cv.getBoundingClientRect(); cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
 window.addEventListener('resize', resize); resize();
-
 const W = () => cv.width / dpr, H = () => cv.height / dpr;
 const toScreen = (x, y) => [W() / 2 + (x - view.x) * view.scale, H() / 2 - (y - view.y) * view.scale];
 const toWorld = (sx, sy) => [view.x + (sx - W() / 2) / view.scale, view.y - (sy - H() / 2) / view.scale];
@@ -315,59 +545,108 @@ function fitMap() {
   view.scale = Math.min(W() / w, H() / h) * 0.92;
   view.follow = false; $('t-follow').classList.remove('on');
 }
+function fitPath(path) {
+  if (!path || !path.length) return;
+  const pts = path.concat(S && S.pose ? [[S.pose.x, S.pose.y]] : []);
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  view.x = (x0 + x1) / 2; view.y = (y0 + y1) / 2;
+  view.scale = clamp(Math.min(W() / Math.max(1, x1 - x0 + 1.5), H() / Math.max(1, y1 - y0 + 1.5)) * 0.85, 10, 300);
+}
+function findRobot() {
+  if (!S || !S.pose) return toast('Robot position unknown', true);
+  view.x = S.pose.x; view.y = S.pose.y; view.scale = Math.max(view.scale, 90);
+  view.follow = true; $('t-follow').classList.add('on'); findPulse = performance.now();
+}
 
 let goalDrag = null, hover = null;
+
+function polyline(pts, color, width, dash) {
+  if (!pts || pts.length < 2) return;
+  const s = view.scale;
+  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+  for (const p of pts) ctx.lineTo(p[0], p[1]);
+  ctx.setLineDash(dash ? [dash / s, dash / s] : []);
+  ctx.strokeStyle = color; ctx.lineWidth = width / s; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+  ctx.setLineDash([]);
+}
 
 function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = C.unk; ctx.fillRect(0, 0, W(), H());
   const P = S && S.pose;
   if (view.follow && P) { view.x += (P.x - view.x) * 0.2; view.y += (P.y - view.y) * 0.2; }
-
-  // world transform (y up)
   const s = view.scale;
   ctx.setTransform(dpr * s, 0, 0, -dpr * s, dpr * (W() / 2 - view.x * s), dpr * (H() / 2 + view.y * s));
   if (map.meta) {
-    const m = map.meta;
-    ctx.imageSmoothingEnabled = false;
+    const m = map.meta; ctx.imageSmoothingEnabled = false;
     ctx.drawImage(map.img, m.origin[0], m.origin[1], m.width * m.resolution, m.height * m.resolution);
   }
-  // 1 m grid
   drawGrid(s);
-  // trail
-  if (trail.length > 1) {
-    ctx.beginPath(); ctx.moveTo(trail[0][0], trail[0][1]);
-    for (const t of trail) ctx.lineTo(t[0], t[1]);
-    ctx.strokeStyle = 'rgba(95,168,255,.55)'; ctx.lineWidth = 2 / s; ctx.stroke();
+  if (trail.length > 1) polyline(trail, 'rgba(95,168,255,.45)', 2);
+  if (preview && preview.path) polyline(preview.path, C.amber, 3, 7);
+  const N = S && S.nav;
+  if (N && N.path && N.path.length) {
+    const pts = P ? [[P.x, P.y]].concat(N.path) : N.path;
+    polyline(pts, 'rgba(56,209,176,.25)', 9);
+    polyline(pts, C.teal, 3);
   }
-  const G = S && S.goal;
-  if (P && G && G.goal && ['ROTATE', 'DRIVE', 'ALIGN'].includes(G.state)) {
-    ctx.beginPath(); ctx.moveTo(P.x, P.y); ctx.lineTo(G.goal.x, G.goal.y);
-    ctx.setLineDash([6 / s, 6 / s]); ctx.strokeStyle = C.teal; ctx.lineWidth = 1.5 / s; ctx.stroke(); ctx.setLineDash([]);
-  }
-  if (G && G.goal && G.state !== 'IDLE') drawGoal(G.goal.x, G.goal.y, G.goal.yaw, G.state === 'SUCCEEDED' ? C.blue : C.teal, s);
-  if (goalDrag) drawGoal(goalDrag.x, goalDrag.y, goalDrag.yaw, C.amber, s);
-  // scan + robot
+  const G = N && N.goal;
+  if (G && ACTIVE_NAV.includes(N.state)) drawGoal(G.x, G.y, G.yaw, C.teal, s);
+  if (!plannerMode() && S && S.goal && S.goal.goal && S.goal.state !== 'IDLE') drawGoal(S.goal.goal.x, S.goal.goal.y, S.goal.goal.yaw, C.teal, s);
+  if (goalDrag) drawGoal(goalDrag.x, goalDrag.y, goalDrag.yaw, toolMode === 'place' ? C.violet : C.amber, s);
+  if (pendingPlace) drawGoal(pendingPlace.x, pendingPlace.y, pendingPlace.yaw, C.violet, s);
   if (P) {
     const c = Math.cos(P.yaw), sn = Math.sin(P.yaw);
     if (S.scan && S.scan.points) {
-      ctx.fillStyle = C.red;
-      const r = 2.2 / s;
+      ctx.fillStyle = C.red; const r = 2.2 / s;
       for (const [px, py] of S.scan.points) ctx.fillRect(P.x + c * px - sn * py - r / 2, P.y + sn * px + c * py - r / 2, r, r);
     }
     ctx.save(); ctx.translate(P.x, P.y); ctx.rotate(P.yaw);
     ctx.fillStyle = 'rgba(56,209,176,.18)'; ctx.strokeStyle = C.teal; ctx.lineWidth = 2 / s;
-    ctx.beginPath(); ctx.rect(-0.17, -0.17, 0.34, 0.34); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0.26, 0); ctx.lineTo(0.05, 0.11); ctx.lineTo(0.05, -0.11); ctx.closePath();
+    ctx.beginPath(); ctx.rect(-0.22, -0.22, 0.44, 0.44); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0.30, 0); ctx.lineTo(0.06, 0.13); ctx.lineTo(0.06, -0.13); ctx.closePath();
     ctx.fillStyle = C.teal; ctx.fill();
     ctx.restore();
   }
-  // screen-space scale bar
+
+  // ---- screen space: places, home, find pulse, scale bar
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '600 11px ' + css('--mono'); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const PL = S && S.places;
+  if (PL && plannerMode()) {
+    for (const pl of PL.places || []) {
+      const [sx, sy] = toScreen(pl.x, pl.y);
+      if (sx < -50 || sy < -20 || sx > W() + 50 || sy > H() + 20) continue;
+      ctx.fillStyle = C.violet; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#0d1014'; ctx.lineWidth = 2; ctx.stroke();
+      const tw = ctx.measureText(pl.name).width;
+      const lx = sx + 8 + tw + 10 > W() - 4 ? sx - 8 - tw - 10 : sx + 8;     // flip near the right edge
+      ctx.fillStyle = 'rgba(13,16,20,.82)'; ctx.fillRect(lx, sy - 9, tw + 10, 18);
+      ctx.fillStyle = '#e9e1ff'; ctx.fillText(pl.name, lx + 5, sy);
+    }
+    if (PL.home) {
+      const [sx, sy] = toScreen(PL.home.x, PL.home.y);
+      ctx.fillStyle = C.blue; ctx.beginPath();
+      ctx.moveTo(sx, sy - 9); ctx.lineTo(sx + 8, sy - 2); ctx.lineTo(sx + 5, sy - 2); ctx.lineTo(sx + 5, sy + 6);
+      ctx.lineTo(sx - 5, sy + 6); ctx.lineTo(sx - 5, sy - 2); ctx.lineTo(sx - 8, sy - 2); ctx.closePath(); ctx.fill();
+    }
+  }
+  if (P && findPulse) {
+    const t = (performance.now() - findPulse) / 1000;
+    if (t < 2.4) {
+      const [sx, sy] = toScreen(P.x, P.y);
+      for (let k = 0; k < 3; k++) {
+        const tt = (t + k * 0.4) % 1.2 / 1.2;
+        ctx.strokeStyle = `rgba(56,209,176,${1 - tt})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(sx, sy, 14 + tt * 60, 0, Math.PI * 2); ctx.stroke();
+      }
+    } else findPulse = 0;
+  }
   const meters = niceLen(120 / s), px = meters * s, x0 = W() - 24 - px, y0 = H() - 52;
   ctx.strokeStyle = '#aab4c0'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(x0, y0 - 5); ctx.lineTo(x0, y0); ctx.lineTo(x0 + px, y0); ctx.lineTo(x0 + px, y0 - 5); ctx.stroke();
-  ctx.fillStyle = '#aab4c0'; ctx.font = '11px ' + css('--mono'); ctx.textAlign = 'center';
+  ctx.fillStyle = '#aab4c0'; ctx.font = '11px ' + css('--mono'); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.fillText(meters >= 1 ? meters + ' m' : meters * 100 + ' cm', x0 + px / 2, y0 - 8);
 
   $('readout').textContent = hover ? `x ${hover[0].toFixed(2)}  y ${hover[1].toFixed(2)}` : (P ? `robot ${P.x.toFixed(2)}, ${P.y.toFixed(2)}` : '—');
@@ -384,22 +663,26 @@ function drawGrid(s) {
 function drawGoal(x, y, yaw, color, s) {
   ctx.save(); ctx.translate(x, y);
   ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2 / s;
-  ctx.beginPath(); ctx.arc(0, 0, 0.12, 0, Math.PI * 2); ctx.stroke();
-  ctx.rotate(yaw);
-  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0.32, 0); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0.4, 0); ctx.lineTo(0.28, 0.06); ctx.lineTo(0.28, -0.06); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, 0, 0.14, 0, Math.PI * 2); ctx.stroke();
+  if (yaw != null) {
+    ctx.rotate(yaw);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0.34, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0.42, 0); ctx.lineTo(0.3, 0.06); ctx.lineTo(0.3, -0.06); ctx.closePath(); ctx.fill();
+  }
   ctx.restore();
 }
 function niceLen(v) { const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n < 2 ? 1 : n < 5 ? 2 : 5) * p; }
 
-// pointer interaction: pan / pinch / goal
+// pointer interaction: pan / pinch / goal / place
 const ptrs = new Map(); let panStart = null, pinch = null;
 cv.addEventListener('pointerdown', e => {
   cv.setPointerCapture(e.pointerId);
   ptrs.set(e.pointerId, [e.offsetX, e.offsetY]);
-  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), scale: view.scale }; panStart = null; return; }
-  if (toolMode === 'goal') { const [x, y] = toWorld(e.offsetX, e.offsetY); goalDrag = { x, y, yaw: 0, moved: false }; if (S && S.pose) goalDrag.yaw = Math.atan2(y - S.pose.y, x - S.pose.x); }
-  else { panStart = { sx: e.offsetX, sy: e.offsetY, x: view.x, y: view.y }; }
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), scale: view.scale }; panStart = null; goalDrag = null; return; }
+  if (toolMode === 'goal' || toolMode === 'place') {
+    const [x, y] = toWorld(e.offsetX, e.offsetY);
+    goalDrag = { x, y, yaw: toolMode === 'goal' && S && S.pose ? Math.atan2(y - S.pose.y, x - S.pose.x) : 0, moved: false };
+  } else panStart = { sx: e.offsetX, sy: e.offsetY, x: view.x, y: view.y };
 });
 cv.addEventListener('pointermove', e => {
   hover = toWorld(e.offsetX, e.offsetY);
@@ -420,7 +703,9 @@ function endPtr(e) {
   if (ptrs.size < 2) pinch = null;
   if (goalDrag && ptrs.size === 0) {
     const g = goalDrag; goalDrag = null;
-    post('/api/goal', { x: g.x, y: g.y, yaw: g.yaw }).then(() => toast(`Goal sent: ${g.x.toFixed(2)}, ${g.y.toFixed(2)}, ${(g.yaw * 180 / Math.PI).toFixed(0)}°`)).catch(() => {});
+    if (toolMode === 'place') { pendingPlace = { x: g.x, y: g.y, yaw: g.yaw }; openNewPlace(); }
+    else if (plannerMode()) showPreview({ type: 'preview', x: g.x, y: g.y, yaw: g.yaw });
+    else post('/api/goal', { x: g.x, y: g.y, yaw: g.yaw }).then(() => toast('Goal sent')).catch(() => {});
     setTool('pan');
   }
   panStart = null;
@@ -438,13 +723,15 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function setTool(m) {
   toolMode = m;
-  $('t-pan').classList.toggle('on', m === 'pan'); $('t-goal').classList.toggle('on', m === 'goal');
-  $('b-goal').classList.toggle('on', m === 'goal');
-  cv.style.cursor = m === 'goal' ? 'crosshair' : 'grab';
-  $('hint').textContent = m === 'goal' ? 'click = goal position · drag = final heading' : 'scroll to zoom · drag to pan';
+  $('t-pan').classList.toggle('on', m === 'pan'); $('t-goal').classList.toggle('on', m === 'goal'); $('t-place').classList.toggle('on', m === 'place');
+  cv.style.cursor = m === 'pan' ? 'grab' : 'crosshair';
+  $('hint').textContent = m === 'goal' ? 'click = destination · drag = final heading · shows the route first'
+    : m === 'place' ? 'click where the place is · drag = facing direction' : 'scroll to zoom · drag to pan';
 }
 $('t-pan').onclick = () => setTool('pan');
-$('t-goal').onclick = $('b-goal').onclick = () => setTool(toolMode === 'goal' ? 'pan' : 'goal');
+$('t-goal').onclick = () => setTool(toolMode === 'goal' ? 'pan' : 'goal');
+$('t-place').onclick = () => setTool(toolMode === 'place' ? 'pan' : 'place');
+$('t-find').onclick = findRobot;
 $('t-follow').onclick = () => { view.follow = !view.follow; $('t-follow').classList.toggle('on', view.follow); };
 $('t-fit').onclick = fitMap;
 $('t-trail').onclick = () => { trail.length = 0; };
@@ -465,7 +752,7 @@ function drawJoy() {
   jctx.fillStyle = '#56606d'; jctx.fillText('FWD', r, 44); jctx.fillText('REV', r, w - 44);
   const kx = r + jv.x * k, ky = r - jv.y * k;
   jctx.fillStyle = jv.active ? C.teal : '#3a4450';
-  jctx.beginPath(); jctx.arc(kx, ky, 46, 0, Math.PI * 2); jctx.fill();
+  jctx.beginPath(); jctx.arc(kx, ky, 48, 0, Math.PI * 2); jctx.fill();
 }
 function joyFromEvent(e) {
   const b = joy.getBoundingClientRect(), r = b.width / 2, k = r * 0.62;
@@ -487,6 +774,8 @@ window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (k === ' ') { e.preventDefault(); if (!(S && S.estop)) post('/api/estop', { on: true }).catch(() => {}); return; }
   if (k === 'g') { setTool(toolMode === 'goal' ? 'pan' : 'goal'); return; }
+  if (k === 'p') { setTool(toolMode === 'place' ? 'pan' : 'place'); return; }
+  if (k === 'f') { findRobot(); return; }
   if (k === 'escape') { setTool('pan'); goalDrag = null; return; }
   if (DRIVE_KEYS[k]) { e.preventDefault(); keys.add(k); }
 });
@@ -498,7 +787,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) { key
 const sv = $('s-v'), sw = $('s-w');
 sv.oninput = () => $('s-v-l').textContent = (+sv.value).toFixed(2);
 sw.oninput = () => $('s-w-l').textContent = (+sw.value).toFixed(2);
-let zerosToSend = 0;
+let zerosToSend = 0, teleopCanceled = false;
 setInterval(() => {
   let fx = 0, fy = 0, active = false;
   if (jv.active) { fx = jv.x; fy = jv.y; active = true; }
@@ -510,22 +799,26 @@ setInterval(() => {
   const v = fy * +sv.value, w = -fx * +sw.value;
   $('drv-val').textContent = `${v.toFixed(2)} m/s · ${w.toFixed(2)} rad/s`;
   if (active) {
-    if (S && S.goal && ['ROTATE', 'DRIVE', 'ALIGN'].includes(S.goal.state) && !window._teleopCanceled) {
-      window._teleopCanceled = true; post('/api/cancel').catch(() => {}); toast('Manual drive: goal canceled');
+    const busy = plannerMode() ? (S.nav && S.nav.missions && S.nav.missions.active)
+                               : (S && S.goal && ['ROTATE', 'DRIVE', 'ALIGN'].includes(S.goal.state));
+    if (busy && !teleopCanceled) {
+      teleopCanceled = true;
+      (plannerMode() ? nav({ type: 'cancel', id: S.nav.missions.active.id }, true) : post('/api/cancel', {}, true)).catch(() => {});
+      toast('Manual drive: mission canceled');
     }
-    post('/api/cmd', { v, w }).catch(() => {}); zerosToSend = 3;
+    post('/api/cmd', { v, w }, true).catch(() => {}); zerosToSend = 3;
   } else {
-    window._teleopCanceled = false;
-    if (zerosToSend > 0) { zerosToSend--; post('/api/cmd', { v: 0, w: 0 }).catch(() => {}); }
+    teleopCanceled = false;
+    if (zerosToSend > 0) { zerosToSend--; post('/api/cmd', { v: 0, w: 0 }, true).catch(() => {}); }
   }
 }, 100);
 
 // ---------------------------------------------------------------- buttons
 $('estop').onclick = () => post('/api/estop', { on: !(S && S.estop) }).catch(() => {});
-$('b-cancel').onclick = () => post('/api/cancel').then(() => toast('Goal canceled')).catch(() => {});
 $('b-save').onclick = () => {
   const n = $('m-name').value.trim() || ('map_' + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, ''));
-  post('/api/save_map', { name: n }).then(j => { $('m-msg').textContent = 'Saved ' + j.saved; toast('Map saved'); }).catch(() => {});
+  $('m-msg').textContent = 'saving…';
+  post('/api/save_map', { name: n }).then(j => { $('m-msg').textContent = 'Saved ' + j.saved; toast('Map saved'); }).catch(e => { $('m-msg').textContent = String(e.message || e); });
 };
 
 poll();

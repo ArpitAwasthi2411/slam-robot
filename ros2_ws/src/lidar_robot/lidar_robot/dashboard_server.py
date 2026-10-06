@@ -8,6 +8,7 @@ The server knows nothing about ROS. It talks to a `backend` object:
     backend.send_goal(x, y, yaw)
     backend.cancel_goal()
     backend.save_map(name) -> str
+    backend.nav_request(dict) -> dict     (navigator: places, routes, missions, commands)
 The ROS node (dashboard.py) and the offline simulator (tools/dashboard_sim.py)
 both implement this interface.
 """
@@ -90,6 +91,8 @@ def make_handler(backend, index_path):
                     backend.send_goal(float(body['x']), float(body['y']), float(body.get('yaw', 0.0)))
                 elif url.path == '/api/cancel':
                     backend.cancel_goal()
+                elif url.path == '/api/nav':
+                    return self._send(200, backend.nav_request(body))
                 elif url.path == '/api/save_map':
                     return self._send(200, {'ok': True, 'saved': backend.save_map(str(body.get('name', 'map')))})
                 else:

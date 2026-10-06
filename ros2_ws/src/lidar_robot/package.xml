@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>lidar_robot</name>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <description>
     Differential-drive robot: RPLiDAR A1 + ESP32-S3 encoder odometry + Cartographer SLAM,
     go-to-goal controller and a web teleop dashboard.
@@ -21,6 +21,7 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-serial</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <exec_depend>sllidar_ros2</exec_depend>
   <exec_depend>cartographer_ros</exec_depend>
 

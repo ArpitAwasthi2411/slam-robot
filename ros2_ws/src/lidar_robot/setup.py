@@ -5,7 +5,7 @@ package_name = 'lidar_robot'
 
 setup(
     name=package_name,
-    version='0.2.0',
+    version='0.3.0',
     packages=[package_name],
     package_data={package_name: ['web/*']},
     data_files=[
@@ -29,6 +29,7 @@ setup(
             'esp32_odom_node = lidar_robot.esp32_bridge:main',   # old name, kept for muscle memory
             'goal_controller = lidar_robot.goal_controller:main',
             'dashboard = lidar_robot.dashboard:main',
+            'navigator = lidar_robot.navigator:main',
         ],
     },
 )

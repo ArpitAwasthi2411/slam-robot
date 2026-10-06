@@ -2,10 +2,14 @@
 """Web teleop dashboard node. Open http://<pi-ip>:8080 from the laptop or a phone.
 
 Publishes   /cmd_vel_teleop (Twist)  /estop (Bool, latched)  /goal_pose  /goal_cancel
-Subscribes  /map  /scan  /robot/status  /goal_controller/status  + TF map->base_link
-Map saving writes ~/maps/<name>.pgm/.yaml (map_server format) directly from /map.
+            /navigator/request (String JSON)
+Subscribes  /map  /scan  /robot/status  /goal_controller/status  /navigator/status
+            /navigator/places  /navigator/response  + TF map->base_link
+Map saving writes ~/maps/<name>.pgm/.yaml (map_server format) from /map, plus
+~/maps/<name>.pbstream (Cartographer state, for slam_mode:=localization) when SLAM is running.
 """
 import base64
+import itertools
 import json
 import math
 import os
@@ -38,6 +42,7 @@ class DashboardNode(Node):
         self.declare_parameter('max_angular', 1.2)
         self.declare_parameter('map_dir', os.path.expanduser('~/maps'))
         self.declare_parameter('scan_decimation', 3)
+        self.declare_parameter('nav_mode', 'planner')
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
         self.global_frame = gp('global_frame')
         self.fallback_frame = gp('fallback_frame')
@@ -46,6 +51,7 @@ class DashboardNode(Node):
         self.max_w = float(gp('max_angular'))
         self.map_dir = gp('map_dir')
         self.scan_dec = max(1, int(gp('scan_decimation')))
+        self.nav_mode = gp('nav_mode')
 
         self.lock = threading.Lock()
         self.map_msg = None
@@ -58,6 +64,11 @@ class DashboardNode(Node):
         self.robot_status_t = 0.0
         self.goal_status = {}
         self.estop = False                 # mirrors the bridge's value (bridge is authoritative)
+        self.nav_status = {}
+        self.nav_status_t = 0.0
+        self.places = {'places': [], 'home': None, 'version': -1}
+        self.pending = {}                  # req_id -> [Event, response]
+        self.req_ids = itertools.count(1)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -68,6 +79,7 @@ class DashboardNode(Node):
         self.estop_pub = self.create_publisher(Bool, 'estop', latched)
         self.goal_pub = self.create_publisher(PoseStamped, 'goal_pose', 10)
         self.cancel_pub = self.create_publisher(Empty, 'goal_cancel', 10)
+        self.nav_req_pub = self.create_publisher(String, 'navigator/request', 10)
         # NOTE: never publish /estop at startup: a restarted dashboard must not release an e-stop
 
         # volatile+reliable matches both cartographer (volatile) and map_server (latched)
@@ -75,6 +87,16 @@ class DashboardNode(Node):
         self.create_subscription(LaserScan, 'scan', self._on_scan, qos_profile_sensor_data)
         self.create_subscription(String, 'robot/status', self._on_robot_status, 10)
         self.create_subscription(String, 'goal_controller/status', self._on_goal_status, 10)
+        self.create_subscription(String, 'navigator/status', self._on_nav_status, 10)
+        self.create_subscription(String, 'navigator/places', self._on_places, latched)
+        self.create_subscription(String, 'navigator/response', self._on_nav_response, 10)
+        self.write_state_cli = None
+        try:                                # Cartographer service to save a .pbstream (optional)
+            from cartographer_ros_msgs.srv import WriteState
+            self._WriteState = WriteState
+            self.write_state_cli = self.create_client(WriteState, 'write_state')
+        except ImportError:
+            self._WriteState = None
 
         port = int(gp('port'))
         self.server = DashboardServer(self, port=port)
@@ -123,6 +145,29 @@ class DashboardNode(Node):
         except ValueError:
             pass
 
+    def _on_nav_status(self, msg):
+        try:
+            self.nav_status = json.loads(msg.data)
+            self.nav_status_t = time.monotonic()
+        except ValueError:
+            pass
+
+    def _on_places(self, msg):
+        try:
+            self.places = json.loads(msg.data)
+        except ValueError:
+            pass
+
+    def _on_nav_response(self, msg):
+        try:
+            res = json.loads(msg.data)
+        except ValueError:
+            return
+        slot = self.pending.get(res.get('req_id'))
+        if slot:
+            slot[1] = res
+            slot[0].set()
+
     def _pose(self):
         for frame in (self.global_frame, self.fallback_frame):
             try:
@@ -158,6 +203,9 @@ class DashboardNode(Node):
             'map': None if m is None else {'version': self.map_version, 'width': m.info.width,
                                            'height': m.info.height, 'resolution': m.info.resolution},
             'limits': {'max_v': self.max_v, 'max_w': self.max_w},
+            'nav_mode': self.nav_mode,
+            'nav': self.nav_status if time.monotonic() - self.nav_status_t < 2.0 else None,
+            'places': self.places,
         }
 
     def get_map(self, since):
@@ -194,7 +242,8 @@ class DashboardNode(Node):
         self.estop_pub.publish(Bool(data=self.estop))
         if self.estop:
             self.cmd_pub.publish(Twist())
-            self.cancel_pub.publish(Empty())
+            if self.nav_mode != 'planner':        # the navigator pauses its missions itself
+                self.cancel_pub.publish(Empty())
 
     def send_goal(self, x, y, yaw):
         pose = self._pose()
@@ -211,6 +260,21 @@ class DashboardNode(Node):
         self.cancel_pub.publish(Empty())
         self.cmd_pub.publish(Twist())
 
+    def nav_request(self, req):
+        """Forward a JSON request to the navigator node and wait (max 3 s) for its reply."""
+        if self.nav_mode != 'planner':
+            return {'ok': False, 'error': 'navigator not running (bringup nav_mode:=planner)'}
+        rid = next(self.req_ids)
+        req = dict(req, req_id=rid)
+        ev = threading.Event()
+        self.pending[rid] = [ev, None]
+        self.nav_req_pub.publish(String(data=json.dumps(req)))
+        ok = ev.wait(3.0)
+        res = self.pending.pop(rid)[1]
+        if not ok or res is None:
+            return {'ok': False, 'error': 'navigator did not answer (is it running?)'}
+        return res
+
     def save_map(self, name):
         with self.lock:
             m = self.map_msg
@@ -221,14 +285,42 @@ class DashboardNode(Node):
         _, yaml_path = save_map(self.map_dir, name, m.info.width, m.info.height, m.info.resolution,
                                 o.position.x, o.position.y, yaw, m.data)
         self.get_logger().info(f'Map saved: {yaml_path}')
-        return yaml_path
+        saved = yaml_path
+        pb = self._write_pbstream(yaml_path[:-5] + '.pbstream')
+        if pb:
+            saved += f' + {os.path.basename(pb)}'
+        else:
+            saved += ' (WARNING: no .pbstream saved: Cartographer write_state unavailable, '
+            saved += 'localization mode will not work with this map)'
+        return saved
+
+    def _write_pbstream(self, path):
+        """Ask Cartographer to save its full state (needed for slam_mode:=localization)."""
+        if not self.write_state_cli or not self.write_state_cli.service_is_ready():
+            return None
+        req = self._WriteState.Request()
+        req.filename = path
+        req.include_unfinished_submaps = True
+        with self.lock:
+            fut = self.write_state_cli.call_async(req)
+        t0 = time.monotonic()
+        while not fut.done() and time.monotonic() - t0 < 10.0:
+            time.sleep(0.05)
+        if fut.done() and fut.result() is not None and fut.result().status.code == 0:
+            self.get_logger().info(f'Cartographer state saved: {path}')
+            return path
+        self.get_logger().warn('Could not save .pbstream (Cartographer busy or not running)')
+        return None
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = DashboardNode()
+    from rclpy.executors import MultiThreadedExecutor
+    ex = MultiThreadedExecutor(num_threads=3)
+    ex.add_node(node)
     try:
-        rclpy.spin(node)
+        ex.spin()
     except KeyboardInterrupt:
         pass
     finally:
