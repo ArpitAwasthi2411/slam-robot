@@ -10,7 +10,7 @@ Arguments
   controller    true   start the go-to-goal controller (RViz 2D Goal Pose)
   dashboard     true   web dashboard on http://<pi>:8080
   lidar_port    /dev/ttyUSB0   (or /dev/rplidar after installing the udev rules)
-  esp32_port    auto           (/dev/esp32, then /dev/ttyACM*)
+  esp32_port    auto           (/dev/esp32, /dev/ttyACM* [S3], /dev/ttyUSB* except lidar_port [classic])
   laser_x/y/z/yaw              LiDAR pose on the robot (base_link -> laser)
 """
 import os
@@ -50,7 +50,8 @@ def _setup(context):
     # In LiDAR-only mode Cartographer owns odom->base_link, so the bridge must not publish it.
     actions.append(Node(
         package='lidar_robot', executable='esp32_bridge', name='esp32_bridge', output='screen',
-        parameters=[params, {'serial_port': cfg('esp32_port'), 'publish_tf': use_odom}]))
+        parameters=[params, {'serial_port': cfg('esp32_port'), 'publish_tf': use_odom,
+                             'exclude_ports': cfg('lidar_port')}]))
 
     if _truthy(cfg('slam')):
         lua = 'cartographer_odom.lua' if use_odom else 'cartographer_lidar_only.lua'

@@ -8,7 +8,7 @@ from an ESP32-S3.
 |---|---|
 | Compute | Raspberry Pi 4, Ubuntu 22.04, ROS 2 Humble (headless) |
 | LiDAR | Slamtec RPLiDAR A1M8, 360°, 10 Hz, 12 m |
-| Low-level | ESP32-S3: motor PWM, quadrature encoders, PI wheel-speed loop, RC input |
+| Low-level | ESP32-S3 or classic ESP32 (auto pin map): motor PWM, quadrature encoders, PI wheel-speed loop, RC input |
 | Drive | 2 × DC gear motors with encoders (4740 ticks/rev), BTS7960-style H-bridges, 125 mm wheels, 300 mm track |
 | Manual | FlySky FS-i6 + FS-iA6 receiver (always overrides software) |
 | SLAM | Cartographer 2D (LiDAR + odometry, or LiDAR-only fallback) |
@@ -46,7 +46,7 @@ stale SLAM pose → goal controller stops in 0.6 s.
 ## Repository layout
 
 ```
-firmware/robot_esp32/        ESP32-S3 Arduino sketch (core 2.x and 3.x)
+firmware/robot_esp32/        ESP32-S3 / classic ESP32 Arduino sketch (core 2.x and 3.x)
 ros2_ws/src/lidar_robot/     ROS 2 package (ament_python)
   lidar_robot/               esp32_bridge, goal_controller, dashboard (+ pure-Python logic modules)
   lidar_robot/web/           dashboard page (single file, works offline)

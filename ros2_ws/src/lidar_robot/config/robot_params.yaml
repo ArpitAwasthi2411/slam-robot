@@ -1,7 +1,7 @@
 # Robot parameters — single source of truth. Edit here, then `colcon build` (or use --symlink-install).
 esp32_bridge:
   ros__parameters:
-    serial_port: auto            # auto = /dev/esp32 (udev) then /dev/ttyACM*
+    serial_port: auto            # auto = /dev/esp32 (udev), /dev/ttyACM* (S3), /dev/ttyUSB* (classic, skips the LiDAR)
     baud_rate: 115200
     wheel_radius: 0.0625         # 125 mm wheels
     wheel_separation: 0.30       # tune with the 360-degree spin test (docs/calibration.md)
