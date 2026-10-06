@@ -1,0 +1,22 @@
+# Start the robot automatically when the Pi boots (optional).
+#   sudo cp scripts/robot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now robot
+#   journalctl -u robot -f          # live logs
+#   sudo systemctl stop robot       # before running tools/serial_probe.py
+[Unit]
+Description=SLAM robot bringup (ROS 2)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=arpit
+Environment=ROS_DOMAIN_ID=0
+Environment=ROS_LOCALHOST_ONLY=0
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/arpit/ros2_ws/install/setup.bash && exec ros2 launch lidar_robot bringup.launch.py'
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

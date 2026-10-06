@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lidar_robot</name>
+  <version>0.2.0</version>
+  <description>
+    Differential-drive robot: RPLiDAR A1 + ESP32-S3 encoder odometry + Cartographer SLAM,
+    go-to-goal controller and a web teleop dashboard.
+  </description>
+  <maintainer email="awasthiarpit24@gmail.com">Arpit Awasthi</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
+  <exec_depend>sllidar_ros2</exec_depend>
+  <exec_depend>cartographer_ros</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

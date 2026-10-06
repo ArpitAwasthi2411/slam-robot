@@ -1,0 +1,38 @@
+# Robot parameters — single source of truth. Edit here, then `colcon build` (or use --symlink-install).
+esp32_bridge:
+  ros__parameters:
+    serial_port: auto            # auto = /dev/esp32 (udev) then /dev/ttyACM*
+    baud_rate: 115200
+    wheel_radius: 0.0625         # 125 mm wheels
+    wheel_separation: 0.30       # tune with the 360-degree spin test (docs/calibration.md)
+    ticks_per_rev_left: 4740.0   # tune with the 1 m straight-line test
+    ticks_per_rev_right: 4740.0
+    cmd_timeout: 0.5             # s, stale cmd_vel -> stop
+    max_wheel_speed: 0.45        # m/s clamp sent to the ESP32
+    cmd_rate: 20.0
+
+goal_controller:
+  ros__parameters:
+    global_frame: map
+    base_frame: base_link
+    rate: 20.0
+    max_linear: 0.20
+    max_angular: 0.9
+    min_linear: 0.04
+    min_angular: 0.25
+    xy_tolerance: 0.08
+    yaw_tolerance: 0.08
+    stop_distance: 0.35          # measured from robot centre
+    slow_distance: 0.75
+    robot_half_width: 0.20
+    front_cone_deg: 25.0
+    goal_timeout: 120.0
+
+dashboard:
+  ros__parameters:
+    port: 8080
+    global_frame: map
+    fallback_frame: odom
+    max_linear: 0.30
+    max_angular: 1.2
+    scan_decimation: 3
