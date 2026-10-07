@@ -18,7 +18,7 @@ def test_parse_v2_and_v1_lines():
 
 
 def test_parse_rejects_junk():
-    for bad in ['', 'ODM,1,2', 'ODM,a,b,c', 'ODM,1,2,0', 'ODM,1,2,99999', 'xx', 'ODM,1,2,3,4,5']:
+    for bad in ['', 'ODM,1,2', 'ODM,a,b,c', 'ODM,1,2,0', 'ODM,1,2,99999', 'xx', 'ODM,1,2,3,4,5,6', 'IMU,1,2', 'US,a,b,c']:
         assert parse_line(bad) is None, bad
 
 
@@ -78,3 +78,22 @@ def test_pgm_orientation_and_values():
     pgm = occupancy_to_pgm_bytes(2, 2, [0, 100, -1, 0])
     body = pgm.split(b'255\n', 1)[1]
     assert list(body) == [205, 254, 254, 0]          # top row first in PGM
+
+
+def test_v22_lines_and_gyro_odometry():
+    from lidar_robot.protocol import ImuPacket, UsPacket
+    from lidar_robot.sensors import front_clearance_from_ranges
+    p = parse_line('ODM,10,12,20,2,-15000')
+    assert p.dyaw == -0.015 and p.mode == 2
+    assert parse_line('IMU,-250,100,0,9810') == ImuPacket(-0.25, 0.1, 0.0, 9.81)
+    assert parse_line('US,350,0,5000') == UsPacket(0.35, None, None)
+    o = DiffDriveOdometry(0.0625, 0.30, 4740, 4740)
+    o.update(100, 100, 0.02, gyro_dtheta=0.1)               # straight wheels, gyro says it turned
+    assert abs(o.theta - 0.1) < 1e-12
+    mounts = [(0.22, 0.12, math.radians(30)), (0.22, 0.0, 0.0), (0.22, -0.12, -math.radians(30))]
+    # centre sensor sees 0.30 m -> obstacle 0.52 m ahead of the robot centre
+    assert abs(front_clearance_from_ranges([(None, mounts[0]), (0.30, mounts[1]), (None, mounts[2])], 0.25) - 0.52) < 1e-9
+    # left sensor sees 1.0 m at +30 deg -> point at y = 0.62, outside the robot corridor -> ignored
+    assert front_clearance_from_ranges([(1.0, mounts[0])], 0.25) == float('inf')
+    # left sensor sees 0.15 m -> y = 0.195 (inside corridor), x = 0.35
+    assert abs(front_clearance_from_ranges([(0.15, mounts[0])], 0.25) - (0.22 + 0.15 * math.cos(math.radians(30)))) < 1e-9

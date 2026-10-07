@@ -11,6 +11,9 @@ Publishes
   /odom             nav_msgs/Odometry
   TF odom->base_link                      only if publish_tf (i.e. Cartographer uses odometry)
   /robot/status     std_msgs/String       JSON, 2 Hz (used by the dashboard)
+  /imu              sensor_msgs/Imu       firmware v2.2 + MPU-6050 (frame imu_link)
+  /ultrasonic/{left,center,right}  sensor_msgs/Range   firmware v2.2 + HC-SR04 (frames us_*)
+With an IMU, odometry heading comes from the gyro (use_imu_yaw) and distance from the wheels.
 """
 import json
 import math
@@ -22,6 +25,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from geometry_msgs.msg import Twist, TransformStamped
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Imu, Range
 from std_msgs.msg import Bool, String
 from tf2_ros import TransformBroadcaster
 
@@ -30,7 +34,8 @@ import serial
 from lidar_robot.ports import pick_esp32_port
 from lidar_robot.kinematics import (DiffDriveOdometry, quaternion_from_yaw,
                                     twist_to_wheels, limit_wheels)
-from lidar_robot.protocol import (parse_line, OdomPacket, InfoPacket, MODE_NAMES, MODE_ESTOP,
+from lidar_robot.protocol import (parse_line, OdomPacket, InfoPacket, ImuPacket, UsPacket,
+                                  MODE_NAMES, MODE_ESTOP,
                                   format_velocity, format_stop, format_estop)
 
 
@@ -52,6 +57,7 @@ class Esp32Bridge(Node):
         p('cmd_timeout', 0.5)
         p('max_wheel_speed', 0.45)      # m/s, hard clamp on what we ask the ESP32
         p('cmd_rate', 20.0)
+        p('use_imu_yaw', True)           # heading from the gyro when the firmware sends it
         g = lambda n: self.get_parameter(n).value  # noqa: E731
 
         self.port_param = g('serial_port')
@@ -78,6 +84,11 @@ class Esp32Bridge(Node):
         self.last_rx = 0.0
         self.esp_mode = -1
         self.esp_info = ''
+        self.use_imu_yaw = bool(self.get_parameter('use_imu_yaw').value)
+        self.last_imu = 0.0
+        self.last_us = 0.0
+        self.us = [None, None, None]
+        self.yaw_source = 'wheels'
         self.cmd = {'teleop': (Twist(), 0.0), 'nav': (Twist(), 0.0)}
         self.cmd_source = 'none'
         self.cmd_out = (0.0, 0.0)
@@ -86,6 +97,9 @@ class Esp32Bridge(Node):
         self.estop_released_at = 0.0
 
         self.odom_pub = self.create_publisher(Odometry, 'odom', 20)
+        self.imu_pub = self.create_publisher(Imu, 'imu', 20)
+        self.range_pubs = [self.create_publisher(Range, f'ultrasonic/{n}', 10)
+                           for n in ('left', 'center', 'right')]
         self.status_pub = self.create_publisher(String, 'robot/status', 5)
         self.tf_pub = TransformBroadcaster(self) if self.publish_tf else None
 
@@ -192,12 +206,25 @@ class Esp32Bridge(Node):
                 self.esp_info = pkt.text
                 self.get_logger().info(f'ESP32: {pkt.text}')
                 continue
+            try:
+                if isinstance(pkt, ImuPacket):
+                    self._handle_imu(pkt)
+                    continue
+                if isinstance(pkt, UsPacket):
+                    self._handle_us(pkt)
+                    continue
+            except Exception:
+                if self.running:
+                    raise
+                continue
             self._handle_odom(pkt)
 
     def _handle_odom(self, pkt: OdomPacket):
         now_t = time.monotonic()
         with self.lock:
-            x, y, th, v, w = self.odom.update(pkt.dl, pkt.dr, pkt.dt_ms / 1000.0)
+            gyro = pkt.dyaw if (self.use_imu_yaw and pkt.dyaw is not None) else None
+            self.yaw_source = 'gyro' if gyro is not None else 'wheels'
+            x, y, th, v, w = self.odom.update(pkt.dl, pkt.dr, pkt.dt_ms / 1000.0, gyro)
             self.rx_count += 1
             self.last_rx = now_t
             self.esp_mode = pkt.mode
@@ -213,6 +240,34 @@ class Esp32Bridge(Node):
         except Exception:            # context shutting down while the reader thread runs
             if self.running:
                 raise
+
+    def _handle_imu(self, pkt: ImuPacket):
+        self.last_imu = time.monotonic()
+        m = Imu()
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.header.frame_id = 'imu_link'
+        m.orientation_covariance[0] = -1.0          # no orientation estimate
+        m.angular_velocity.z = pkt.gz
+        m.angular_velocity_covariance[8] = 0.0004
+        m.linear_acceleration.x, m.linear_acceleration.y, m.linear_acceleration.z = pkt.ax, pkt.ay, pkt.az
+        m.linear_acceleration_covariance[0] = m.linear_acceleration_covariance[4] = 0.04
+        m.linear_acceleration_covariance[8] = 0.04
+        self.imu_pub.publish(m)
+
+    def _handle_us(self, pkt: UsPacket):
+        self.last_us = time.monotonic()
+        self.us = [pkt.left, pkt.center, pkt.right]
+        stamp = self.get_clock().now().to_msg()
+        for pub, name, rng in zip(self.range_pubs, ('left', 'center', 'right'), self.us):
+            r = Range()
+            r.header.stamp = stamp
+            r.header.frame_id = f'us_{name}'
+            r.radiation_type = Range.ULTRASOUND
+            r.field_of_view = 0.26                     # ~15 degrees
+            r.min_range = 0.02
+            r.max_range = 4.0
+            r.range = float(rng) if rng is not None else float('inf')   # inf = nothing in range (REP 117)
+            pub.publish(r)
 
     def _publish_odom(self, x, y, th, v, w):
         stamp = self.get_clock().now().to_msg()
@@ -332,6 +387,10 @@ class Esp32Bridge(Node):
                          'yaw': round(self.odom.theta, 3),
                          'v': round(self.odom.v, 3), 'w': round(self.odom.w, 3),
                          'turns': round(self.odom.theta_total / (2 * math.pi), 3)},
+                'yaw_source': self.yaw_source,
+                'imu_ok': time.monotonic() - self.last_imu < 1.0,
+                'us': ([None if r is None else round(r, 3) for r in self.us]
+                       if time.monotonic() - self.last_us < 1.0 else None),
             }
         self.status_pub.publish(String(data=json.dumps(st)))
 

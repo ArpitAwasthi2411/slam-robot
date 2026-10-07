@@ -1,6 +1,8 @@
 """ESP32 <-> Pi serial protocol (pure Python, no ROS imports, unit-tested).
 
-ESP32 -> Pi:  ODM,<dl>,<dr>,<dt_ms>,<mode>      (v1 firmware sends 4 fields, no mode)
+ESP32 -> Pi:  ODM,<dl>,<dr>,<dt_ms>,<mode>[,<dyaw_urad>]   (v1: 4 fields, v2.2+IMU: 6 fields)
+              IMU,<gz_mrad_s>,<ax_mm_s2>,<ay_mm_s2>,<az_mm_s2>
+              US,<left_mm>,<center_mm>,<right_mm>       (0 = no echo)
               INFO,<text>
 Pi -> ESP32:  V,<left_mm_s>,<right_mm_s>
               P,<left_pwm>,<right_pwm>
@@ -19,6 +21,22 @@ class OdomPacket:
     dr: int
     dt_ms: int
     mode: int = -1
+    dyaw: Optional[float] = None       # rad, from the gyro (None if no IMU)
+
+
+@dataclass
+class ImuPacket:
+    gz: float                          # rad/s (yaw rate, CCW positive)
+    ax: float                          # m/s^2
+    ay: float
+    az: float
+
+
+@dataclass
+class UsPacket:
+    left: Optional[float]              # metres, None = nothing in range
+    center: Optional[float]
+    right: Optional[float]
 
 
 @dataclass
@@ -26,7 +44,7 @@ class InfoPacket:
     text: str
 
 
-Packet = Union[OdomPacket, InfoPacket]
+Packet = Union[OdomPacket, InfoPacket, ImuPacket, UsPacket]
 
 
 def parse_line(line: str) -> Optional[Packet]:
@@ -36,16 +54,35 @@ def parse_line(line: str) -> Optional[Packet]:
         return None
     if line.startswith('ODM,'):
         parts = line.split(',')
-        if len(parts) not in (4, 5):
+        if len(parts) not in (4, 5, 6):
             return None
         try:
             dl, dr, dt = int(parts[1]), int(parts[2]), int(parts[3])
-            mode = int(parts[4]) if len(parts) == 5 else -1
+            mode = int(parts[4]) if len(parts) >= 5 else -1
+            dyaw = int(parts[5]) * 1e-6 if len(parts) == 6 else None
         except ValueError:
             return None
         if dt <= 0 or dt > 60000:
             return None
-        return OdomPacket(dl, dr, dt, mode)
+        return OdomPacket(dl, dr, dt, mode, dyaw)
+    if line.startswith('IMU,'):
+        parts = line.split(',')
+        if len(parts) != 5:
+            return None
+        try:
+            gz, ax, ay, az = (int(p) * 1e-3 for p in parts[1:])
+        except ValueError:
+            return None
+        return ImuPacket(gz, ax, ay, az)
+    if line.startswith('US,'):
+        parts = line.split(',')
+        if len(parts) != 4:
+            return None
+        try:
+            vals = [int(p) for p in parts[1:]]
+        except ValueError:
+            return None
+        return UsPacket(*[(v / 1000.0 if 20 <= v <= 4000 else None) for v in vals])
     if line.startswith('INFO,'):
         return InfoPacket(line[5:])
     if line == 'ESP32_ROBOT_READY':          # v1 firmware banner

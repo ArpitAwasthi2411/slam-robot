@@ -30,15 +30,22 @@ The firmware picks the map automatically from the board selected in the Arduino 
 | Left encoder A / B | 15 / 16 | 18 / 19 | left motor encoder |
 | Right encoder A / B | 17 / 18 | 4 / 13 | right motor encoder |
 | Link to the Pi | native USB → `/dev/ttyACM0` | USB-UART chip → `/dev/ttyUSB*` | Pi USB, `/dev/esp32` with udev |
-| Free for later | — | 21/22 I2C (IMU), 36 ADC (battery) | |
+| IMU SDA / SCL (v2.2) | 1 / 2 | 21 / 22 | MPU-6050 (GY-521) |
+| E-stop sense (v2.2) | 41 | 5 | mushroom NO contact to GND |
+| Ultrasonic TRIG L/C/R (v2.2) | 13 / 14 / 21 | 14 / 16 / 17 | HC-SR04 TRIG |
+| Ultrasonic ECHO L/C/R (v2.2) | 38 / 39 / 40 | 23 / 27 / 15 | via level shifter (5 V → 3.3 V) |
+| Free for later | — | 36 ADC (battery), 39 | |
+
+Wiring, mounting and tests for the IMU, ultrasonics and e-stop: **[sensors.md](sensors.md)**.
 
 **Classic ESP32 — pins you must not use:** 6–11 (wired to the flash chip: using them crashes the
 board, and the S3 map uses 6, 7, 9, 10), 1/3 (the USB serial to the Pi), and 0/2/5/12/15
 (boot strapping: a motor driver or encoder pulling them at power-up can stop the board booting).
 34–39 are input-only with no internal pull-ups.
 
-Remember: all grounds common (ESP32, drivers, receiver, encoders). Encoders powered at 3.3 V,
-or level-shifted if they need 5 V. Driver R_EN/L_EN tied high.
+Remember: all grounds common (ESP32, drivers, receiver, encoders, sensors). Encoders powered at
+3.3 V, or level-shifted if they need 5 V. Driver R_EN/L_EN go to 5 V **through the e-stop's NC
+contact** with a 10 kΩ pull-down (see sensors.md).
 
 ## Frames and dimensions
 

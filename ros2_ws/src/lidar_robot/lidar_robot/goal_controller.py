@@ -27,6 +27,7 @@ from tf2_ros import Buffer, TransformListener, TransformException
 from lidar_robot.goal_logic import (GoalController, GoalParams, front_clearance_from_scan,
                                     IDLE, ACTIVE_STATES)
 from lidar_robot.kinematics import yaw_from_quaternion
+from lidar_robot.us_listener import UltrasonicListener
 
 
 class GoalControllerNode(Node):
@@ -56,6 +57,7 @@ class GoalControllerNode(Node):
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.us = UltrasonicListener(self, self.tf_buffer, self.base_frame)
         self.front = float('inf')
         self.scan_stamp = None
         self.laser_tf = None          # (x, yaw) of laser in base frame
@@ -166,6 +168,7 @@ class GoalControllerNode(Node):
         if self.scan_stamp is None or \
                 (self.get_clock().now() - self.scan_stamp).nanoseconds > 1e9:
             front = 0.0                             # no fresh scan -> don't drive forward
+        front = min(front, self.us.front_clearance(self.half_width))
         v, w = self.ctrl.step(self.pose, front, self.dt)
         cmd = Twist()
         cmd.linear.x = float(v)

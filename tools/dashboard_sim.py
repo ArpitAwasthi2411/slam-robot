@@ -32,6 +32,7 @@ RES = 0.05
 W, H = 300, 200                       # 15 m x 10 m
 ORIGIN = (-0.5, -0.5)
 HOME = (1.0, 4.25, 0.0)
+US_MOUNTS = [[0.22, 0.12, math.radians(30)], [0.22, 0.0, 0.0], [0.22, -0.12, -math.radians(30)]]
 
 PLACES = [
     ('HOD office', 2.5, 7.2, math.pi / 2, ['hod', 'head of department']),
@@ -105,6 +106,7 @@ class SimBackend:
         parser = CommandParser(self.places, groq_api_key=os.environ.get('GROQ_API_KEY'))
         self.nav = NavigatorCore(self.places, parser=parser, dwell_s=2.0)
         self.scan_pts, self.front = [], float('inf')
+        self.us = [None, None, None]
         self.map_version = 0
         self.cmd = (0.0, 0.0)
         self.source = 'none'
@@ -141,6 +143,18 @@ class SimBackend:
                 r += RES * 0.7
         return pts, world_pts, front
 
+    def _ray(self, mount, max_r=4.0):
+        mx, my, myaw = mount
+        c, s = math.cos(self.yaw), math.sin(self.yaw)
+        ox, oy = self.x + c * mx - s * my, self.y + s * mx + c * my
+        a = self.yaw + myaw
+        r = 0.02
+        while r < max_r:
+            if self._occupied(ox + r * math.cos(a), oy + r * math.sin(a)):
+                return round(r, 3)
+            r += 0.02
+        return None
+
     def _push_map(self):
         data = [(-1 if v == 0 else v - 1) for v in self.known]
         self.nav.set_map(GridMap.from_occupancy(W, H, RES, ORIGIN[0], ORIGIN[1], data))
@@ -153,6 +167,7 @@ class SimBackend:
             with self.lock:
                 if t0 - last_scan > 0.1:
                     self.scan_pts, world_pts, self.front = self._scan()
+                    self.us = [self._ray(m) for m in US_MOUNTS]
                     self.nav.update_scan_world(world_pts)
                     last_scan = t0
                 if t0 - last_map > 1.0:
@@ -202,6 +217,7 @@ class SimBackend:
                 'map': {'version': self.map_version, 'width': W, 'height': H, 'resolution': RES},
                 'limits': {'max_v': 0.3, 'max_w': 1.2},
                 'nav_mode': 'planner',
+                'sensors': {'us': list(self.us), 'imu_ok': True, 'yaw_source': 'gyro', 'us_mounts': US_MOUNTS},
                 'nav': self.nav.status(),
                 'places': self.places.summary(),
             }

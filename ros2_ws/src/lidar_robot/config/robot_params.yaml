@@ -10,6 +10,7 @@ esp32_bridge:
     cmd_timeout: 0.5             # s, stale cmd_vel -> stop
     max_wheel_speed: 0.45        # m/s clamp sent to the ESP32
     cmd_rate: 20.0
+    use_imu_yaw: true            # firmware v2.2 + MPU-6050: heading from the gyro, distance from wheels
 
 goal_controller:
   ros__parameters:

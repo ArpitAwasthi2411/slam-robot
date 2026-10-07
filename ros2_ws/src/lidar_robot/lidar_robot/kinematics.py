@@ -47,12 +47,19 @@ class DiffDriveOdometry:
     def reset(self):
         self.x = self.y = self.theta = self.v = self.w = self.theta_total = 0.0
 
-    def update(self, dl_ticks: int, dr_ticks: int, dt: float):
+    def update(self, dl_ticks: int, dr_ticks: int, dt: float, gyro_dtheta=None):
+        """Wheel odometry; if gyro_dtheta is given (rad), it replaces the wheel-based heading change.
+
+        Wheels measure distance well but heading badly (they slip when turning); a gyro measures
+        heading well. Using each for what it is good at is the standard fix for diff-drive drift.
+        """
         circ = 2.0 * math.pi * self.wheel_radius
         dist_l = dl_ticks * circ / self.ticks_per_rev_left
         dist_r = dr_ticks * circ / self.ticks_per_rev_right
         d_center = 0.5 * (dist_l + dist_r)
         d_theta = (dist_r - dist_l) / self.wheel_separation
+        if gyro_dtheta is not None:
+            d_theta = gyro_dtheta
         # midpoint integration
         self.x += d_center * math.cos(self.theta + 0.5 * d_theta)
         self.y += d_center * math.sin(self.theta + 0.5 * d_theta)

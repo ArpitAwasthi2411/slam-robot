@@ -15,8 +15,8 @@
    replanning, places, missions, localization mode); see [navigation.md](navigation.md).
    Nav2 is still an option later (it would replace the navigator; topics are compatible: `/map`,
    `/scan`, `/odom`, TF, `/cmd_vel`, `/goal_pose`), mainly for its DWB local planner and costmap layers.
-7. **IMU** (MPU6050/BNO055 on the ESP32 I2C): gyro yaw makes rotations far more reliable than
-   wheels. Send `IMU,...` lines and set `use_imu_data = true`.
+7. ~~IMU~~ **code done (firmware v2.2)**: the MPU-6050 gyro gives odometry heading; wire it per
+   [hardware/sensors.md](../hardware/sensors.md). Ultrasonics and the mushroom e-stop are done the same way.
 8. **Battery voltage** on an ESP32 ADC pin (divider) → shown on the dashboard, auto-stop when low.
 
 ## Later (project polish / report)
@@ -34,7 +34,7 @@
 15. **Campus app + scheduling (your novelty #2)**: a FastAPI server on the Pi that calls the same
     `/navigator/request` API; users summon the robot, missions carry requester + priority, the
     queue already handles priority pre-emption and return-home-when-idle (`auto_return_s`).
-16. **Ultrasonic sensors** low on the chassis → extra obstacles for the follower (below the LiDAR plane).
+16. ~~Ultrasonic sensors~~ **code done (v2.2)**: front clearance + replanning + an ESP32-level 15 cm safety net.
 
 ## Known limitations of v2
 - The goal controller drives straight lines: walls between robot and goal will block it (safely). That's what Nav2 fixes.
