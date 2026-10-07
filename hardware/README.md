@@ -37,6 +37,7 @@ The firmware picks the map automatically from the board selected in the Arduino 
 | Free for later | — | 36 ADC (battery), 39 | |
 
 Wiring, mounting and tests for the IMU, ultrasonics and e-stop: **[sensors.md](sensors.md)**.
+Full classic-ESP32 connection list: **[wiring_classic_esp32.md](wiring_classic_esp32.md)** (sketch: `firmware/robot_esp32_classic/`).
 
 **Classic ESP32 — pins you must not use:** 6–11 (wired to the flash chip: using them crashes the
 board, and the S3 map uses 6, 7, 9, 10), 1/3 (the USB serial to the Pi), and 0/2/5/12/15
