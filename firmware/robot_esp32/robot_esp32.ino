@@ -509,8 +509,10 @@ void handleLine(char *line) {
       break;
     }
     case 'P': {
-      raw_pwm_l = constrain(parseLong(p), -255L, 255L);
-      raw_pwm_r = constrain(parseLong(p), -255L, 255L);
+      // parse into locals first: constrain() is a macro and would call parseLong() up to 3 times
+      long pl = parseLong(p), pr = parseLong(p);
+      raw_pwm_l = constrain(pl, -255L, 255L);
+      raw_pwm_r = constrain(pr, -255L, 255L);
       raw_pwm_mode = true;
       have_cmd = true;
       last_cmd_ms = millis();
