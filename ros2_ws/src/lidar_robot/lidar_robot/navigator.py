@@ -42,6 +42,8 @@ from lidar_robot.kinematics import yaw_from_quaternion
 from lidar_robot.navigator_core import NavigatorCore
 from lidar_robot.places import PlaceStore
 from lidar_robot.planner import GridMap, Planner, PlannerParams
+from lidar_robot.sensors import to_world
+from lidar_robot.us_listener import UltrasonicListener
 
 
 class NavigatorNode(Node):
@@ -99,6 +101,7 @@ class NavigatorNode(Node):
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.us = UltrasonicListener(self, self.tf_buffer, self.base_frame)   # low obstacles (v2.2)
         self.front = float('inf')
         self.scan_stamp = None
         self.laser_tf = None
@@ -215,6 +218,7 @@ class NavigatorNode(Node):
                     by = ly + r * math.sin(a + lyaw)
                     pts.append((x + c * bx - s * by, y + s * bx + c * by))
                 a += msg.angle_increment
+            pts += to_world(self.us.points_base(), pose)       # things below the LiDAR plane
             with self.core_lock:
                 self.core.update_scan_world(pts)
 
@@ -261,6 +265,7 @@ class NavigatorNode(Node):
         front = self.front
         if self.scan_stamp is None or (self.get_clock().now() - self.scan_stamp).nanoseconds > 1e9:
             front = 0.0                                  # no fresh scan: never drive forward
+        front = min(front, self.us.front_clearance(self.half_width))
         try:
             with self.core_lock:
                 v, w = self.core.step(pose, front, self.dt)

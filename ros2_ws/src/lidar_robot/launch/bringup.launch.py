@@ -20,6 +20,9 @@ Arguments
   lidar_port    /dev/ttyUSB0   (or /dev/rplidar after installing the udev rules)
   esp32_port    auto           (/dev/esp32, /dev/ttyACM* [S3], /dev/ttyUSB* except lidar_port [classic])
   laser_x/y/z/yaw              LiDAR pose on the robot (base_link -> laser)
+  us_x / us_y / us_side_deg / us_z   ultrasonic mounts: centre at (us_x, 0), left/right at
+                               (us_x, +-us_y) angled +-us_side_deg outwards, height us_z
+  imu_x/imu_y/imu_z            MPU-6050 position (orientation: chip X forward, Z up)
 """
 import os
 
@@ -61,6 +64,20 @@ def _setup(context):
         arguments=['--x', cfg('laser_x'), '--y', cfg('laser_y'), '--z', cfg('laser_z'),
                    '--yaw', cfg('laser_yaw'), '--pitch', '0', '--roll', '0',
                    '--frame-id', 'base_link', '--child-frame-id', 'laser']))
+
+    sd = cfg('us_side_deg')
+    import math as _m
+    side = str(_m.radians(float(sd)))
+    for name, y, yaw in (('us_center', '0.0', '0.0'), ('us_left', cfg('us_y'), side),
+                         ('us_right', '-' + cfg('us_y'), '-' + side)):
+        actions.append(Node(
+            package='tf2_ros', executable='static_transform_publisher', name=f'base_to_{name}',
+            arguments=['--x', cfg('us_x'), '--y', y, '--z', cfg('us_z'), '--yaw', yaw,
+                       '--pitch', '0', '--roll', '0', '--frame-id', 'base_link', '--child-frame-id', name]))
+    actions.append(Node(
+        package='tf2_ros', executable='static_transform_publisher', name='base_to_imu',
+        arguments=['--x', cfg('imu_x'), '--y', cfg('imu_y'), '--z', cfg('imu_z'), '--yaw', '0',
+                   '--pitch', '0', '--roll', '0', '--frame-id', 'base_link', '--child-frame-id', 'imu_link']))
 
     actions.append(Node(
         package='sllidar_ros2', executable='sllidar_node', name='sllidar_node', output='screen',
@@ -116,6 +133,8 @@ def generate_launch_description():
         ('nav_mode', 'planner'), ('dashboard', 'true'), ('places', '~/maps/places.json'),
         ('lidar_port', '/dev/ttyUSB0'), ('esp32_port', 'auto'),
         ('laser_x', '0.0'), ('laser_y', '0.0'), ('laser_z', '0.10'), ('laser_yaw', '0.0'),
+        ('us_x', '0.22'), ('us_y', '0.12'), ('us_side_deg', '30'), ('us_z', '0.06'),
+        ('imu_x', '0.0'), ('imu_y', '0.0'), ('imu_z', '0.05'),
     ]
     return LaunchDescription(
         [DeclareLaunchArgument(n, default_value=d) for n, d in args] + [OpaqueFunction(function=_setup)])

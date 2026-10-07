@@ -247,3 +247,52 @@ def test_esp32_latched_before_restart_is_detected():
     finally:
         node.running = False
         esp.unplug()
+
+
+class FakeEsp32v22(FakeEsp32):
+    """Firmware v2.2 with IMU + ultrasonics: ODM carries a gyro yaw delta, plus IMU and US lines."""
+
+    def __init__(self, gyro_rate=0.5, slip=0.0):
+        self.gyro_rate = gyro_rate          # rad/s the robot actually turns
+        self.slip = slip
+        super().__init__()
+
+    def _tx(self):
+        n = 0
+        while self.running:
+            time.sleep(0.02)
+            # robot spins in place at gyro_rate, but the wheels over-report (slip) -> wheel yaw wrong
+            arc = self.gyro_rate * 0.02 * 0.15 * (1 + self.slip)        # per wheel, sep 0.30
+            ticks = round(arc * TICKS_PER_M)
+            dyaw_urad = round(self.gyro_rate * 0.02 * 1e6)
+            try:
+                os.write(self.master, f'ODM,{-ticks},{ticks},20,0,{dyaw_urad}\n'.encode())
+                os.write(self.master, f'IMU,{int(self.gyro_rate * 1000)},10,-20,9810\n'.encode())
+                n += 1
+                if n % 4 == 0:
+                    os.write(self.master, b'US,350,0,1200\n')
+            except OSError:
+                return
+
+
+def test_v22_gyro_heading_and_sensor_topics():
+    esp = FakeEsp32v22(gyro_rate=0.5, slip=0.3)      # wheels claim 30% more rotation than real
+    node, timers = make_bridge(esp.path)
+    try:
+        pump(timers, 2.0)
+        turned = node.odom.theta_total
+        # ~2 s at 0.5 rad/s = ~1.0 rad. Gyro-based heading must be close; wheels alone would say ~1.3
+        assert 0.85 < turned < 1.15, turned
+        assert node.yaw_source == 'gyro'
+        imu = node.pubs['imu'].msgs[-1]
+        assert abs(imu.angular_velocity.z - 0.5) < 1e-6 and imu.header.frame_id == 'imu_link'
+        left, center, right = (node.pubs[f'ultrasonic/{n}'].msgs[-1] for n in ('left', 'center', 'right'))
+        assert abs(left.range - 0.35) < 1e-6 and center.range == float('inf') and abs(right.range - 1.2) < 1e-6
+        assert left.header.frame_id == 'us_left'
+        import json
+        pump(timers, 0.6)
+        st = json.loads(node.pubs['robot/status'].msgs[-1].data)
+        assert st['imu_ok'] and st['us'] == [0.35, None, 1.2] and st['yaw_source'] == 'gyro'
+    finally:
+        node.running = False
+        esp.unplug()

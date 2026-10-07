@@ -240,6 +240,8 @@
           <div class="kv"><label>command v / ω</label><div id="t-cmd">—</div></div>
           <div class="kv"><label>route left</label><div id="t-dist">—</div></div>
           <div class="kv"><label>esp32 link</label><div id="t-link">—</div></div>
+          <div class="kv"><label>ultrasonic L / C / R</label><div id="t-us">—</div></div>
+          <div class="kv"><label>heading from</label><div id="t-imu">—</div></div>
         </div>
       </div>
       <div class="card">
@@ -382,6 +384,10 @@ function updatePanels() {
   $('t-meas').textContent = `${f2(S.odom && S.odom.v)} / ${f2(S.odom && S.odom.w)}`;
   $('t-cmd').textContent = `${f2(S.cmd && S.cmd.v)} / ${f2(S.cmd && S.cmd.w)}`;
   $('t-link').innerHTML = L.port ? `${esc(L.port.replace('/dev/', ''))} <small>bad ${L.bad_lines || 0}</small>` : '—';
+  const SN = S.sensors || {};
+  const cm = r => r == null ? '—' : Math.round(r * 100);
+  $('t-us').innerHTML = SN.us ? `${cm(SN.us[0])} / ${cm(SN.us[1])} / ${cm(SN.us[2])} <small>cm</small>` : '—';
+  $('t-imu').innerHTML = SN.yaw_source ? (SN.yaw_source === 'gyro' ? 'gyro <small>MPU-6050</small>' : 'wheels <small>no IMU</small>') : '—';
   $('t-dist').innerHTML = N && N.distance != null ? `${fmtDist(N.distance)} <small>${fmtEta(N.eta_s)}</small>` : '—';
   if (S.limits) { $('s-v').max = S.limits.max_v; $('s-w').max = S.limits.max_w; }
 
@@ -603,6 +609,16 @@ function draw() {
       for (const [px, py] of S.scan.points) ctx.fillRect(P.x + c * px - sn * py - r / 2, P.y + sn * px + c * py - r / 2, r, r);
     }
     ctx.save(); ctx.translate(P.x, P.y); ctx.rotate(P.yaw);
+    const SN = S.sensors;
+    if (SN && SN.us && SN.us_mounts) {               // ultrasonic cones, coloured by distance
+      SN.us_mounts.forEach((m, i) => {
+        const r = SN.us[i], len = r == null ? 0.5 : Math.min(r, 2.0);
+        const col = r == null ? 'rgba(127,138,152,.18)' : r < 0.3 ? 'rgba(240,82,79,.55)' : r < 0.8 ? 'rgba(243,181,69,.45)' : 'rgba(56,209,176,.30)';
+        ctx.beginPath(); ctx.moveTo(m[0], m[1]);
+        ctx.arc(m[0], m[1], len, m[2] - 0.13, m[2] + 0.13); ctx.closePath();
+        ctx.fillStyle = col; ctx.fill();
+      });
+    }
     ctx.fillStyle = 'rgba(56,209,176,.18)'; ctx.strokeStyle = C.teal; ctx.lineWidth = 2 / s;
     ctx.beginPath(); ctx.rect(-0.22, -0.22, 0.44, 0.44); ctx.fill(); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0.30, 0); ctx.lineTo(0.06, 0.13); ctx.lineTo(0.06, -0.13); ctx.closePath();

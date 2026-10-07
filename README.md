@@ -12,6 +12,7 @@ or RViz. Wheel-encoder odometry comes from an ESP32.
 | Low-level | ESP32-S3 or classic ESP32 (auto pin map): motor PWM, quadrature encoders, PI wheel-speed loop, RC input |
 | Drive | 2 × DC gear motors with encoders (4740 ticks/rev), BTS7960-style H-bridges, 125 mm wheels, 300 mm track |
 | Manual | FlySky FS-i6 + FS-iA6 receiver (always overrides software) |
+| Extra sensors (v2.2) | MPU-6050 gyro (heading), 3× HC-SR04 (low obstacles), mushroom e-stop (hardware cut + sense): [hardware/sensors.md](hardware/sensors.md) |
 | SLAM | Cartographer 2D (LiDAR + odometry, or LiDAR-only fallback) |
 
 ![Web dashboard: live map, LiDAR scan, robot trail and a goal being driven to](docs/images/dashboard.png)
@@ -88,13 +89,14 @@ No robot? `python3 tools/dashboard_sim.py` runs the dashboard against a simulate
 ## Status
 
 - [x] LiDAR → Cartographer → live map in RViz over ethernet
-- [x] ESP32 firmware v2.1: velocity commands, PI wheel loop, RC override + failsafe, e-stop latch
+- [x] ESP32 firmware v2.2: velocity commands, PI wheel loop, RC override + failsafe, e-stop latch
 - [x] Bridge with reconnect, teleop/nav arbitration, e-stop
 - [x] Web dashboard: joystick, e-stop, live map, save map
 - [x] Navigator: named places + search, A* routes with preview, path following, replanning around
       obstacles, priority mission queue, NL commands (LLM + offline fallback), failure reason codes
       ([docs/navigation.md](docs/navigation.md)), tested in simulation
 - [x] Localization on a saved map (Cartographer pure localization + operator confirmation)
+- [x] Firmware v2.2 + Pi support for MPU-6050, 3× ultrasonic, e-stop button (wiring: hardware/sensors.md)
 - [ ] Encoder odometry verified on hardware (calibration: [docs/calibration.md](docs/calibration.md))
 - [ ] Navigator verified on the real robot and floor
 - [ ] LLM error recovery + campus app — see [docs/roadmap.md](docs/roadmap.md)

@@ -168,6 +168,21 @@ class DashboardNode(Node):
             slot[1] = res
             slot[0].set()
 
+    def _us_mounts(self):
+        """[x, y, yaw] of us_left/center/right in base_link from TF (cached once found)."""
+        if getattr(self, '_mounts', None):
+            return self._mounts
+        out = []
+        for f in ('us_left', 'us_center', 'us_right'):
+            try:
+                t = self.tf_buffer.lookup_transform(self.base_frame, f, Time()).transform
+            except TransformException:
+                return None
+            out.append([t.translation.x, t.translation.y,
+                        yaw_from_quaternion(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w)])
+        self._mounts = out
+        return out
+
     def _pose(self):
         for frame in (self.global_frame, self.fallback_frame):
             try:
@@ -204,6 +219,8 @@ class DashboardNode(Node):
                                            'height': m.info.height, 'resolution': m.info.resolution},
             'limits': {'max_v': self.max_v, 'max_w': self.max_w},
             'nav_mode': self.nav_mode,
+            'sensors': {'us': rs.get('us'), 'imu_ok': rs.get('imu_ok'), 'yaw_source': rs.get('yaw_source'),
+                        'us_mounts': self._us_mounts()},
             'nav': self.nav_status if time.monotonic() - self.nav_status_t < 2.0 else None,
             'places': self.places,
         }

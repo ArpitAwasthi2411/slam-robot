@@ -74,6 +74,21 @@ class Odometry(_Msg):
                  'twist': TwistWithCovariance}
 
 
+class Imu(_Msg):
+    __slots__ = ('header', 'orientation', 'orientation_covariance', 'angular_velocity',
+                 'angular_velocity_covariance', 'linear_acceleration', 'linear_acceleration_covariance')
+    _defaults = {'header': Header, 'orientation': Quaternion, 'orientation_covariance': lambda: [0.0] * 9,
+                 'angular_velocity': Vector3, 'angular_velocity_covariance': lambda: [0.0] * 9,
+                 'linear_acceleration': Vector3, 'linear_acceleration_covariance': lambda: [0.0] * 9}
+
+
+class Range(_Msg):
+    ULTRASOUND = 0
+    INFRARED = 1
+    __slots__ = ('header', 'radiation_type', 'field_of_view', 'min_range', 'max_range', 'range')
+    _defaults = {'header': Header, 'radiation_type': 0}
+
+
 class Bool(_Msg):
     __slots__ = ('data',)
     _defaults = {'data': False}
@@ -175,6 +190,9 @@ def install():
     gm = m('geometry_msgs.msg')
     gm.Twist, gm.TransformStamped, gm.Quaternion = Twist, TransformStamped, Quaternion
     m('geometry_msgs').msg = gm
+    sens = m('sensor_msgs.msg')
+    sens.Imu, sens.Range = Imu, Range
+    m('sensor_msgs').msg = sens
     nm = m('nav_msgs.msg')
     nm.Odometry = Odometry
     m('nav_msgs').msg = nm

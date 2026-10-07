@@ -103,7 +103,46 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /goal_controller/plan
+        Value: /plan
+      Value: true
+    - Class: rviz_default_plugins/Range
+      Name: Ultrasonic left
+      Enabled: true
+      Alpha: 0.5
+      Buffer Length: 1
+      Color: 243; 181; 69
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /ultrasonic/left
+      Value: true
+    - Class: rviz_default_plugins/Range
+      Name: Ultrasonic center
+      Enabled: true
+      Alpha: 0.5
+      Buffer Length: 1
+      Color: 243; 181; 69
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /ultrasonic/center
+      Value: true
+    - Class: rviz_default_plugins/Range
+      Name: Ultrasonic right
+      Enabled: true
+      Alpha: 0.5
+      Buffer Length: 1
+      Color: 243; 181; 69
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /ultrasonic/right
       Value: true
   Enabled: true
   Global Options:
