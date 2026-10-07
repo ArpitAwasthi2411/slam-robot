@@ -95,10 +95,10 @@
 //   Both wheels must spin FORWARD. If one spins backward, flip its MOTOR_DIR.
 // Test 2: roll the robot forward by hand. Both dl and dr must be POSITIVE.
 //   If one is negative, flip its ENC_DIR.
-#define LEFT_MOTOR_DIR    1
+#define LEFT_MOTOR_DIR    -1   // measured 2026-10-07: left wheel ran backward on forward PWM
 #define RIGHT_MOTOR_DIR   1
-#define LEFT_ENC_DIR      1
-#define RIGHT_ENC_DIR     1
+#define LEFT_ENC_DIR      -1   // measured: --push gave negative left ticks rolling forward
+#define RIGHT_ENC_DIR     -1   // measured: right speed negative on forward PWM
 
 // ============================ RC CALIBRATION ==================================
 // Measured 2026-10-07 with rc_reader (FS-i6, two sticks: forward/back on one, left/right on the other)
@@ -126,8 +126,8 @@
 // Calibrate with:  python3 tools/serial_probe.py --calibrate   (robot on blocks)
 #define WHEEL_DIAMETER_MM     125.0f
 #define TICKS_PER_REV         4740.0f
-#define MAX_WHEEL_SPEED_MMS   600.0f  // wheel speed reached at MAX_PWM  (calibrate)
-#define PWM_MIN               25.0f   // PWM where the wheel just starts turning (calibrate)
+#define MAX_WHEEL_SPEED_MMS   493.0f  // wheel speed reached at MAX_PWM  (calibrate)
+#define PWM_MIN               15.0f   // PWM where the wheel just starts turning (calibrate)
 #define KP                    0.15f   // PWM per (mm/s) error
 #define KI                    0.40f   // PWM per (mm) integrated error
 #define INTEG_LIMIT_PWM       60.0f
