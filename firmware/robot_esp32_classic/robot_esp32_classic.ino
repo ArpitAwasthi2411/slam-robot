@@ -15,7 +15,7 @@
  *    Each can be switched off below (USE_IMU / USE_ULTRASONIC / USE_ESTOP_BUTTON).
  *
  * WIRING (classic ESP32 GPIO)
- *   RC CH1 steering 34, CH2 throttle 35
+ *   RC: forward/back channel -> 34, left/right channel -> 35
  *   Left BTS7960  RPWM 25, LPWM 26      Right BTS7960  RPWM 32, LPWM 33
  *   All 4 EN pins: 5V -> e-stop NC contact -> R_EN/L_EN (+10k to GND)
  *   Encoders  left A 18, B 19   right A 4, B 13   (3.3 V)
@@ -54,8 +54,8 @@
 
 // ============================ PINS (classic ESP32) ============================
 #define BOARD_NAME   "ESP32"
-#define RC_STEERING_PIN  34   // CH1  (input-only pin, fine for RC)
-#define RC_THROTTLE_PIN  35   // CH2
+#define RC_STEERING_PIN  35   // left/right stick channel (your wiring: the wire on 35)
+#define RC_THROTTLE_PIN  34   // forward/back stick channel (the wire on 34)
 #define LEFT_RPWM   25
 #define LEFT_LPWM   26
 #define RIGHT_RPWM  32
@@ -101,12 +101,14 @@
 #define RIGHT_ENC_DIR     1
 
 // ============================ RC CALIBRATION ==================================
-#define STEERING_MIN     1105
-#define STEERING_CENTER  1504
-#define STEERING_MAX     2000
-#define THROTTLE_MIN     1212
-#define THROTTLE_CENTER  1710
-#define THROTTLE_MAX     2000
+// Measured 2026-10-07 with rc_reader (FS-i6, two sticks: forward/back on one, left/right on the other)
+#define STEERING_MIN     1113     // stick full RIGHT
+#define STEERING_CENTER  1609
+#define STEERING_MAX     1999     // stick full LEFT
+#define STEERING_REVERSE 1        // 1 = higher pulse means LEFT (yours). 0 = higher means right
+#define THROTTLE_MIN     1034     // full back
+#define THROTTLE_CENTER  1540
+#define THROTTLE_MAX     1996     // full forward
 #define RC_DEADZONE      60
 #define RC_TIMEOUT_US    100000UL   // no pulse for 100 ms = receiver lost
 #define RC_RANGE_MARGIN  100        // pulses this far outside MIN..MAX = receiver failsafe value
@@ -579,6 +581,7 @@ void loop() {
                rcValid(throttle_last, throttle_pw, THROTTLE_MIN, THROTTLE_MAX);
   float thr = rc_ok ? normalizeRC(throttle_pw, THROTTLE_MIN, THROTTLE_CENTER, THROTTLE_MAX) : 0.0f;
   float str = rc_ok ? normalizeRC(steering_pw, STEERING_MIN, STEERING_CENTER, STEERING_MAX) : 0.0f;
+  if (STEERING_REVERSE) str = -str;   // str > 0 must mean turn right
   bool rc_active = (thr != 0.0f || str != 0.0f);
   if (rc_active) last_rc_active_ms = now;
 
