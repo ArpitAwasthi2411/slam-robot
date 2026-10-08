@@ -54,8 +54,15 @@ jobs:
           name: Pathik-apk
           path: out/*.apk
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish release (download link that works on a phone without logging in)
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          name: Pathik ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('1.0.{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            Pathik app for the SLAM robot. Download the APK below on your phone and install it
+            (allow "Install unknown apps" for your browser when Android asks).
           files: out/*.apk
