@@ -114,15 +114,25 @@ def make_handler(backend, index_path, app_dir=None):
             q = parse_qs(url.query)
             try:
                 if url.path in ('/', '/index.html'):
-                    if app_dir:
-                        return self._static('index.html')
+                    if app_dir:                          # the app's relative URLs need the /app/ base
+                        self.send_response(302)
+                        self.send_header('Location', '/app/')
+                        self.send_header('Content-Length', '0')
+                        self.end_headers()
+                        return
                     with open(index_path, 'rb') as f:
                         return self._send(200, f.read(), 'text/html; charset=utf-8')
                 if url.path in ('/classic', '/classic/'):
                     with open(index_path, 'rb') as f:
                         return self._send(200, f.read(), 'text/html; charset=utf-8')
+                if url.path == '/app':
+                    self.send_response(301)
+                    self.send_header('Location', '/app/')
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+                    return
                 if url.path.startswith('/app/'):
-                    return self._static(url.path[len('/app/'):])
+                    return self._static(url.path[len('/app/'):] or 'index.html')
                 if url.path == '/api/ping':
                     return self._optional('ping')
                 if url.path == '/api/telemetry':

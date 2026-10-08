@@ -116,6 +116,7 @@ class SimBackend:
         self.wl = WheelSim(self.tune, gain_mms_per_pwm=2.65, seed=1)
         self.wr = WheelSim(self.tune, gain_mms_per_pwm=2.45, deadband_pwm=14.0, seed=2)
         self.telemetry_on = False
+        self.odom_turns = 0.0
         self.telemetry = TelemetryBuffer()
         self.tests = TestRunner(self.command, self._sample, is_blocked=lambda: self.estop)
         self.scan_pts, self.front = [], float('inf')
@@ -219,13 +220,15 @@ class SimBackend:
                 else:
                     self.v = 0.0
                 self.yaw = wrap_angle(self.yaw + self.w * dt)
+                # wheel odometry over-counts turns by 4 % (as if wheel_separation were set 4 % too small)
+                self.odom_turns += self.w * dt * 1.04 / (2 * math.pi)
             time.sleep(max(0.0, dt - (time.monotonic() - t0)))
 
     # ---------------------------------------------------------- tuning lab
     def _sample(self):
         with self.lock:
             return {'x': round(self.x, 4), 'y': round(self.y, 4), 'yaw': round(self.yaw, 4),
-                    'v': round(self.v, 3), 'w': round(self.w, 3)}
+                    'v': round(self.v, 3), 'w': round(self.w, 3), 'turns': round(self.odom_turns, 4)}
 
     def ping(self):
         return {'ok': True, 'robot': 'slam-robot (simulator)', 'api': 2, 'fw': '2.3-sim',
@@ -288,7 +291,7 @@ class SimBackend:
                 'nav': self.nav.status(),
                 'places': self.places.summary(),
                 'tune': dict(self.tune), 'fw': '2.3-sim', 'telemetry': self.telemetry_on,
-                'turns': None, 'test_running': bool(self.tests.result.get('running')),
+                'turns': round(self.odom_turns, 3), 'sep': SEP, 'test_running': bool(self.tests.result.get('running')),
             }
 
     def get_map(self, since):

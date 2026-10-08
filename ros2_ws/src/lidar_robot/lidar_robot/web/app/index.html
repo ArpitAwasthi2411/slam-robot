@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#221628">
+<meta name="color-scheme" content="dark">
+<title>Pathik</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="band" aria-hidden="true"></div>
+
+<!-- ===================== connect ===================== -->
+<section id="connect" class="screen" aria-labelledby="c-title">
+  <div class="c-hero">
+    <svg class="c-mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#mark"/></svg>
+    <h1 id="c-title">Pathik</h1>
+    <p class="c-sub">Find your robot on this Wi‑Fi to drive it, send it places and tune it.</p>
+  </div>
+  <div class="weave" aria-hidden="true"></div>
+  <div class="c-body">
+    <div class="c-actions">
+      <button id="c-scan" class="btn primary wide">Find robot</button>
+    </div>
+    <p id="c-progress" class="c-progress" role="status"></p>
+    <ul id="c-list" class="c-list" aria-label="Robots"></ul>
+    <form id="c-manual" class="c-manual">
+      <label for="c-addr">Or type its address</label>
+      <div class="row">
+        <input id="c-addr" inputmode="url" autocomplete="off" spellcheck="false" placeholder="10.42.0.1">
+        <button class="btn" type="submit">Connect</button>
+      </div>
+    </form>
+    <details class="c-help">
+      <summary>How do I get the phone and robot on the same network?</summary>
+      <p><b>Robot Wi‑Fi (simplest).</b> Join the Wi‑Fi called <b>SLAM-Robot</b>. Pathik finds the robot at 10.42.0.1.</p>
+      <p><b>Your phone's hotspot.</b> Turn the hotspot on, let the robot join it, then tap Find robot. Pathik scans the hotspot network.</p>
+      <p>Robot not found? Check that <code>robot_up</code> is running on the Pi and that the phone isn't on mobile data only.</p>
+    </details>
+  </div>
+</section>
+
+<!-- ===================== main ===================== -->
+<section id="main" class="screen" hidden>
+  <header class="top">
+    <button id="t-robot" class="t-robot" aria-label="Robot status">
+      <span id="t-dot" class="dot"></span>
+      <span class="t-name"><b>Pathik</b> <span id="t-host">robot</span></span>
+    </button>
+    <span id="t-mode" class="chip">Idle</span>
+  </header>
+
+  <div class="stage">
+    <div class="mapwrap">
+      <canvas id="map" aria-label="Live map. Drag to move, pinch to zoom, long-press to send the robot somewhere."></canvas>
+      <div class="map-tools">
+        <button id="m-follow" class="round on" aria-pressed="true" title="Follow robot">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+        </button>
+      </div>
+      <div id="m-hint" class="m-hint">Long‑press the map to send the robot there</div>
+      <div id="m-banner" class="m-banner" hidden></div>
+    </div>
+
+    <div id="sheet" class="sheet">
+      <!-- Drive -->
+      <div class="panel" id="p-drive" role="tabpanel" aria-labelledby="tab-drive">
+        <div class="drive">
+          <div class="joy-wrap">
+            <canvas id="joy" width="220" height="220" aria-label="Joystick"></canvas>
+          </div>
+          <div class="drive-side">
+            <div class="readout">
+              <div><span class="big" id="d-v">0.00</span><span class="unit">m/s</span></div>
+              <div><span class="big" id="d-w">0.00</span><span class="unit">rad/s</span></div>
+            </div>
+            <label class="slider-label" for="d-speed">Top speed <output id="d-speed-out">60%</output></label>
+            <input id="d-speed" type="range" min="20" max="100" value="60">
+            <div class="row gap">
+              <button id="d-savemap" class="btn">Save map</button>
+              <button id="d-locok" class="btn" hidden>Position OK</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Go -->
+      <div class="panel" id="p-go" role="tabpanel" aria-labelledby="tab-go" hidden>
+        <form id="g-cmd" class="cmd">
+          <input id="g-cmd-in" autocomplete="off" placeholder="Say where to go, e.g. take this to lab 3 then come back">
+          <button class="btn primary" type="submit">Send</button>
+        </form>
+        <p id="g-reply" class="reply" role="status"></p>
+        <div id="g-mission" class="mission" hidden></div>
+        <div class="row between">
+          <h2>Places</h2>
+          <div class="row gap">
+            <button id="g-here" class="btn small">Save place here</button>
+            <button id="g-home" class="btn small">Set home</button>
+          </div>
+        </div>
+        <input id="g-search" class="search" placeholder="Search places" autocomplete="off">
+        <ul id="g-places" class="places"></ul>
+      </div>
+
+      <!-- Lab -->
+      <div class="panel" id="p-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
+        <div class="seg" role="tablist" aria-label="Tuning Lab">
+          <button class="seg-b on" data-lab="wheels" role="tab" aria-selected="true">Wheels</button>
+          <button class="seg-b" data-lab="path" role="tab" aria-selected="false">Path following</button>
+          <button class="seg-b" data-lab="tests" role="tab" aria-selected="false">Drive tests</button>
+        </div>
+
+        <div class="lab" id="lab-wheels">
+          <p class="lede">Speed loop inside the ESP32. Changes apply instantly. Save keeps them after power‑off.</p>
+          <div class="chart-card">
+            <div class="row between">
+              <span class="legend"><i class="lg-t"></i>target <i class="lg-l"></i>left <i class="lg-r"></i>right</span>
+              <label class="switch"><input id="w-live" type="checkbox"><span>Live</span></label>
+            </div>
+            <canvas id="w-chart" class="chart" height="170"></canvas>
+          </div>
+          <div class="row gap">
+            <button id="w-step" class="btn primary grow">Run step test</button>
+            <select id="w-step-v" aria-label="Step speed">
+              <option value="0.15">0.15 m/s</option>
+              <option value="0.2" selected>0.20 m/s</option>
+              <option value="0.3">0.30 m/s</option>
+            </select>
+          </div>
+          <div id="w-metrics" class="metrics" hidden></div>
+          <div id="w-params" class="params"></div>
+          <div class="row gap">
+            <button id="w-save" class="btn primary grow">Save to robot</button>
+            <button id="w-reset" class="btn">Factory values</button>
+          </div>
+        </div>
+
+        <div class="lab" id="lab-path" hidden>
+          <p class="lede">How the robot follows a planned route. Changes apply to the next metre of driving.</p>
+          <div id="f-params" class="params"></div>
+          <div class="row gap">
+            <button id="f-save" class="btn primary grow">Save</button>
+            <button id="f-reset" class="btn">Defaults</button>
+          </div>
+        </div>
+
+        <div class="lab" id="lab-tests" hidden>
+          <p class="lede">Clear space in front of the robot first. Any touch on the remote or the stop button ends a test.</p>
+          <div class="test-pick">
+            <button class="tp on" data-test="straight"><b>Straight line</b><span>Drives forward and measures drift</span></button>
+            <button class="tp" data-test="spin"><b>Spin</b><span>Turns on the spot and checks wheel separation</span></button>
+          </div>
+          <div class="row gap">
+            <label class="mini">Speed <select id="t-speed"></select></label>
+            <label class="mini">Time <select id="t-secs">
+              <option value="2">2 s</option><option value="3" selected>3 s</option><option value="5">5 s</option><option value="8">8 s</option>
+            </select></label>
+          </div>
+          <button id="t-run" class="btn primary wide">Run test</button>
+          <div class="chart-card"><canvas id="t-chart" class="chart" height="200"></canvas></div>
+          <div id="t-metrics" class="metrics" hidden></div>
+        </div>
+      </div>
+
+      <!-- Status -->
+      <div class="panel" id="p-status" role="tabpanel" aria-labelledby="tab-status" hidden>
+        <dl id="s-list" class="stats"></dl>
+        <h2>Activity</h2>
+        <ol id="s-events" class="events"></ol>
+        <div class="row gap">
+          <button id="s-disconnect" class="btn grow">Switch robot</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab on" id="tab-drive" data-tab="drive" role="tab" aria-selected="true">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/></svg>Drive</button>
+    <button class="tab" id="tab-go" data-tab="go" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>Go</button>
+    <button class="tab" id="tab-lab" data-tab="lab" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 5-8 4 5"/><path d="M3 21h18"/></svg>Lab</button>
+    <button class="tab" id="tab-status" data-tab="status" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24"><path d="M4 12h3l2-6 4 12 2-6h5"/></svg>Status</button>
+  </nav>
+
+  <button id="estop" class="estop" aria-label="Emergency stop">STOP</button>
+  <div id="estopped" class="estopped" hidden>
+    <div class="es-in">
+      <b>Stopped</b>
+      <p>Motors are locked. Check the area, then hold to release.</p>
+      <button id="es-release" class="btn hold"><span class="hold-fill"></span><span class="hold-t">Hold to release</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- action sheet for long-press on the map -->
+<div id="action" class="action" hidden>
+  <div class="action-card" role="dialog" aria-modal="true" aria-labelledby="a-title">
+    <h3 id="a-title">This spot</h3>
+    <p id="a-coords" class="muted"></p>
+    <div id="a-route" class="muted"></div>
+    <button id="a-go" class="btn primary wide">Go here</button>
+    <button id="a-save" class="btn wide">Save as a place</button>
+    <button id="a-cancel" class="btn ghost wide">Cancel</button>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 64 64">
+    <path d="M32 4 60 32 32 60 4 32z" fill="#E5487F"/>
+    <path d="M32 14 50 32 32 50 14 32z" fill="#221628"/>
+    <path d="M32 22 42 32 32 42 22 32z" fill="#F4B33C"/>
+    <circle cx="32" cy="32" r="3.5" fill="#2FB7A6"/>
+  </symbol>
+</svg>
+<script src="app.js"></script>
+</body>
+</html>
