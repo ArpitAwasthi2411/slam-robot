@@ -242,7 +242,7 @@ class DashboardNode(Node):
                         'us_mounts': self._us_mounts()},
             'nav': self.nav_status if time.monotonic() - self.nav_status_t < 2.0 else None,
             'tune': rs.get('tune'), 'fw': rs.get('fw'), 'telemetry': rs.get('telemetry'),
-            'turns': odom.get('turns'), 'test_running': bool(self.tests.result.get('running')),
+            'turns': odom.get('turns'), 'sep': rs.get('sep'), 'test_running': bool(self.tests.result.get('running')),
             'places': self.places,
         }
 
@@ -273,7 +273,8 @@ class DashboardNode(Node):
         odom = self.robot_status.get('odom', {})
         if not p:
             return None
-        return {'x': p['x'], 'y': p['y'], 'yaw': p['yaw'], 'v': odom.get('v'), 'w': odom.get('w')}
+        return {'x': p['x'], 'y': p['y'], 'yaw': p['yaw'], 'v': odom.get('v'), 'w': odom.get('w'),
+                'turns': odom.get('turns')}
 
     def test_start(self, req):
         if self.estop:

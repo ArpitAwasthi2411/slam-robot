@@ -16,14 +16,14 @@ from collections import deque
 
 # key: (min, max, default, unit, help)
 FOLLOWER_RANGES = {
-    'max_linear': (0.05, 0.60, 0.22, 'm/s', 'cruise speed'),
-    'max_angular': (0.20, 2.00, 0.60, 'rad/s', 'fastest turn'),
+    'max_linear': (0.05, 0.60, 0.22, 'm/s', 'speed on straight stretches'),
+    'max_angular': (0.20, 2.00, 0.60, 'rad/s', 'limit for turning speed'),
     'lookahead': (0.15, 1.50, 0.50, 'm', 'bigger = smoother & straighter, smaller = tighter'),
-    'k_angular': (0.20, 4.00, 1.00, '', 'steering gain: lower if it weaves'),
-    'linear_accel': (0.05, 2.00, 0.30, 'm/s²', 'speed-up / slow-down rate'),
-    'angular_accel': (0.20, 5.00, 1.20, 'rad/s²', 'how fast turns start'),
-    'rotate_in_place_above': (0.30, 3.00, 1.20, 'rad', 'turn on the spot above this heading error'),
-    'rotate_exit_below': (0.05, 1.50, 0.30, 'rad', '...until below this'),
+    'k_angular': (0.20, 4.00, 1.00, '', 'lower if it weaves, higher if it turns lazily'),
+    'linear_accel': (0.05, 2.00, 0.30, 'm/s²', 'how gently it speeds up and slows down'),
+    'angular_accel': (0.20, 5.00, 1.20, 'rad/s²', 'how gently turns start'),
+    'rotate_in_place_above': (0.30, 3.00, 1.20, 'rad', 'heading error that makes it stop and turn on the spot'),
+    'rotate_exit_below': (0.05, 1.50, 0.30, 'rad', 'it drives on once the error is below this'),
 }
 WHEEL_RANGES = {
     'kp': (0.0, 2.0, 0.15, 'PWM per mm/s', 'proportional gain'),
@@ -120,7 +120,8 @@ class TestRunner:
     """Run one scripted motion in a background thread and record what happened.
 
     send_cmd(v, w)    command the base (teleop priority)
-    get_sample()      -> dict(x, y, yaw, v, w) or None
+    get_sample()      -> dict(x, y, yaw, v, w, turns) or None   (turns = wheel-odometry turn count)
+    samples: [t, x, y, yaw, v, w, cmd_v, cmd_w, turns]
     is_blocked()      -> True stops the test (e-stop, RC override...)
     """
     KINDS = ('straight', 'spin')
@@ -184,7 +185,7 @@ class TestRunner:
                 with self.lock:
                     self.result['samples'].append([round(t, 3), s.get('x'), s.get('y'), s.get('yaw'),
                                                    s.get('v'), s.get('w'), v if moving else 0.0,
-                                                   w if moving else 0.0])
+                                                   w if moving else 0.0, s.get('turns')])
             time.sleep(self.dt)
         self.send_cmd(0.0, 0.0)
         with self.lock:
