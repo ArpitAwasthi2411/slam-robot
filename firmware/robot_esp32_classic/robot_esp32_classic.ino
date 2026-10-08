@@ -1,5 +1,5 @@
 /*
- * robot_esp32_classic  v2.2  —  CLASSIC ESP32 ONLY (ESP32-WROOM-32 DevKit)
+ * robot_esp32_classic  v2.3  —  CLASSIC ESP32 ONLY (ESP32-WROOM-32 DevKit)
  * -----------------------------------------------------------------------------
  *  Same firmware as firmware/robot_esp32 v2.2, with the ESP32-S3 parts removed.
  *  Arduino IDE: Tools > Board > "ESP32 Dev Module", Upload speed 115200 if uploads fail.
@@ -33,6 +33,11 @@
  *  Pi -> ESP32
  *    V,<left_mm_s>,<right_mm_s>   P,<left_pwm>,<right_pwm>   S stop   E e-stop   R release
  *    C print RC pulses   G re-calibrate gyro   ? print config
+ *  v2.3 tuning (used by the mobile app's Tuning Lab):
+ *    K,<kp>,<ki>,<pwm_min>,<max_mms>,<accel_mms2>   set speed-loop gains live
+ *    W  save them to flash (kept after power-off)      X  back to factory defaults
+ *    T,1 / T,0  stream / stop  SPD,<tgtL>,<measL>,<pwmL>,<tgtR>,<measR>,<pwmR>  (50 Hz)
+ *    ESP32 -> Pi:  INFO,TUNE,<kp>,<ki>,<pwm_min>,<max_mms>,<accel>
  * -----------------------------------------------------------------------------
  */
 
@@ -49,8 +54,9 @@
 #endif
 
 #define LINK Serial               // classic ESP32: USB-UART chip -> /dev/ttyUSB0 on the Pi
-#define FW_VERSION "2.2"
+#define FW_VERSION "2.3"
 #include <Wire.h>
+#include <Preferences.h>     // tuning values survive reboot (ESP32 flash)
 
 // ============================ PINS (classic ESP32) ============================
 #define BOARD_NAME   "ESP32"
@@ -125,11 +131,13 @@
 // ============================ SPEED LOOP ======================================
 // Calibrate with:  python3 tools/serial_probe.py --calibrate   (robot on blocks)
 #define WHEEL_DIAMETER_MM     125.0f
-#define TICKS_PER_REV         4740.0f
-#define MAX_WHEEL_SPEED_MMS   493.0f  // wheel speed reached at MAX_PWM  (calibrate)
-#define PWM_MIN               15.0f   // PWM where the wheel just starts turning (calibrate)
-#define KP                    0.15f   // PWM per (mm/s) error
-#define KI                    0.40f   // PWM per (mm) integrated error
+#define TICKS_PER_REV         4970.0f // measured with serial_probe --push (avg of both wheels)
+// Defaults below are only used until you tune from the app ("K" command) and save ("W").
+#define DEF_MAX_WHEEL_SPEED_MMS 493.0f  // wheel speed reached at MAX_PWM  (calibrate)
+#define DEF_PWM_MIN           15.0f   // PWM where the wheel just starts turning (calibrate)
+#define DEF_KP                0.15f   // PWM per (mm/s) error
+#define DEF_KI                0.40f   // PWM per (mm) integrated error
+#define DEF_ACCEL_MMS2        600.0f  // wheel-speed ramp (mm/s^2); 0 = no ramp (jerky)
 #define INTEG_LIMIT_PWM       60.0f
 #define SPEED_FILTER_ALPHA    0.5f
 
@@ -154,8 +162,16 @@ struct Motor {
 Motor motorL = {LEFT_RPWM, LEFT_LPWM, 0, 1, LEFT_MOTOR_DIR};
 Motor motorR = {RIGHT_RPWM, RIGHT_LPWM, 2, 3, RIGHT_MOTOR_DIR};
 
+// live-tunable (K command), saved to flash with W
+float g_kp = DEF_KP, g_ki = DEF_KI, g_pwm_min = DEF_PWM_MIN;
+float g_max_mms = DEF_MAX_WHEEL_SPEED_MMS, g_accel = DEF_ACCEL_MMS2;
+bool telemetry = false;            // T,1: stream SPD lines (target/measured/pwm per wheel)
+int last_pwm_l = 0, last_pwm_r = 0;
+Preferences prefs;
+
 struct WheelLoop {
-  float target_mms = 0;
+  float cmd_mms = 0;     // what the Pi asked for
+  float target_mms = 0;  // ramped toward cmd_mms at g_accel
   float speed_mms = 0;   // filtered measurement
   float integ = 0;       // mm
 };
@@ -422,18 +438,63 @@ int speedLoop(WheelLoop &w, float dt_s) {
   }
   float err = w.target_mms - w.speed_mms;
   w.integ += err * dt_s;
-  float ilim = INTEG_LIMIT_PWM / KI;
+  float ilim = INTEG_LIMIT_PWM / fmaxf(g_ki, 0.01f);
   w.integ = constrain(w.integ, -ilim, ilim);
 
   float sgn = w.target_mms > 0 ? 1.0f : -1.0f;
-  float ff = PWM_MIN + (fabsf(w.target_mms) / MAX_WHEEL_SPEED_MMS) * (MAX_PWM - PWM_MIN);
-  float out = sgn * ff + KP * err + KI * w.integ;
+  float ff = g_pwm_min + (fabsf(w.target_mms) / g_max_mms) * (MAX_PWM - g_pwm_min);
+  float out = sgn * ff + g_kp * err + g_ki * w.integ;
   // never let the PI term reverse the wheel against the commanded direction
   if (out * sgn < 0) out = 0;
   return (int)constrain(out, -(float)MAX_PWM, (float)MAX_PWM);
 }
 
+// Ramp both wheel targets toward the commanded speeds together, keeping their ratio
+// (so the curve the Pi asked for is kept while accelerating) -> no jerks.
+void rampTargets(float dt_s) {
+  float dl = loopL.cmd_mms - loopL.target_mms, dr = loopR.cmd_mms - loopR.target_mms;
+  float big = fmaxf(fabsf(dl), fabsf(dr));
+  float step = g_accel * dt_s;
+  if (g_accel <= 0 || big <= step) {
+    loopL.target_mms = loopL.cmd_mms;
+    loopR.target_mms = loopR.cmd_mms;
+  } else {
+    float k = step / big;
+    loopL.target_mms += dl * k;
+    loopR.target_mms += dr * k;
+  }
+}
+
+void printTune() {
+  LINK.printf("INFO,TUNE,%.4f,%.4f,%.1f,%.0f,%.0f\n", g_kp, g_ki, g_pwm_min, g_max_mms, g_accel);
+}
+
+void loadTune() {
+  prefs.begin("tune", true);
+  g_kp = prefs.getFloat("kp", DEF_KP);
+  g_ki = prefs.getFloat("ki", DEF_KI);
+  g_pwm_min = prefs.getFloat("pmin", DEF_PWM_MIN);
+  g_max_mms = prefs.getFloat("vmax", DEF_MAX_WHEEL_SPEED_MMS);
+  g_accel = prefs.getFloat("acc", DEF_ACCEL_MMS2);
+  prefs.end();
+}
+
+void saveTune() {
+  prefs.begin("tune", false);
+  prefs.putFloat("kp", g_kp);
+  prefs.putFloat("ki", g_ki);
+  prefs.putFloat("pmin", g_pwm_min);
+  prefs.putFloat("vmax", g_max_mms);
+  prefs.putFloat("acc", g_accel);
+  prefs.end();
+}
+
 // ============================ SERIAL RX =======================================
+float parseFloat(const char *&p) {
+  while (*p == ',' || *p == ' ') p++;
+  return strtof(p, (char **)&p);
+}
+
 long parseLong(const char *&p) {
   while (*p == ',' || *p == ' ') p++;
   return strtol(p, (char **)&p, 10);
@@ -444,8 +505,8 @@ void handleLine(char *line) {
   switch (line[0]) {
     case 'V': {
       long l = parseLong(p), r = parseLong(p);
-      loopL.target_mms = constrain(l, -2000L, 2000L);
-      loopR.target_mms = constrain(r, -2000L, 2000L);
+      loopL.cmd_mms = constrain(l, -2000L, 2000L);
+      loopR.cmd_mms = constrain(r, -2000L, 2000L);
       raw_pwm_mode = false;
       have_cmd = true;
       last_cmd_ms = millis();
@@ -464,8 +525,35 @@ void handleLine(char *line) {
     case 'S':
       have_cmd = false;
       loopL.target_mms = loopR.target_mms = 0;
+      loopL.cmd_mms = loopR.cmd_mms = 0;
       stopMotors();
       break;
+    case 'K': {   // K,kp,ki,pwm_min,max_mms,accel   (live tuning; W saves to flash)
+      float kp = parseFloat(p), ki = parseFloat(p), pmin = parseFloat(p), vmax = parseFloat(p), acc = parseFloat(p);
+      g_kp = constrain(kp, 0.0f, 2.0f);
+      g_ki = constrain(ki, 0.0f, 5.0f);
+      g_pwm_min = constrain(pmin, 0.0f, 120.0f);
+      g_max_mms = constrain(vmax, 100.0f, 2000.0f);
+      g_accel = constrain(acc, 0.0f, 5000.0f);
+      loopL.integ = loopR.integ = 0;
+      printTune();
+      break;
+    }
+    case 'W':
+      saveTune();
+      LINK.printf("INFO,TUNE_SAVED\n");
+      printTune();
+      break;
+    case 'X':     // factory defaults (and clear flash)
+      prefs.begin("tune", false); prefs.clear(); prefs.end();
+      loadTune();
+      printTune();
+      break;
+    case 'T': {   // T,1 = stream SPD telemetry, T,0 = stop
+      long on = parseLong(p);
+      telemetry = on != 0;
+      break;
+    }
     case 'E':
       estop_latched = true;
       have_cmd = false;
@@ -489,8 +577,9 @@ void handleLine(char *line) {
       break;
     }
     case '?':
-      LINK.printf("INFO,robot_esp32 v%s %s core%d mm_per_tick=%.5f max_mms=%.0f pwm_min=%.0f kp=%.3f ki=%.3f\n",
-                  FW_VERSION, BOARD_NAME, ESP_ARDUINO_VERSION_MAJOR, MM_PER_TICK, MAX_WHEEL_SPEED_MMS, PWM_MIN, KP, KI);
+      LINK.printf("INFO,robot_esp32 v%s %s core%d mm_per_tick=%.5f max_mms=%.0f pwm_min=%.0f kp=%.3f ki=%.3f accel=%.0f\n",
+                  FW_VERSION, BOARD_NAME, ESP_ARDUINO_VERSION_MAJOR, MM_PER_TICK, g_max_mms, g_pwm_min, g_kp, g_ki, g_accel);
+      printTune();
       LINK.printf("INFO,sensors imu=%s(who=0x%02X bias=%.1f) ultrasonic=%s estop_button=%s(%s)\n",
                   USE_IMU ? (imu_ok ? "ok" : "FAIL") : "off", imu_whoami, gyro_bias_z,
                   USE_ULTRASONIC ? "on" : "off", USE_ESTOP_BUTTON ? "on" : "off",
@@ -546,8 +635,10 @@ void setup() {
   usInit();
   delay(300);
   imuInit();                       // calibrates the gyro: keep the robot still at power-up
+  loadTune();
   last_control_ms = millis();
   LINK.printf("INFO,READY,robot_esp32 v%s %s\n", FW_VERSION, BOARD_NAME);
+  printTune();
 }
 
 // ============================ LOOP ============================================
@@ -590,35 +681,51 @@ void loop() {
   bool pi_fresh = have_cmd && (now - last_cmd_ms) < CMD_TIMEOUT_MS;
   bool rc_holdoff = last_rc_active_ms != 0 && (now - last_rc_active_ms) < RC_HOLDOFF_MS;
 
+  // anything other than closed-loop Pi driving: next Pi command ramps up from standstill
+  bool closed_loop = !estop_latched && !rc_active && pi_fresh && !rc_holdoff && !raw_pwm_mode;
+  if (!closed_loop) {
+    loopL.target_mms = loopR.target_mms = 0;
+    if (!pi_fresh) loopL.cmd_mms = loopR.cmd_mms = 0;
+  }
+
   if (estop_latched) {
     mode = MODE_ESTOP;
     stopMotors();
+    last_pwm_l = last_pwm_r = 0;
     loopL.integ = loopR.integ = 0;
     have_cmd = false;
   } else if (rc_active) {
     mode = MODE_RC;
     float ls = constrain(thr + str, -1.0f, 1.0f);
     float rs = constrain(thr - str, -1.0f, 1.0f);
-    setMotor(motorL, (int)(ls * MAX_PWM));
-    setMotor(motorR, (int)(rs * MAX_PWM));
+    last_pwm_l = (int)(ls * MAX_PWM);
+    last_pwm_r = (int)(rs * MAX_PWM);
+    setMotor(motorL, last_pwm_l);
+    setMotor(motorR, last_pwm_r);
     loopL.integ = loopR.integ = 0;
   } else if (pi_fresh && !rc_holdoff) {
     mode = MODE_PI;
     if (raw_pwm_mode) {
+      last_pwm_l = raw_pwm_l;
+      last_pwm_r = raw_pwm_r;
       setMotor(motorL, raw_pwm_l);
       setMotor(motorR, raw_pwm_r);
     } else {
       if (frontBlocked()) {
         // low-level safety net under the Pi: remove the forward part, keep turning in place
-        float avg = 0.5f * (loopL.target_mms + loopR.target_mms);
-        if (avg > 0) { loopL.target_mms -= avg; loopR.target_mms -= avg; }
+        float avg = 0.5f * (loopL.cmd_mms + loopR.cmd_mms);
+        if (avg > 0) { loopL.cmd_mms -= avg; loopR.cmd_mms -= avg; }
       }
-      setMotor(motorL, speedLoop(loopL, dt_s));
-      setMotor(motorR, speedLoop(loopR, dt_s));
+      rampTargets(dt_s);
+      last_pwm_l = speedLoop(loopL, dt_s);
+      last_pwm_r = speedLoop(loopR, dt_s);
+      setMotor(motorL, last_pwm_l);
+      setMotor(motorR, last_pwm_r);
     }
   } else {
     mode = MODE_IDLE;
     stopMotors();
+    last_pwm_l = last_pwm_r = 0;
     loopL.integ = loopR.integ = 0;
     if (!pi_fresh) have_cmd = false;
   }
@@ -639,6 +746,12 @@ void loop() {
     }
     report_dl = report_dr = 0;
     report_dt = 0;
+    if (telemetry && LINK.availableForWrite() >= 48) {
+      // per-wheel: target (ramped) mm/s, measured mm/s, PWM actually applied
+      LINK.printf("SPD,%d,%d,%d,%d,%d,%d\n",
+                  (int)loopL.target_mms, (int)loopL.speed_mms, last_pwm_l,
+                  (int)loopR.target_mms, (int)loopR.speed_mms, last_pwm_r);
+    }
   } else if (report_dt > 1000) {
     // nobody has been reading for >1 s (Pi rebooting/bridge restarting): drop the backlog
     // instead of sending one huge stale packet later
