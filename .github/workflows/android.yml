@@ -1,0 +1,58 @@
+name: Pathik APK
+
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', 'ros2_ws/src/lidar_robot/lidar_robot/web/app/**', '.github/workflows/android.yml']
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # attach the APK to a GitHub Release on v* tags
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Release keystore (optional)
+        env:
+          KS_B64: ${{ secrets.PATHIK_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/pathik.jks"
+            echo "PATHIK_KEYSTORE=$RUNNER_TEMP/pathik.jks" >> "$GITHUB_ENV"
+            echo "Signing with the release keystore"
+          else
+            echo "No keystore secret: signing with a debug key (installable, but updates need the same key)"
+          fi
+
+      - name: Build APK
+        working-directory: android
+        env:
+          PATHIK_KEYSTORE_PASSWORD: ${{ secrets.PATHIK_KEYSTORE_PASSWORD }}
+          PATHIK_KEY_ALIAS: ${{ secrets.PATHIK_KEY_ALIAS }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Name the APK
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk "out/Pathik-${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pathik-apk
+          path: out/*.apk
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.apk
