@@ -58,7 +58,13 @@ class NavigatorNode(Node):
         d('soft_radius', 0.60)
         d('allow_unknown', False)
         d('max_linear', 0.22)
-        d('max_angular', 0.9)
+        d('max_angular', 0.6)
+        d('lookahead', 0.50)
+        d('k_angular', 1.0)
+        d('linear_accel', 0.3)
+        d('angular_accel', 1.2)
+        d('rotate_in_place_above', 1.2)
+        d('rotate_exit_below', 0.30)
         d('stop_distance', 0.38)
         d('slow_distance', 0.80)
         d('robot_half_width', 0.25)
@@ -87,6 +93,10 @@ class NavigatorNode(Node):
             self.places,
             self.planner_params,
             FollowerParams(max_linear=float(g('max_linear')), max_angular=float(g('max_angular')),
+                           lookahead=float(g('lookahead')), k_angular=float(g('k_angular')),
+                           linear_accel=float(g('linear_accel')), angular_accel=float(g('angular_accel')),
+                           rotate_in_place_above=float(g('rotate_in_place_above')),
+                           rotate_exit_below=float(g('rotate_exit_below')),
                            stop_distance=float(g('stop_distance')), slow_distance=float(g('slow_distance'))),
             parser=parser, dwell_s=float(g('dwell_s')), auto_return_s=float(g('auto_return_s')),
             max_replans=int(g('max_replans')))

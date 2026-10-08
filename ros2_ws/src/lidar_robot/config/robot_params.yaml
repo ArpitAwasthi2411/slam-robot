@@ -47,7 +47,14 @@ navigator:
     soft_radius: 0.60            # prefer this much clearance where possible (corridor centre)
     allow_unknown: false         # plan only through mapped free space
     max_linear: 0.22
-    max_angular: 0.9
+    max_angular: 0.6             # rad/s
+    # path following feel (smooth vs. tight):
+    lookahead: 0.50              # m: bigger = smoother/straighter, smaller = follows curves tighter
+    k_angular: 1.0               # turning gain: lower if it weaves, higher if it's lazy
+    linear_accel: 0.3            # m/s^2
+    angular_accel: 1.2           # rad/s^2: lower = gentler turn starts
+    rotate_in_place_above: 1.2   # rad (~70 deg): turn on the spot above this heading error
+    rotate_exit_below: 0.30      # rad (~17 deg): ...until it's below this, then drive
     stop_distance: 0.38
     slow_distance: 0.80
     robot_half_width: 0.25
