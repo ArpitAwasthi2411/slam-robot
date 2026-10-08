@@ -1,0 +1,44 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.arpit.pathik'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.arpit.pathik'
+        minSdk 26
+        targetSdk 34
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int)
+        versionName '1.0.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '0')
+    }
+
+    signingConfigs {
+        release {
+            // CI: secrets PATHIK_KEYSTORE_B64 / _PASSWORD / _ALIAS (see android/README.md)
+            def ks = System.getenv('PATHIK_KEYSTORE')
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv('PATHIK_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('PATHIK_KEY_ALIAS') ?: 'pathik'
+                keyPassword System.getenv('PATHIK_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // without the keystore secrets the release is signed with the debug key (still installable)
+            signingConfig System.getenv('PATHIK_KEYSTORE') ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+    // The app UI lives in the ROS package (the robot serves the same files at http://<robot>:8080/app/).
+    // Its parent folder becomes the APK's assets, so the app is at file:///android_asset/app/index.html.
+    sourceSets {
+        main { assets.srcDirs += ["$rootDir/../ros2_ws/src/lidar_robot/lidar_robot/web"] }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

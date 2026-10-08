@@ -84,7 +84,11 @@ rviz2 -d rviz/robot.rviz          # use the "2D Goal Pose" tool to send the robo
 xdg-open http://169.254.1.2:8080  # web dashboard: joystick, e-stop, map, click-to-goal, save map
 ```
 
-No robot? `python3 tools/dashboard_sim.py` runs the dashboard against a simulated robot.
+**Phone app (Pathik):** drive, send the robot to places, and tune it from Android: see
+[docs/mobile_app.md](docs/mobile_app.md). The APK is built by GitHub Actions; the same app also opens in any
+browser at `http://<robot>:8080`.
+
+No robot? `python3 tools/dashboard_sim.py` runs the app against a simulated robot.
 
 ## Status
 
@@ -97,7 +101,9 @@ No robot? `python3 tools/dashboard_sim.py` runs the dashboard against a simulate
       ([docs/navigation.md](docs/navigation.md)), tested in simulation
 - [x] Localization on a saved map (Cartographer pure localization + operator confirmation)
 - [x] Firmware v2.2 + Pi support for MPU-6050, 3× ultrasonic, e-stop button (wiring: hardware/sensors.md)
-- [ ] Encoder odometry verified on hardware (calibration: [docs/calibration.md](docs/calibration.md))
+- [x] Pathik mobile app + Tuning Lab (live PID, step/straight/spin tests), firmware v2.3
+- [x] Encoder odometry verified on hardware (directions, ticks per rev, 50 Hz into Cartographer)
+- [ ] Wheel separation and speed-loop tuning with the Tuning Lab (calibration: [docs/calibration.md](docs/calibration.md))
 - [ ] Navigator verified on the real robot and floor
 - [ ] LLM error recovery + campus app — see [docs/roadmap.md](docs/roadmap.md)
 
