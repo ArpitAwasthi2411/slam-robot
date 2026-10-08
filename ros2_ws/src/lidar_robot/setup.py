@@ -1,3 +1,4 @@
+import os
 from glob import glob
 from setuptools import setup
 
@@ -5,16 +6,17 @@ package_name = 'lidar_robot'
 
 setup(
     name=package_name,
-    version='0.3.0',
+    version='0.4.0',
     packages=[package_name],
-    package_data={package_name: ['web/*']},
+    package_data={package_name: ['web/*.html', 'web/app/*']},
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.py')),
         ('share/' + package_name + '/config', glob('config/*')),
         ('share/' + package_name + '/rviz', glob('rviz/*.rviz')),
-        ('share/' + package_name + '/web', glob('lidar_robot/web/*')),
+        ('share/' + package_name + '/web', [f for f in glob('lidar_robot/web/*') if os.path.isfile(f)]),
+        ('share/' + package_name + '/web/app', [f for f in glob('lidar_robot/web/app/*') if os.path.isfile(f)]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

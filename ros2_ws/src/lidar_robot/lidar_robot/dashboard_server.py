@@ -9,10 +9,18 @@ The server knows nothing about ROS. It talks to a `backend` object:
     backend.cancel_goal()
     backend.save_map(name) -> str
     backend.nav_request(dict) -> dict     (navigator: places, routes, missions, commands)
+  Tuning Lab / mobile app (optional; 404 if the backend lacks them):
+    backend.ping() -> dict
+    backend.esp_command(dict) -> dict     ({"op": "tune"|"save"|"defaults"|"telemetry"|"query"})
+    backend.get_telemetry(since) -> dict
+    backend.test_start(dict) / test_stop() / test_status(since) -> dict
+The mobile app (web/app/) is served at / ; the classic dashboard at /classic.
+Every response carries CORS headers so the APK (file:// origin) can call the API.
 The ROS node (dashboard.py) and the offline simulator (tools/dashboard_sim.py)
 both implement this interface.
 """
 import json
+import mimetypes
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,7 +44,18 @@ def _find_index_html():
     raise FileNotFoundError('dashboard index.html not found in: ' + ', '.join(candidates))
 
 
-def make_handler(backend, index_path):
+def _find_app_dir():
+    d = os.path.join(os.path.dirname(_find_index_html()), 'app')
+    return d if os.path.isfile(os.path.join(d, 'index.html')) else None
+
+
+STATIC_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
+                '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
+                '.json': 'application/json', '.webmanifest': 'application/manifest+json',
+                '.ico': 'image/x-icon', '.woff2': 'font/woff2'}
+
+
+def make_handler(backend, index_path, app_dir=None):
     class Handler(BaseHTTPRequestHandler):
         server_version = 'RobotDashboard/1.0'
 
@@ -52,6 +71,7 @@ def make_handler(backend, index_path):
             self.send_header('Content-Type', ctype)
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-store')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(body)
 
@@ -63,12 +83,52 @@ def make_handler(backend, index_path):
                 raise ValueError('body too large')
             return json.loads(self.rfile.read(n) or b'{}')
 
+        def do_OPTIONS(self):                    # CORS preflight from the APK
+            self.send_response(204)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.send_header('Access-Control-Max-Age', '600')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+
+        def _static(self, rel):
+            if not app_dir:
+                return self._send(404, {'error': 'app not installed'})
+            full = os.path.realpath(os.path.join(app_dir, rel))
+            if not full.startswith(os.path.realpath(app_dir) + os.sep) or not os.path.isfile(full):
+                return self._send(404, {'error': 'not found'})
+            ext = os.path.splitext(full)[1].lower()
+            ctype = STATIC_TYPES.get(ext) or mimetypes.guess_type(full)[0] or 'application/octet-stream'
+            with open(full, 'rb') as f:
+                return self._send(200, f.read(), ctype)
+
+        def _optional(self, name, *args):
+            fn = getattr(backend, name, None)
+            if fn is None:
+                return self._send(404, {'error': f'{name} not supported by this backend'})
+            return self._send(200, fn(*args))
+
         def do_GET(self):
             url = urlparse(self.path)
+            q = parse_qs(url.query)
             try:
                 if url.path in ('/', '/index.html'):
+                    if app_dir:
+                        return self._static('index.html')
                     with open(index_path, 'rb') as f:
                         return self._send(200, f.read(), 'text/html; charset=utf-8')
+                if url.path in ('/classic', '/classic/'):
+                    with open(index_path, 'rb') as f:
+                        return self._send(200, f.read(), 'text/html; charset=utf-8')
+                if url.path.startswith('/app/'):
+                    return self._static(url.path[len('/app/'):])
+                if url.path == '/api/ping':
+                    return self._optional('ping')
+                if url.path == '/api/telemetry':
+                    return self._optional('get_telemetry', int(q.get('since', ['0'])[0]))
+                if url.path == '/api/test':
+                    return self._optional('test_status', int(q.get('since', ['0'])[0]))
                 if url.path == '/api/state':
                     return self._send(200, backend.get_state())
                 if url.path == '/api/map':
@@ -95,6 +155,12 @@ def make_handler(backend, index_path):
                     return self._send(200, backend.nav_request(body))
                 elif url.path == '/api/save_map':
                     return self._send(200, {'ok': True, 'saved': backend.save_map(str(body.get('name', 'map')))})
+                elif url.path == '/api/esp':
+                    return self._optional('esp_command', body)
+                elif url.path == '/api/test':
+                    if body.get('action') == 'stop':
+                        return self._optional('test_stop')
+                    return self._optional('test_start', body)
                 else:
                     return self._send(404, {'error': 'not found'})
                 return self._send(200, {'ok': True})
@@ -108,7 +174,8 @@ def make_handler(backend, index_path):
 
 class DashboardServer:
     def __init__(self, backend, host='0.0.0.0', port=8080):
-        self.httpd = ThreadingHTTPServer((host, port), make_handler(backend, _find_index_html()))
+        self.httpd = ThreadingHTTPServer((host, port),
+                                         make_handler(backend, _find_index_html(), _find_app_dir()))
         self.httpd.daemon_threads = True
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
 
