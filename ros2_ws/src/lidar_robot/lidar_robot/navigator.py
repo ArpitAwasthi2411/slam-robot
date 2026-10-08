@@ -99,7 +99,8 @@ class NavigatorNode(Node):
                            rotate_exit_below=float(g('rotate_exit_below')),
                            stop_distance=float(g('stop_distance')), slow_distance=float(g('slow_distance'))),
             parser=parser, dwell_s=float(g('dwell_s')), auto_return_s=float(g('auto_return_s')),
-            max_replans=int(g('max_replans')))
+            max_replans=int(g('max_replans')),
+            tuning_path=os.path.join(os.path.dirname(g('places_file')), 'tuning.json'))
         self.core.localized = not bool(g('require_localization_confirm'))
         self.core_lock = threading.RLock()       # callbacks + map worker thread share the core
         self.topic_estop = False

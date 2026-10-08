@@ -29,6 +29,9 @@ from tf2_ros import Buffer, TransformListener, TransformException
 from lidar_robot.dashboard_server import DashboardServer
 from lidar_robot.kinematics import yaw_from_quaternion, quaternion_from_yaw, wrap_angle
 from lidar_robot.mapsave import save_map
+from lidar_robot.tuning import TelemetryBuffer, TestRunner, ranges_for_app, WHEEL_RANGES
+
+APP_API = 2
 
 
 class DashboardNode(Node):
@@ -80,6 +83,11 @@ class DashboardNode(Node):
         self.goal_pub = self.create_publisher(PoseStamped, 'goal_pose', 10)
         self.cancel_pub = self.create_publisher(Empty, 'goal_cancel', 10)
         self.nav_req_pub = self.create_publisher(String, 'navigator/request', 10)
+        self.esp_cmd_pub = self.create_publisher(String, 'robot/esp_cmd', 10)
+        self.telemetry = TelemetryBuffer()
+        self.create_subscription(String, 'robot/wheel_telemetry', self._on_wheel_telemetry, 20)
+        self.tests = TestRunner(self._test_cmd, self._test_sample,
+                                is_blocked=lambda: self.estop or self.robot_status.get('esp_mode') == 'RC')
         # NOTE: never publish /estop at startup: a restarted dashboard must not release an e-stop
 
         # volatile+reliable matches both cartographer (volatile) and map_server (latched)
@@ -138,6 +146,17 @@ class DashboardNode(Node):
             self.estop = bool(self.robot_status.get('estop', False))
         except ValueError:
             pass
+
+    def _on_wheel_telemetry(self, msg):
+        try:
+            batch = json.loads(msg.data).get('s', [])
+        except ValueError:
+            return
+        now = time.monotonic()
+        n = len(batch)
+        for i, smp in enumerate(batch):       # 50 Hz samples arrive in 10 Hz batches: spread the stamps
+            if isinstance(smp, list) and len(smp) == 6:
+                self.telemetry.add(smp, now - (n - 1 - i) * 0.02)
 
     def _on_goal_status(self, msg):
         try:
@@ -222,8 +241,50 @@ class DashboardNode(Node):
             'sensors': {'us': rs.get('us'), 'imu_ok': rs.get('imu_ok'), 'yaw_source': rs.get('yaw_source'),
                         'us_mounts': self._us_mounts()},
             'nav': self.nav_status if time.monotonic() - self.nav_status_t < 2.0 else None,
+            'tune': rs.get('tune'), 'fw': rs.get('fw'), 'telemetry': rs.get('telemetry'),
+            'turns': odom.get('turns'), 'test_running': bool(self.tests.result.get('running')),
             'places': self.places,
         }
+
+    # ------------------------------------------------------------ mobile app / Tuning Lab
+    def ping(self):
+        rs = self.robot_status
+        return {'ok': True, 'robot': 'slam-robot', 'api': APP_API, 'fw': rs.get('fw'),
+                'host': os.uname().nodename, 'nav_mode': self.nav_mode,
+                'wheel_ranges': ranges_for_app(WHEEL_RANGES)}
+
+    def esp_command(self, req):
+        op = req.get('op')
+        if op not in ('tune', 'save', 'defaults', 'telemetry', 'query'):
+            raise ValueError('unknown op')
+        self.esp_cmd_pub.publish(String(data=json.dumps(req)))
+        return {'ok': True}
+
+    def get_telemetry(self, since):
+        return self.telemetry.since(since)
+
+    def _test_cmd(self, v, w):
+        t = Twist()
+        t.linear.x, t.angular.z = v, w
+        self.cmd_pub.publish(t)
+
+    def _test_sample(self):
+        p = self._pose()
+        odom = self.robot_status.get('odom', {})
+        if not p:
+            return None
+        return {'x': p['x'], 'y': p['y'], 'yaw': p['yaw'], 'v': odom.get('v'), 'w': odom.get('w')}
+
+    def test_start(self, req):
+        if self.estop:
+            raise ValueError('release the e-stop first')
+        return self.tests.start(req)
+
+    def test_stop(self):
+        return self.tests.stop()
+
+    def test_status(self, since):
+        return self.tests.status(since)
 
     def get_map(self, since):
         with self.lock:

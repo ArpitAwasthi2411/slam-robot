@@ -27,6 +27,10 @@ from lidar_robot.mapsave import save_map                          # noqa: E402
 from lidar_robot.navigator_core import NavigatorCore              # noqa: E402
 from lidar_robot.places import PlaceStore                         # noqa: E402
 from lidar_robot.planner import GridMap                           # noqa: E402
+from lidar_robot.tuning import (TelemetryBuffer, TestRunner, WheelSim, WHEEL_RANGES,  # noqa: E402
+                                clamp_values, ranges_for_app)
+
+SEP = 0.30                            # wheel separation (m)
 
 RES = 0.05
 W, H = 300, 200                       # 15 m x 10 m
@@ -104,7 +108,16 @@ class SimBackend:
             self.places.add(name, x, y, yaw, aliases)
         self.places.set_home(*HOME)
         parser = CommandParser(self.places, groq_api_key=os.environ.get('GROQ_API_KEY'))
-        self.nav = NavigatorCore(self.places, parser=parser, dwell_s=2.0)
+        self.nav = NavigatorCore(self.places, parser=parser, dwell_s=2.0,
+                                 tuning_path=os.path.join(HERE, '..', 'maps', 'sim_tuning.json'))
+        # wheels: the firmware's speed loop driving two slightly different motors
+        self.tune = {k: r[2] for k, r in WHEEL_RANGES.items()}
+        self.saved_tune = dict(self.tune)
+        self.wl = WheelSim(self.tune, gain_mms_per_pwm=2.65, seed=1)
+        self.wr = WheelSim(self.tune, gain_mms_per_pwm=2.45, deadband_pwm=14.0, seed=2)
+        self.telemetry_on = False
+        self.telemetry = TelemetryBuffer()
+        self.tests = TestRunner(self.command, self._sample, is_blocked=lambda: self.estop)
         self.scan_pts, self.front = [], float('inf')
         self.us = [None, None, None]
         self.map_version = 0
@@ -185,9 +198,19 @@ class SimBackend:
                 else:
                     cmd, self.source = (0.0, 0.0), 'none'
                 self.cmd = cmd
-                a = dt / (0.15 + dt)
-                self.v += a * (cmd[0] - self.v)
-                self.w += a * (cmd[1] - self.w)
+                # (v, w) -> wheel targets -> firmware ramp + PI loop -> motors -> (v, w)
+                cl, cr = (cmd[0] - cmd[1] * SEP / 2) * 1000, (cmd[0] + cmd[1] * SEP / 2) * 1000
+                dl, dr = cl - self.wl.target, cr - self.wr.target
+                big = max(abs(dl), abs(dr), 1e-9)
+                for wheel, d in ((self.wl, dl), (self.wr, dr)):       # ramp keeps the wheel ratio
+                    wheel.ramp_to(wheel.target + d, dt, abs(d) / big)
+                self.wl.step(dt)
+                self.wr.step(dt)
+                if self.telemetry_on:
+                    self.telemetry.add([self.wl.target, self.wl.meas, self.wl.pwm,
+                                        self.wr.target, self.wr.meas, self.wr.pwm])
+                self.v = (self.wl.speed + self.wr.speed) / 2000.0
+                self.w = (self.wr.speed - self.wl.speed) / 1000.0 / SEP
                 nx = self.x + self.v * math.cos(self.yaw) * dt
                 ny = self.y + self.v * math.sin(self.yaw) * dt
                 if not any(self._occupied(nx + 0.22 * math.cos(k), ny + 0.22 * math.sin(k))
@@ -197,6 +220,50 @@ class SimBackend:
                     self.v = 0.0
                 self.yaw = wrap_angle(self.yaw + self.w * dt)
             time.sleep(max(0.0, dt - (time.monotonic() - t0)))
+
+    # ---------------------------------------------------------- tuning lab
+    def _sample(self):
+        with self.lock:
+            return {'x': round(self.x, 4), 'y': round(self.y, 4), 'yaw': round(self.yaw, 4),
+                    'v': round(self.v, 3), 'w': round(self.w, 3)}
+
+    def ping(self):
+        return {'ok': True, 'robot': 'slam-robot (simulator)', 'api': 2, 'fw': '2.3-sim',
+                'host': 'simulator', 'nav_mode': 'planner', 'wheel_ranges': ranges_for_app(WHEEL_RANGES)}
+
+    def esp_command(self, req):
+        op = req.get('op')
+        with self.lock:
+            if op == 'tune':
+                self.tune.update(clamp_values(req.get('values', {}), WHEEL_RANGES))
+                self.wl.t.update(self.tune)
+                self.wr.t.update(self.tune)
+                self.wl.integ = self.wr.integ = 0.0
+            elif op == 'save':
+                self.saved_tune = dict(self.tune)
+            elif op == 'defaults':
+                self.tune.update({k: r[2] for k, r in WHEEL_RANGES.items()})
+                self.wl.t.update(self.tune)
+                self.wr.t.update(self.tune)
+            elif op == 'telemetry':
+                self.telemetry_on = bool(req.get('on'))
+            elif op != 'query':
+                raise ValueError('unknown op')
+        return {'ok': True}
+
+    def get_telemetry(self, since):
+        return self.telemetry.since(since)
+
+    def test_start(self, req):
+        if self.estop:
+            raise ValueError('release the e-stop first')
+        return self.tests.start(req)
+
+    def test_stop(self):
+        return self.tests.stop()
+
+    def test_status(self, since):
+        return self.tests.status(since)
 
     # ---------------------------------------------------------- backend API
     def get_state(self):
@@ -220,6 +287,8 @@ class SimBackend:
                 'sensors': {'us': list(self.us), 'imu_ok': True, 'yaw_source': 'gyro', 'us_mounts': US_MOUNTS},
                 'nav': self.nav.status(),
                 'places': self.places.summary(),
+                'tune': dict(self.tune), 'fw': '2.3-sim', 'telemetry': self.telemetry_on,
+                'turns': None, 'test_running': bool(self.tests.result.get('running')),
             }
 
     def get_map(self, since):

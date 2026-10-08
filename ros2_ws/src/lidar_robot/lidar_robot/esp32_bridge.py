@@ -13,6 +13,9 @@ Publishes
   /robot/status     std_msgs/String       JSON, 2 Hz (used by the dashboard)
   /imu              sensor_msgs/Imu       firmware v2.2 + MPU-6050 (frame imu_link)
   /ultrasonic/{left,center,right}  sensor_msgs/Range   firmware v2.2 + HC-SR04 (frames us_*)
+  /robot/wheel_telemetry  std_msgs/String  JSON batches of 50 Hz SPD samples (firmware v2.3, Tuning Lab)
+Subscribes (Tuning Lab)
+  /robot/esp_cmd    std_msgs/String       JSON {"op": "tune"|"save"|"defaults"|"telemetry"|"query", ...}
 With an IMU, odometry heading comes from the gyro (use_imu_yaw) and distance from the wheels.
 """
 import json
@@ -34,9 +37,10 @@ import serial
 from lidar_robot.ports import pick_esp32_port
 from lidar_robot.kinematics import (DiffDriveOdometry, quaternion_from_yaw,
                                     twist_to_wheels, limit_wheels)
-from lidar_robot.protocol import (parse_line, OdomPacket, InfoPacket, ImuPacket, UsPacket,
-                                  MODE_NAMES, MODE_ESTOP,
+from lidar_robot.protocol import (parse_line, OdomPacket, InfoPacket, ImuPacket, UsPacket, SpdPacket,
+                                  MODE_NAMES, MODE_ESTOP, parse_tune, format_tune, format_telemetry,
                                   format_velocity, format_stop, format_estop)
+from lidar_robot.tuning import clamp_values, WHEEL_RANGES
 
 
 
@@ -95,12 +99,19 @@ class Esp32Bridge(Node):
         self.zero_frames_left = 0
         self.estop = False
         self.estop_released_at = 0.0
+        self.tune = None                  # last INFO,TUNE from the firmware (v2.3+)
+        self.fw = ''
+        self.telemetry_on = False         # what the app asked for (re-sent after an ESP32 reset)
+        self.spd_batch = []
 
         self.odom_pub = self.create_publisher(Odometry, 'odom', 20)
         self.imu_pub = self.create_publisher(Imu, 'imu', 20)
         self.range_pubs = [self.create_publisher(Range, f'ultrasonic/{n}', 10)
                            for n in ('left', 'center', 'right')]
         self.status_pub = self.create_publisher(String, 'robot/status', 5)
+        self.telem_pub = self.create_publisher(String, 'robot/wheel_telemetry', 10)
+        self.create_subscription(String, 'robot/esp_cmd', self._on_esp_cmd, 10)
+        self.create_timer(0.1, self._flush_telemetry)
         self.tf_pub = TransformBroadcaster(self) if self.publish_tf else None
 
         self.create_subscription(Twist, 'cmd_vel', lambda m: self._on_cmd('nav', m), 10)
@@ -160,6 +171,8 @@ class Esp32Bridge(Node):
         # The boot banner was printed before we opened the port; ask the firmware to
         # identify itself so the log shows which version is flashed (v1 ignores this).
         self._write(b'?\n')
+        if self.telemetry_on:
+            self._write(format_telemetry(True))
         return True
 
     def _close(self):
@@ -202,7 +215,19 @@ class Esp32Bridge(Node):
             if pkt is None:
                 self.bad_lines += 1
                 continue
+            if isinstance(pkt, SpdPacket):
+                with self.lock:
+                    self.spd_batch.append([pkt.tl, pkt.ml, pkt.pl, pkt.tr, pkt.mr, pkt.pr])
+                continue
             if isinstance(pkt, InfoPacket):
+                tune = parse_tune(pkt.text)
+                if tune:
+                    self.tune = tune
+                    continue
+                if 'robot_esp32 v' in pkt.text:
+                    self.fw = pkt.text.split('robot_esp32 v', 1)[1].split()[0]
+                if pkt.text.startswith('READY') and self.telemetry_on:
+                    self._write(format_telemetry(True))      # ESP32 rebooted: turn the stream back on
                 self.esp_info = pkt.text
                 self.get_logger().info(f'ESP32: {pkt.text}')
                 continue
@@ -353,6 +378,37 @@ class Esp32Bridge(Node):
         self._write(format_velocity(vl, vr))
         self.zero_frames_left = 5
 
+    # ------------------------------------------------------------------ tuning lab
+    def _on_esp_cmd(self, msg: String):
+        try:
+            req = json.loads(msg.data)
+            op = req.get('op')
+            if op == 'tune':
+                cur = dict(self.tune or {k: r[2] for k, r in WHEEL_RANGES.items()})
+                cur.update(clamp_values(req.get('values', {}), WHEEL_RANGES))
+                self._write(format_tune(cur['kp'], cur['ki'], cur['pwm_min'], cur['max_mms'], cur['accel']))
+            elif op == 'save':
+                self._write(b'W\n')
+            elif op == 'defaults':
+                self._write(b'X\n')
+            elif op == 'telemetry':
+                self.telemetry_on = bool(req.get('on'))
+                self._write(format_telemetry(self.telemetry_on))
+            elif op == 'query':
+                self._write(b'?\n')
+            else:
+                self.get_logger().warn(f'esp_cmd: unknown op {op!r}')
+                return
+            self.get_logger().info(f'Tuning Lab -> ESP32: {op}')
+        except (ValueError, TypeError, KeyError) as e:
+            self.get_logger().warn(f'esp_cmd rejected: {e}')
+
+    def _flush_telemetry(self):
+        with self.lock:
+            batch, self.spd_batch = self.spd_batch, []
+        if batch:
+            self.telem_pub.publish(String(data=json.dumps({'s': batch})))
+
     # ------------------------------------------------------------------ health
     def _health_check(self):
         with self.lock:
@@ -383,6 +439,10 @@ class Esp32Bridge(Node):
                 'cmd_v': round(self.cmd_out[0], 3),
                 'cmd_w': round(self.cmd_out[1], 3),
                 'estop': self.estop,
+                'tune': self.tune,
+                'fw': self.fw,
+                'telemetry': self.telemetry_on,
+                'sep': self.sep,
                 'odom': {'x': round(self.odom.x, 3), 'y': round(self.odom.y, 3),
                          'yaw': round(self.odom.theta, 3),
                          'v': round(self.odom.v, 3), 'w': round(self.odom.w, 3),

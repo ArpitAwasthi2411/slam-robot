@@ -27,6 +27,8 @@ from lidar_robot.commands import CommandParser
 from lidar_robot.follower import FollowerParams, PathFollower
 from lidar_robot.missions import Mission, MissionQueue, Stop
 from lidar_robot.planner import Planner, PlannerParams, path_length
+from lidar_robot.tuning import (TuningStore, apply_follower, follower_values, ranges_for_app,
+                                FOLLOWER_RANGES)
 
 IDLE, PLANNING, DRIVING, DWELL, WAITING = 'IDLE', 'PLANNING', 'DRIVING', 'DWELL', 'WAITING'
 
@@ -47,10 +49,12 @@ def _reason_code(planner_error):
 class NavigatorCore:
     def __init__(self, places, planner_params=None, follower_params=None, parser=None,
                  dwell_s=3.0, auto_return_s=0.0, max_replans=3, plan_retry_s=2.0, max_plan_attempts=3,
-                 clock=time.monotonic):
+                 clock=time.monotonic, tuning_path=None):
         self.places = places
         self.planner = Planner(planner_params or PlannerParams())
         self.follower = PathFollower(follower_params or FollowerParams())
+        self.tuning = TuningStore(tuning_path)           # saved Tuning Lab values override the YAML
+        apply_follower(self.follower.p, self.tuning.data['follower'])
         self.parser = parser or CommandParser(places)
         self.queue = MissionQueue()
         self.dwell_s = dwell_s
@@ -167,6 +171,16 @@ class NavigatorCore:
                 self.places.set_home(x, y, yaw)
                 self._log('home position set')
                 return {'ok': True, 'home': self.places.home}
+            if t == 'get_tune':
+                return {'ok': True, 'follower': follower_values(self.follower.p),
+                        'ranges': ranges_for_app(FOLLOWER_RANGES)}
+            if t == 'tune':
+                applied = apply_follower(self.follower.p, req.get('follower', {}))
+                if req.get('save'):
+                    self.tuning.save_follower(follower_values(self.follower.p))
+                self._log(f'follower tuning {"saved" if req.get("save") else "changed"}: '
+                          + ', '.join(f'{k}={v:g}' for k, v in applied.items()))
+                return {'ok': True, 'follower': follower_values(self.follower.p), 'saved': bool(req.get('save'))}
             if t == 'search':
                 return {'ok': True, 'results': [{'score': s, **p} for s, p in self.places.search(req.get('q', ''), limit=8, min_score=0.35)]}
             return {'ok': False, 'error': f'unknown request type {t!r}'}
