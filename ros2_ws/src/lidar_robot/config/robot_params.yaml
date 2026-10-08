@@ -5,8 +5,8 @@ esp32_bridge:
     baud_rate: 115200
     wheel_radius: 0.0625         # 125 mm wheels
     wheel_separation: 0.30       # tune with the 360-degree spin test (docs/calibration.md)
-    ticks_per_rev_left: 5036.0   # --push 1 m, 2026-10-07 (repeat + average)
-    ticks_per_rev_right: 5140.4
+    ticks_per_rev_left: 4963.0   # average of 2 x --push 1 m
+    ticks_per_rev_right: 4977.0
     cmd_timeout: 0.5             # s, stale cmd_vel -> stop
     max_wheel_speed: 0.45        # m/s clamp sent to the ESP32
     cmd_rate: 20.0
