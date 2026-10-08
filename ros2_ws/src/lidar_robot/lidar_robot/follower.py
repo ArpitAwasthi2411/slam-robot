@@ -15,16 +15,17 @@ from lidar_robot.kinematics import wrap_angle
 @dataclass
 class FollowerParams:
     max_linear: float = 0.22
-    max_angular: float = 0.9
+    max_angular: float = 0.6
     min_linear: float = 0.05
-    min_angular: float = 0.25
-    lookahead: float = 0.35          # m
-    rotate_in_place_above: float = 0.9   # rad heading error to the lookahead point
+    min_angular: float = 0.18
+    lookahead: float = 0.50          # m (longer = straighter, smoother; shorter = hugs the path)
+    rotate_in_place_above: float = 1.2   # rad: start turning on the spot above this heading error
+    rotate_exit_below: float = 0.30      # rad: ...and keep turning until below this (hysteresis)
     xy_tolerance: float = 0.10
     yaw_tolerance: float = 0.10
-    k_angular: float = 1.8
-    linear_accel: float = 0.4
-    angular_accel: float = 2.0
+    k_angular: float = 1.0
+    linear_accel: float = 0.3
+    angular_accel: float = 1.2
     slow_down_dist: float = 0.6      # m before the end of the path
     stop_distance: float = 0.38      # m front clearance from robot centre (440 mm chassis)
     slow_distance: float = 0.80
@@ -43,6 +44,7 @@ class PathFollower:
         self.final_yaw = None
         self.idx = 0
         self.aligning = False
+        self.rotating = False
         self.blocked = False
         self._blocked_for = 0.0
         self._v = 0.0
@@ -53,6 +55,7 @@ class PathFollower:
         self.final_yaw = final_yaw
         self.idx = 0
         self.aligning = False
+        self.rotating = False
         self.blocked = False
         self._blocked_for = 0.0
 
@@ -116,12 +119,17 @@ class PathFollower:
             else:
                 lx, ly = self._lookahead_point(x, y)
                 alpha = wrap_angle(math.atan2(ly - y, lx - x) - yaw)
+                # hysteresis: no chattering between "turn on the spot" and "drive"
                 if abs(alpha) > p.rotate_in_place_above:
+                    self.rotating = True
+                elif abs(alpha) < p.rotate_exit_below:
+                    self.rotating = False
+                if self.rotating:
                     w_t = _clamp(p.k_angular * alpha, -p.max_angular, p.max_angular)
                     if abs(w_t) < p.min_angular:
                         w_t = math.copysign(p.min_angular, alpha)
                 else:
-                    v_t = p.max_linear * (1.0 - 0.6 * abs(alpha) / p.rotate_in_place_above)
+                    v_t = p.max_linear * max(0.2, 1.0 - abs(alpha) / p.rotate_in_place_above)
                     v_t = min(v_t, max(p.min_linear, p.max_linear * dist_end / p.slow_down_dist))
                     if front_clearance < p.stop_distance:
                         v_t = 0.0
