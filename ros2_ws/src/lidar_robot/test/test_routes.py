@@ -69,3 +69,26 @@ def test_route_skips_unreachable_point(tmp_path):
     assert math.hypot(x - 2.0, y - 4.5) < 0.25
     assert any(e['text'].startswith('skipping point 1') for e in nav.events)
     assert nav.queue.history[0].state == 'DONE'
+
+
+def test_short_position_loss_pauses_then_continues(tmp_path):
+    nav, clk = setup(tmp_path)
+    nav.handle({'type': 'goto_pose', 'x': 6.0, 'y': 1.0}, (1.0, 1.0, 0.0))
+    pose = run(nav, clk, (1.0, 1.0, 0.0), 3)
+    for _ in range(int(5 / 0.05)):                     # 5 s without a position (ESP32 reset, SLAM hiccup)
+        assert nav.step(None, float('inf'), 0.05) == (0.0, 0.0)
+        clk.t += 0.05
+    assert nav.queue.active is not None and nav.state == 'WAITING'
+    x, y, _ = run(nav, clk, pose, 200)
+    assert math.hypot(x - 6.0, y - 1.0) < 0.25 and nav.queue.history[0].state == 'DONE'
+    assert any('position back' in e['text'] for e in nav.events)
+
+
+def test_long_position_loss_fails_the_mission(tmp_path):
+    nav, clk = setup(tmp_path)
+    nav.handle({'type': 'goto_pose', 'x': 6.0, 'y': 1.0}, (1.0, 1.0, 0.0))
+    run(nav, clk, (1.0, 1.0, 0.0), 2)
+    for _ in range(int(31 / 0.05)):
+        nav.step(None, float('inf'), 0.05)
+        clk.t += 0.05
+    assert nav.queue.active is None and nav.last_failure['code'] == 'POSE_LOST'
