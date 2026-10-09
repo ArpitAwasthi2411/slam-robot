@@ -22,6 +22,13 @@ need_nm() {
     exit 1
   fi
   systemctl enable --now NetworkManager >/dev/null 2>&1 || true
+  # our own netplan Wi-Fi file (from "hotspot" mode before NetworkManager was installed) is replaced
+  # by a NetworkManager profile: move it out of the way so netplan stops managing wlan0
+  if [ -f /etc/netplan/60-robot-wifi.yaml ]; then
+    mv /etc/netplan/60-robot-wifi.yaml /root/60-robot-wifi.yaml.bak
+    netplan apply || true
+    sleep 2
+  fi
   # netplan must not also manage wlan0, or the two fight over it
   if grep -lqs "$IFACE" /etc/netplan/*.yaml 2>/dev/null && ! grep -qs "renderer: NetworkManager" /etc/netplan/*.yaml; then
     echo "WARNING: a netplan file configures $IFACE:"
@@ -29,6 +36,8 @@ need_nm() {
     echo "Remove the wifis: section for $IFACE from it (keep the ethernet part), run 'sudo netplan apply', then rerun."
     exit 1
   fi
+  iw reg set IN 2>/dev/null || true      # Wi-Fi country (India): needed for access-point mode
+  rfkill unblock wifi 2>/dev/null || true
   nmcli radio wifi on || true
   nmcli device set "$IFACE" managed yes 2>/dev/null || true
 }
