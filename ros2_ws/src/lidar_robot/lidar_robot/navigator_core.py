@@ -24,6 +24,7 @@ import math
 import time
 
 from lidar_robot.commands import CommandParser
+from lidar_robot.explorer import ExploreParams, find_frontiers, choose_goal, mapped_area
 from lidar_robot.follower import FollowerParams, PathFollower
 from lidar_robot.missions import Mission, MissionQueue, Stop
 from lidar_robot.planner import Planner, PlannerParams, path_length
@@ -78,10 +79,18 @@ class NavigatorCore:
         self._idle_since = clock()
         self._pose = None
         self._pose_lost_for = 0.0
+        self.grid = None                # latest GridMap (for exploration)
+        self.explore_params = ExploreParams()
+        self.explore = {'active': False, 'state': 'off'}
 
     # ---------------------------------------------------------------- inputs
     def set_map(self, grid):
         self.planner.set_map(grid)
+        self.grid = grid
+
+    def set_grid(self, grid):
+        """Latest raw map for the explorer (the planner is swapped in separately)."""
+        self.grid = grid
 
     def swap_planner(self, planner):
         """Install a planner whose map was prepared in another thread (atomic reference swap)."""
@@ -127,6 +136,8 @@ class NavigatorCore:
             if t == 'preview':
                 return self._preview(req, pose)
             if t == 'cancel':
+                if req.get('id') is None and self.explore.get('active'):
+                    self._explore_stop('canceled')
                 n = self.queue.cancel(req.get('id'))
                 if not self.queue.active:
                     self.follower.clear()
@@ -171,6 +182,10 @@ class NavigatorCore:
                 self.places.set_home(x, y, yaw)
                 self._log('home position set')
                 return {'ok': True, 'home': self.places.home}
+            if t == 'explore_start':
+                return self._explore_start(req, pose)
+            if t == 'explore_stop':
+                return self._explore_stop('stopped by user')
             if t == 'get_tune':
                 return {'ok': True, 'follower': follower_values(self.follower.p),
                         'ranges': ranges_for_app(FOLLOWER_RANGES)}
@@ -279,6 +294,8 @@ class NavigatorCore:
             return 0.0, 0.0
         self._pose_lost_for = 0.0
 
+        if self.explore.get('active'):
+            self._explore_tick(pose, now)
         m = self.queue.active or self.queue.next()
         if m is None:
             self._maybe_auto_home(pose, now)
@@ -292,6 +309,7 @@ class NavigatorCore:
             m.next_stop += 1
             if m.current is None:
                 self.queue.finish('DONE', 'all stops reached')
+                self._mission_ended(m, True)
                 self._log(f'mission #{m.id} done')
                 self._set(IDLE, f'mission #{m.id} done')
                 self._idle_since = now
@@ -354,10 +372,120 @@ class NavigatorCore:
         if m:
             m.message = f'{code}: {text}'
             self.queue.finish('FAILED', m.message)
+            self._mission_ended(m, False)
+            if m.source == 'explore':          # unreachable frontier: not an error, just skip it
+                self._log(f'skipping an unreachable area ({code})', 'warn')
+                self.follower.clear()
+                self._replans = 0
+                self._set(IDLE, 'exploring: trying another area')
+                return
             self._log(f'mission #{m.id} failed: {text}', 'error')
         self._set(IDLE, f'failed: {text}')
         self.last_failure = {'code': code, 'text': text, 'mission': m.summary() if m else None}
         self._idle_since = self.clock()
+
+    # ---------------------------------------------------------------- exploration
+    def _explore_start(self, req, pose):
+        if self.grid is None or not self.planner.has_map():
+            raise ValueError('no map yet: wait for the first scans')
+        if not pose:
+            raise ValueError('robot pose unknown')
+        if self.estopped or self.hold:
+            raise ValueError('release the e-stop and resume first')
+        p = self.explore_params
+        p.speed = min(0.4, max(0.05, float(req.get('speed', p.speed))))
+        p.turn_speed = min(1.2, max(0.2, float(req.get('turn_speed', p.turn_speed))))
+        if not self.explore.get('active'):
+            self.explore = {'active': True, 'state': 'running', 'started': self.clock(), 'goals_done': 0,
+                            'skipped': 0, 'blacklist': [], 'frontiers': [], 'target': None,
+                            'start_pose': tuple(pose), 'none_count': 0, 'next_pick': 0.0,
+                            'saved_speed': (self.follower.p.max_linear, self.follower.p.max_angular),
+                            'area': round(mapped_area(self.grid), 1), 'message': 'looking for unexplored areas'}
+            self._log(f'exploration started at {p.speed:.2f} m/s')
+        self.follower.p.max_linear, self.follower.p.max_angular = p.speed, p.turn_speed
+        return {'ok': True, 'explore': self._explore_status()}
+
+    def _explore_stop(self, why, done=False):
+        e = self.explore
+        if not e.get('active'):
+            return {'ok': True, 'explore': self._explore_status()}
+        e['active'] = False
+        e['state'] = 'done' if done else 'stopped'
+        e['message'] = why
+        self.follower.p.max_linear, self.follower.p.max_angular = e['saved_speed']
+        # drop exploration goals, keep anything a person asked for
+        if self.queue.active and self.queue.active.source == 'explore':
+            self.queue.cancel(self.queue.active.id)
+            self.follower.clear()
+            self._set(IDLE, why)
+        for m in list(self.queue.queue):
+            if m.source == 'explore':
+                self.queue.cancel(m.id)
+        self._log(f'exploration {"finished" if done else "stopped"}: {why}')
+        return {'ok': True, 'explore': self._explore_status()}
+
+    def _explore_tick(self, pose, now):
+        e, p = self.explore, self.explore_params
+        m = self.queue.active
+        if m and m.source == 'explore':
+            if now - e.get('goal_started', now) > p.max_goal_time:
+                if e.get('target'):
+                    e['blacklist'].append(e['target'])
+                e['skipped'] += 1
+                e['target'] = None
+                self.queue.cancel(m.id)
+                self.follower.clear()
+                self._set(IDLE, 'exploring: trying another area')
+                self._log('exploration goal took too long: skipping that area', 'warn')
+            return
+        if m or self.queue.queue or now < e['next_pick'] or self.grid is None or self.hold:
+            return                                  # a person's mission runs first
+        e['next_pick'] = now + 2.0
+        fr = find_frontiers(self.grid, p.min_frontier_cells)
+        e['frontiers'] = [[round(f.cx, 2), round(f.cy, 2), f.size] for f in fr[:30]]
+        e['area'] = round(mapped_area(self.grid), 1)
+        pick = choose_goal(fr, self.planner, pose, e['blacklist'], p, self.planner.p.robot_radius,
+                           self._dynamic_obstacles())
+        if pick is None:
+            e['none_count'] += 1
+            e['target'] = None
+            e['message'] = 'no reachable unexplored area left' if fr else 'everything reachable is mapped'
+            if e['none_count'] >= 3:
+                self._explore_stop(e['message'], done=True)
+                h = self.places.home
+                home = (h['x'], h['y'], h.get('yaw')) if h else e['start_pose']
+                try:
+                    self._enqueue([Stop('home' if h else 'exploration start', home[0], home[1], home[2])],
+                                  0, 'explore-return', 'return after exploring')
+                except ValueError:
+                    pass
+            return
+        gx, gy, f, _ = pick
+        e['none_count'] = 0
+        e['target'] = (round(gx, 2), round(gy, 2))
+        e['goal_started'] = now
+        e['message'] = f'heading to an unexplored area ({f.size * self.grid.resolution:.1f} m of edge)'
+        self._enqueue([Stop('unexplored area', gx, gy, None)], 0, 'explore', 'explore')
+
+    def _mission_ended(self, m, ok):
+        e = self.explore
+        if m.source != 'explore' or not e.get('active') or not e.get('target'):
+            return
+        e['blacklist'].append(e['target'])          # don't pick the same spot again
+        if ok:
+            e['goals_done'] += 1
+        else:
+            e['skipped'] += 1
+        e['target'] = None
+        e['next_pick'] = 0.0
+
+    def _explore_status(self):
+        e = self.explore
+        out = {k: e.get(k) for k in ('active', 'state', 'goals_done', 'skipped', 'frontiers', 'target',
+                                       'area', 'message')}
+        if e.get('started') is not None:
+            out['elapsed_s'] = round(self.clock() - e['started'])
+        return out
 
     def _maybe_auto_home(self, pose, now):
         h = self.places.home
@@ -390,6 +518,7 @@ class NavigatorCore:
             'blocked': self.follower.blocked, 'preview': self.preview,
             'missions': self.queue.summary(), 'events': self.events[:15],
             'has_map': self.planner.has_map(),
+            'explore': self._explore_status(),
         }
 
 
