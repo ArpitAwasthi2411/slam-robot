@@ -132,7 +132,28 @@ class NavigatorCore:
                         raise ValueError(f'{k} must be a finite number')
                 st = Stop(req.get('label') or 'map point', float(req['x']), float(req['y']),
                           None if req.get('yaw') is None else float(req['yaw']))
+                if req.get('replace'):
+                    self._cancel_all('new goal')
                 return self._enqueue([st], req.get('priority', 1), req.get('source', 'dashboard'), st.label)
+            if t == 'goto_poses':
+                pts = req.get('waypoints') or []
+                if not isinstance(pts, list) or not 1 <= len(pts) <= 30:
+                    raise ValueError('give 1 to 30 waypoints')
+                stops = [Stop(str(w.get('label') or f'point {i + 1}'), float(w['x']), float(w['y']),
+                              None if w.get('yaw') is None else float(w['yaw'])) for i, w in enumerate(pts)]
+                repeat = int(req.get('repeat', 0))
+                if repeat < -1 or repeat > 99:
+                    raise ValueError('repeat must be -1 (patrol) or 0..99')
+                if req.get('replace'):
+                    self._cancel_all('new route')
+                text = req.get('label') or (f'patrol of {len(stops)} points' if repeat == -1 else f'route of {len(stops)} points')
+                r = self._enqueue(stops, req.get('priority', 1), req.get('source', 'dashboard'), text)
+                m = self.queue.active if (self.queue.active and self.queue.active.id == r['mission']['id']) else \
+                    next(q for q in self.queue.queue if q.id == r['mission']['id'])
+                m.repeat = repeat
+                m.skip_unreachable = len(stops) > 1
+                r['mission'] = m.summary()
+                return r
             if t == 'command':
                 return self._command(req.get('text', ''))
             if t == 'preview':
@@ -159,6 +180,10 @@ class NavigatorCore:
                 self._log('operator confirmed the robot position on the map')
                 return {'ok': True}
             if t == 'go_home':
+                if not self.places.home:
+                    raise ValueError('home is not set (long-press the map → Set home here)')
+                if req.get('replace'):
+                    self._cancel_all('going home')
                 return self._go_home(req.get('priority', 1), 'dashboard')
             if t == 'add_place':
                 if req.get('here'):
@@ -216,6 +241,15 @@ class NavigatorCore:
     @staticmethod
     def _stop_from_place(p):
         return Stop(p['name'], p['x'], p['y'], p.get('yaw'))
+
+    def _cancel_all(self, why):
+        if self.explore.get('active'):
+            self._explore_stop(why)
+        n = self.queue.cancel(None)
+        self.follower.clear()
+        self._set(IDLE, why)
+        if n:
+            self._log(f'replaced {n} mission(s): {why}')
 
     def _enqueue(self, stops, priority, source, text):
         for st in stops:
@@ -322,6 +356,11 @@ class NavigatorCore:
             if now < self._dwell_until:
                 return 0.0, 0.0
             m.next_stop += 1
+            if m.current is None and m.repeat != 0:          # route loop / patrol: start the next round
+                m.repeat -= 1 if m.repeat > 0 else 0
+                m.round += 1
+                m.next_stop = 0
+                self._log(f'mission #{m.id}: round {m.round}')
             if m.current is None:
                 self.queue.finish('DONE', 'all stops reached')
                 self._mission_ended(m, True)
@@ -338,6 +377,7 @@ class NavigatorCore:
 
         v, w, event = self.follower.step(pose, front_clearance, dt)
         if event == 'ARRIVED':
+            m.skips = 0
             self._log(f'arrived at {m.current.label}')
             self.follower.clear()
             self._replans = 0
@@ -389,6 +429,22 @@ class NavigatorCore:
         m = self.queue.active
         self.follower.clear()
         self._replans = 0
+        if m and m.skip_unreachable and m.skips + 1 < len(m.stops) and code != 'POSE_LOST':
+            m.skips += 1
+            m.attempts = 0
+            self._log(f'skipping {m.current.label}: {text}', 'warn')
+            m.next_stop += 1
+            if m.current is None and m.repeat != 0:
+                m.repeat -= 1 if m.repeat > 0 else 0
+                m.round += 1
+                m.next_stop = 0
+            if m.current is not None:
+                self._set(PLANNING, f'skipped a point, next: {m.current.label}')
+                return
+            self.queue.finish('DONE', 'route finished (some points skipped)')
+            self._set(IDLE, 'route finished (some points skipped)')
+            self._idle_since = self.clock()
+            return
         if m:
             m.message = f'{code}: {text}'
             self.queue.finish('FAILED', m.message)

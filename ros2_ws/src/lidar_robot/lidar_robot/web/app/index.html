@@ -58,11 +58,24 @@
     <div class="mapwrap">
       <canvas id="map" aria-label="Live map. Drag to move, pinch to zoom, long-press to send the robot somewhere."></canvas>
       <div class="map-tools">
+        <button class="round tool" data-tool="goal" aria-pressed="false" title="Goal: tap to send, drag to set facing direction">
+          <svg viewBox="0 0 24 24"><path d="M6 21V4"/><path d="M6 4h11l-2.5 4L17 12H6"/></svg>
+        </button>
+        <button class="round tool" data-tool="route" aria-pressed="false" title="Route: tap several points, then Go">
+          <svg viewBox="0 0 24 24"><circle cx="5" cy="18" r="2.2"/><circle cx="12" cy="7" r="2.2"/><circle cx="19" cy="16" r="2.2"/><path d="M6.3 16.2 10.8 9M13.3 8.9l4.6 5.4" stroke-dasharray="2 2"/></svg>
+        </button>
+        <button class="round tool" data-tool="measure" aria-pressed="false" title="Measure a distance">
+          <svg viewBox="0 0 24 24"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z"/><path d="M7 11.5l2 2M10 8.5l2.5 2.5M13 5.5l2 2"/></svg>
+        </button>
+        <button id="m-home" class="round" title="Go home">
+          <svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M10 20v-5h4v5"/></svg>
+        </button>
         <button id="m-follow" class="round on" aria-pressed="true" title="Follow robot">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
         </button>
       </div>
-      <div id="m-hint" class="m-hint">Long‑press the map to send the robot there</div>
+      <div id="m-mode" class="m-mode" hidden role="status"></div>
+      <div id="m-hint" class="m-hint">Flag tool: tap the map to send the robot, drag to choose its direction</div>
       <div id="m-banner" class="m-banner" hidden></div>
     </div>
 
@@ -236,6 +249,7 @@
     <div id="a-route" class="muted"></div>
     <button id="a-go" class="btn primary wide">Go here</button>
     <button id="a-save" class="btn wide">Save as a place</button>
+    <button id="a-home" class="btn wide">Set home here</button>
     <button id="a-cancel" class="btn ghost wide">Cancel</button>
   </div>
 </div>
