@@ -38,6 +38,7 @@
       <summary>How do I get the phone and robot on the same network?</summary>
       <p><b>Robot Wi‑Fi (simplest).</b> Join the Wi‑Fi called <b>SLAM-Robot</b>. Pathik finds the robot at 10.42.0.1.</p>
       <p><b>Your phone's hotspot.</b> Turn the hotspot on, let the robot join it, then tap Find robot. Pathik scans the hotspot network.</p>
+      <p><b>Far away (another lab, another floor).</b> Put a phone with mobile data on the robot as its hotspot, and install Tailscale on the Pi and on this phone. Then type <code>slam-robot</code> (or its 100.x address) below. The robot keeps working on its own if the link drops.</p>
       <p>Robot not found? Check that <code>robot_up</code> is running on the Pi and that the phone isn't on mobile data only.</p>
     </details>
   </div>
@@ -84,6 +85,34 @@
               <button id="d-locok" class="btn" hidden>Position OK</button>
             </div>
           </div>
+        </div>
+
+        <div id="x-card" class="xcard">
+          <div class="x-head">
+            <svg class="x-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M12 3v5M12 12l4-3"/><circle cx="12" cy="12" r="1.6"/></svg>
+            <div class="x-title"><b>Map by itself</b>
+              <small id="x-sub">Drives slowly into every unmapped area, turns once at each spot so the LiDAR sees all walls, then comes back and saves the map.</small></div>
+          </div>
+          <div id="x-idle">
+            <div class="seg" role="radiogroup" aria-label="Exploring speed">
+              <button class="seg-b" data-xs="0.12" role="radio" aria-checked="false">Careful<small>0.12 m/s</small></button>
+              <button class="seg-b on" data-xs="0.18" role="radio" aria-checked="true">Normal<small>0.18 m/s</small></button>
+              <button class="seg-b" data-xs="0.25" role="radio" aria-checked="false">Quick<small>0.25 m/s</small></button>
+            </div>
+            <label class="switch x-spin"><input id="x-spin" type="checkbox" checked><span>Turn once at every spot <small>sharper walls, about 15 s more per spot</small></span></label>
+            <button id="x-go" class="btn primary wide">Start mapping</button>
+          </div>
+          <div id="x-run" hidden>
+            <p id="x-msg" class="x-msg" role="status"></p>
+            <div class="metrics x-metrics">
+              <div class="metric"><b id="x-area">–</b><span>m² mapped</span></div>
+              <div class="metric"><b id="x-done">0</b><span>areas visited</span></div>
+              <div class="metric"><b id="x-left">–</b><span>open edges left</span></div>
+              <div class="metric"><b id="x-time">–</b><span>running</span></div>
+            </div>
+            <button id="x-stop" class="btn wide">Stop mapping</button>
+          </div>
+          <p id="x-last" class="x-last" hidden></p>
         </div>
       </div>
 

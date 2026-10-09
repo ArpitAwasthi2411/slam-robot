@@ -19,6 +19,7 @@ Every response carries CORS headers so the APK (file:// origin) can call the API
 The ROS node (dashboard.py) and the offline simulator (tools/dashboard_sim.py)
 both implement this interface.
 """
+import gzip
 import json
 import mimetypes
 import os
@@ -67,8 +68,15 @@ def make_handler(backend, index_path, app_dir=None):
                 body = json.dumps(body, separators=(',', ':')).encode()
             elif isinstance(body, str):
                 body = body.encode()
+            zipped = (len(body) > 1200 and 'gzip' in (self.headers.get('Accept-Encoding') or '')
+                      and not ctype.startswith(('image/png', 'font/')))
+            if zipped:                     # ~4x less data: matters when the phone is on mobile data
+                body = gzip.compress(body, compresslevel=5)
             self.send_response(code)
             self.send_header('Content-Type', ctype)
+            if zipped:
+                self.send_header('Content-Encoding', 'gzip')
+                self.send_header('Vary', 'Accept-Encoding')
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-store')
             self.send_header('Access-Control-Allow-Origin', '*')

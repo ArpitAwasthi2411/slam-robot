@@ -4,7 +4,7 @@ One app for everyday use and for research:
 
 | Tab | What it does |
 |---|---|
-| **Drive** | Live map with LiDAR, route and places. Joystick, top-speed limit, Save map, Position OK |
+| **Drive** | Live map with LiDAR, route and places. Joystick, top-speed limit, Save map, Position OK. **Map by itself**: the robot explores and maps the floor on its own ([exploration.md](exploration.md)) |
 | **Go** | Say where to go ("take this to lab 3 then come back"), places list with Route and Go, mission card with Cancel/Resume, Save place here, Set home. Long-press the map to send the robot anywhere |
 | **Lab** | **Wheels**: the ESP32 speed loop (Kp, Ki, start-up PWM, top speed, acceleration ramp) with live wheel-speed chart and a step test that grades the tuning. **Path following**: look-ahead, steering gain, accelerations, turn-on-the-spot thresholds. **Drive tests**: straight-line drift test and spin test that computes the correct `wheel_separation` |
 | **Status** | Link health, firmware, LiDAR rate, position, sensors, navigator, activity log |
@@ -52,6 +52,10 @@ Phone: hotspot on → Pathik → Find robot. The APK asks Android for the hotspo
 
 Either way, the ethernet cable to the laptop keeps working at the same time.
 
+**Option C: the robot goes to other labs or floors on its own.** Put a phone with mobile data on the
+robot as its hotspot and use Tailscale, so you can reach it from anywhere: [remote_access.md](remote_access.md).
+Missions and Map by itself keep running on the Pi if the app loses the link.
+
 ## 3. Build the APK (GitHub Actions)
 
 The build runs on GitHub's servers. Your laptop needs nothing installed.
@@ -71,8 +75,8 @@ The build runs on GitHub's servers. Your laptop needs nothing installed.
    unzip → `Pathik-<n>.apk`.
 5. Phone: open the APK → allow "Install unknown apps" for your file manager/browser → Install.
 
-For a public download link: create a tag `v1.0.0` (`git tag v1.0.0 && git push --tags`). The workflow
-attaches the APK to a GitHub Release.
+Every push to `main` also publishes the APK as a GitHub Release (`v1.0.<run number>`), so the
+latest APK is always on the repo's *Releases* page.
 
 ## 4. Tuning Lab: how to remove the jerks, in order
 
@@ -113,5 +117,8 @@ Phone (Pathik) ── HTTP/JSON ──► dashboard node :8080 ──► ROS 2 t
   left/right ratio, so curves stay curves while speeding up.
 - **Bridge**: `/robot/esp_cmd` (JSON in), `/robot/wheel_telemetry` (JSON batches out), `tune`/`fw` in `/robot/status`.
 - **Navigator**: requests `get_tune` and `tune` (with `save`), persisted to `~/maps/tuning.json`.
-- **Dashboard**: CORS for the APK (file:// origin), the app served at `/`, test runner for scripted motions.
-- Tests: `ros2_ws/src/lidar_robot/test/test_tuning_lab.py`.
+- **Dashboard**: CORS for the APK (file:// origin), the app served at `/`, test runner for scripted motions,
+  gzip for large responses (about 4× less mobile data), map auto-save when exploration finishes.
+- **Exploration**: `explore_start` / `explore_stop` navigator requests, `nav.explore` + `autosave` in `/api/state`
+  ([exploration.md](exploration.md)).
+- Tests: `ros2_ws/src/lidar_robot/test/test_tuning_lab.py`, `test_explorer.py`.

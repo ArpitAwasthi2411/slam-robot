@@ -3,6 +3,8 @@
 #
 #   sudo bash setup_wifi.sh ap  [password]          robot makes its own Wi-Fi "SLAM-Robot" (10.42.0.1)
 #   sudo bash setup_wifi.sh hotspot "<SSID>" "<pw>"  robot joins your phone's hotspot (app scans for it)
+#   sudo bash setup_wifi.sh extra "<SSID>" "<pw>" [priority]  remember one more network (e.g. lab Wi-Fi);
+#                                                    the Pi joins whichever known one is in range
 #   sudo bash setup_wifi.sh status
 #   sudo bash setup_wifi.sh off                      remove both profiles
 #
@@ -80,6 +82,17 @@ EOF
     echo
     echo "Joined '$SSID'. Robot address: ${IP:-not yet - check the hotspot is on}"
     echo "On the phone: keep the hotspot on, open Pathik, tap Find robot."
+    ;;
+  extra)
+    SSID="${2:?usage: setup_wifi.sh extra \"<SSID>\" \"<password>\" [priority]}"
+    PW="${3:?usage: setup_wifi.sh extra \"<SSID>\" \"<password>\" [priority]}"
+    PRIO="${4:-5}"
+    need_nm
+    CON="robot-wifi-$(echo "$SSID" | tr -c 'A-Za-z0-9' '_' | cut -c1-20)"
+    nmcli connection delete "$CON" >/dev/null 2>&1 || true
+    nmcli connection add type wifi ifname "$IFACE" con-name "$CON" autoconnect yes ssid "$SSID" \
+      wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$PW" connection.autoconnect-priority "$PRIO"
+    echo "Remembered '$SSID' (priority $PRIO; the robot hotspot profile has 20, so the phone on the robot wins)."
     ;;
   status)
     ip -4 -br addr show "$IFACE" 2>/dev/null || echo "no $IFACE"

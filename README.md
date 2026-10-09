@@ -61,7 +61,8 @@ tools/                       serial_probe.py (debug/calibrate ESP32), dashboard_
 rviz/robot.rviz              RViz2 layout for the laptop
 udev/ scripts/               stable /dev names, laptop ethernet setup, systemd autostart
 hardware/                    pin map, wiring, BOM, CAD, photos
-docs/                        deploy, calibration, navigation (app + API), troubleshooting, roadmap
+docs/                        deploy, calibration, navigation (app + API), exploration, remote access,
+                             mobile app, troubleshooting, roadmap
 maps/                        saved maps (.pgm + .yaml)
 ```
 
@@ -88,7 +89,12 @@ xdg-open http://169.254.1.2:8080  # web dashboard: joystick, e-stop, map, click-
 [docs/mobile_app.md](docs/mobile_app.md). The APK is built by GitHub Actions; the same app also opens in any
 browser at `http://<robot>:8080`.
 
-No robot? `python3 tools/dashboard_sim.py` runs the app against a simulated robot.
+**Map by itself:** the robot explores and maps rooms on its own, slowly, for clean maps, then returns
+and saves the map: [docs/exploration.md](docs/exploration.md).
+**Robot in another lab:** phone-on-robot hotspot + Tailscale: [docs/remote_access.md](docs/remote_access.md).
+
+No robot? `python3 tools/dashboard_sim.py` runs the app against a simulated robot
+(`--explore` starts with an empty map to try Map by itself).
 
 ## Status
 
@@ -102,6 +108,8 @@ No robot? `python3 tools/dashboard_sim.py` runs the app against a simulated robo
 - [x] Localization on a saved map (Cartographer pure localization + operator confirmation)
 - [x] Firmware v2.2 + Pi support for MPU-6050, 3× ultrasonic, e-stop button (wiring: hardware/sensors.md)
 - [x] Pathik mobile app + Tuning Lab (live PID, step/straight/spin tests), firmware v2.3
+- [x] Frontier exploration (Map by itself) with map auto-save, tested in simulation
+- [x] Remote access over mobile data (Tailscale), app keeps working on slow links
 - [x] Encoder odometry verified on hardware (directions, ticks per rev, 50 Hz into Cartographer)
 - [ ] Wheel separation and speed-loop tuning with the Tuning Lab (calibration: [docs/calibration.md](docs/calibration.md))
 - [ ] Navigator verified on the real robot and floor
