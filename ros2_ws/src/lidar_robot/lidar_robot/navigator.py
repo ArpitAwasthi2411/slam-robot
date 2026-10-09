@@ -175,9 +175,11 @@ class NavigatorNode(Node):
                 continue
             try:
                 planner = Planner(self.planner_params)
-                planner.set_map(GridMap.from_occupancy(*job))
+                grid = GridMap.from_occupancy(*job)
+                planner.set_map(grid)
                 with self.core_lock:
                     self.core.swap_planner(planner)
+                    self.core.set_grid(grid)
                 self.map_stamp = self.get_clock().now()
             except Exception as e:
                 self.get_logger().error(f'map processing failed: {e}')
