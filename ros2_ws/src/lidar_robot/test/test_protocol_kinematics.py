@@ -97,3 +97,13 @@ def test_v22_lines_and_gyro_odometry():
     assert front_clearance_from_ranges([(1.0, mounts[0])], 0.25) == float('inf')
     # left sensor sees 0.15 m -> y = 0.195 (inside corridor), x = 0.35
     assert abs(front_clearance_from_ranges([(0.15, mounts[0])], 0.25) - (0.22 + 0.15 * math.cos(math.radians(30)))) < 1e-9
+
+
+def test_compose_2d_map_odom_base():
+    import math
+    from lidar_robot.kinematics import compose_2d
+    # odom frame rotated 90° and shifted (1, 2) in the map; robot 1 m ahead in odom
+    x, y, yaw = compose_2d((1.0, 2.0, math.pi / 2), (1.0, 0.0, 0.0))
+    assert abs(x - 1.0) < 1e-9 and abs(y - 3.0) < 1e-9 and abs(yaw - math.pi / 2) < 1e-9
+    x, y, yaw = compose_2d((0.0, 0.0, 0.0), (0.5, -0.2, 0.3))
+    assert (round(x, 6), round(y, 6), round(yaw, 6)) == (0.5, -0.2, 0.3)

@@ -69,3 +69,11 @@ class DiffDriveOdometry:
             self.v = d_center / dt
             self.w = d_theta / dt
         return self.x, self.y, self.theta, self.v, self.w
+
+
+def compose_2d(a, b):
+    """Pose b expressed in a's parent frame: (x, y, yaw) of a ∘ b (e.g. map->odom ∘ odom->base_link)."""
+    ax, ay, ath = a
+    bx, by, bth = b
+    c, s = math.cos(ath), math.sin(ath)
+    return ax + c * bx - s * by, ay + s * bx + c * by, wrap_angle(ath + bth)
