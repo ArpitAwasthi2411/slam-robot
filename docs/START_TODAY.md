@@ -69,18 +69,51 @@ robot_up
 Leave it running. Look for `Connected to ESP32 on /dev/esp32` and no red errors from `sllidar`.
 LiDAR error `80008000`: unplug the LiDAR USB for 5 s, plug back, `robot_up` again.
 
-## D. Connect the phone (5 min)
+## D. Connect the phone: the robot makes its own Wi-Fi (15 min the first time, then nothing)
 
-1. Install `Pathik-4.apk` on the phone (allow "install unknown apps" once). It installs over the old version.
-2. Put the phone on a network with the robot. **Today, the easiest is your phone's hotspot**:
-   - Phone: turn the hotspot ON (note its name and password).
-   - PI-2 (second laptop terminal: `ssh arpit@169.254.1.2`):
-     ```bash
-     sudo bash ~/slam-robot/scripts/setup_wifi.sh hotspot "<hotspot name>" "<password>"
-     ```
-     It prints the robot's address, e.g. `192.168.43.57`.
-3. Pathik → **Find robot** → tap it. (Or type the printed address.)
-   The ethernet cable keeps working at the same time, so the laptop stays connected too.
+The Pi becomes the hotspot: it creates a Wi-Fi called **SLAM-Robot**, and the phone (and laptop)
+join it. No phone hotspot or lab Wi-Fi needed, and the robot's address is always **10.42.0.1**.
+
+**One-time setup.** The Pi needs one program, NetworkManager, and has to download it once.
+For those 5 minutes the Pi borrows your phone's internet:
+
+1. Phone: turn the hotspot ON (note its name and password).
+2. PI-2 (second laptop terminal: `ssh arpit@169.254.1.2`). The ethernet cable keeps SSH working
+   through all of this:
+   ```bash
+   sudo bash ~/slam-robot/scripts/setup_wifi.sh hotspot "<phone hotspot name>" "<password>"
+   ping -c 2 google.com                     # must answer: the Pi has internet now
+   sudo apt update && sudo apt install -y network-manager
+   ```
+3. Turn the Pi into the hotspot (pick your own password, at least 8 characters):
+   ```bash
+   sudo bash ~/slam-robot/scripts/setup_wifi.sh ap robot1234
+   ```
+   It prints `Robot Wi-Fi is up: name SLAM-Robot`. You can turn the phone hotspot OFF now.
+4. Check: `sudo bash ~/slam-robot/scripts/setup_wifi.sh status` shows `robot-ap` on wlan0 with
+   10.42.0.1. It comes back by itself at every boot.
+
+**Every day from now on:**
+1. Install `Pathik-4.apk` on the phone (once; allow "install unknown apps").
+2. Robot ON, wait ~1 minute.
+3. Phone → Wi-Fi → join **SLAM-Robot** (password `robot1234`). Android may say "no internet":
+   tap **stay connected / keep**, otherwise it jumps back to mobile data or another Wi-Fi.
+4. Pathik → **Find robot** → tap it (or type `10.42.0.1`).
+
+The laptop can join SLAM-Robot too (then `ssh arpit@10.42.0.1`), or keep using the cable.
+
+**Limits of robot Wi-Fi:** no internet on the robot while it's the hotspot, so typed commands use the
+offline parser instead of the LLM. Range is about 15–25 m. If the robot drives farther, the app
+reconnects when it comes back, and the robot keeps doing its job meanwhile.
+Need internet on the robot again (LLM, `apt`, `git`)? Run `setup_wifi.sh hotspot …` to join the
+phone; run `setup_wifi.sh ap robot1234` to go back.
+
+**If step 3 fails:**
+- *"a netplan file configures wlan0"*: the Pi's original Wi-Fi setup is in a netplan file. The
+  script prints its name. Open it with `sudo nano <file>`, delete the `wifis:` part (keep `ethernets:`),
+  then `sudo netplan apply` and run step 3 again.
+- *SLAM-Robot doesn't show on the phone:* `sudo nmcli connection up robot-ap` and read the error;
+  `sudo journalctl -u NetworkManager -n 30` shows why.
 
 ## E. Checks before driving (5 min)
 
@@ -128,14 +161,14 @@ Full guide: `docs/exploration.md`.
 | # | Way | Setup (once) | Every day | Range | Internet on robot | Good for |
 |---|---|---|---|---|---|---|
 | 1 | **Ethernet cable** laptop ↔ Pi (169.254.1.2) | done | plug in | 1 cable | no | SSH, flashing, RViz, fixing things. Never drops |
-| 2 | **Robot's own Wi-Fi** "SLAM-Robot" (10.42.0.1) | `setup_wifi.sh ap` (needs NetworkManager, see below) | power on, phone joins SLAM-Robot | ~15–25 m | no (offline commands) | any lab, no lab Wi-Fi needed, address never changes |
-| 3 | **Robot joins your phone's hotspot** | `setup_wifi.sh hotspot "<name>" "<pw>"` | turn hotspot on, Find robot | ~10–15 m around you | yes (LLM works) | today; you walk with the robot |
+| 2 | **Robot's own Wi-Fi** "SLAM-Robot" (10.42.0.1): the Pi is the hotspot | section D (one-time install) | power on, phone joins SLAM-Robot | ~15–25 m | no (offline commands) | any lab, no lab Wi-Fi needed, address never changes |
+| 3 | **Robot joins your phone's hotspot** | `setup_wifi.sh hotspot "<name>" "<pw>"` | turn hotspot on, Find robot | ~10–15 m around you | yes (LLM works) | when the robot needs internet (LLM commands, installing things); you walk with the robot |
 | 4 | **Lab / college Wi-Fi** | `setup_wifi.sh extra "<SSID>" "<pw>"` | Find robot | that building | yes | only if the network lets devices talk to each other (many college networks block it) |
-| 5 | **Phone on the robot as hotspot + Tailscale** | spare phone with SIM + `setup_tailscale.sh` + Tailscale app on your phone | type `slam-robot` in Pathik | anywhere with 4G | yes | the robot going to other labs/floors alone |
+| 5 | **A spare phone riding on the robot is the hotspot** (4G) **+ Tailscale** | spare phone with SIM + `setup_tailscale.sh` + Tailscale app on your phone | type `slam-robot` in Pathik | anywhere with 4G | yes | the robot going to other labs/floors alone |
 
 **Easiest when you walk into a lab:** option **2, the robot's own Wi-Fi**. It doesn't care what
 network the lab has. Power on, phone joins "SLAM-Robot", Pathik → Find robot, done. The address is
-always 10.42.0.1. Until that's set up, option 3 (your phone's hotspot) is just as quick.
+always 10.42.0.1.
 
 **Most reliable:**
 - For setup and debugging: option **1, the cable**. No wireless at all.
@@ -143,14 +176,7 @@ always 10.42.0.1. Until that's set up, option 3 (your phone's hotspot) is just a
   so you can watch it from anywhere. And with any option, a mission or Map by itself keeps running
   on the Pi if the link drops.
 
-**Setting up option 2 (once).** The Pi needs NetworkManager. Install it while the Pi has internet
-(join your phone's hotspot with option 3 first):
-```bash
-sudo apt update && sudo apt install -y network-manager
-sudo bash ~/slam-robot/scripts/setup_wifi.sh ap robot1234
-```
-From then on the Pi makes the "SLAM-Robot" network (password `robot1234`) at every boot.
-To go back to the phone hotspot: `setup_wifi.sh hotspot …` again. `setup_wifi.sh status` shows what's active.
+Setting up option 2: section D above.
 
 **Start at power-on without SSH** (recommended once everything works):
 ```bash
