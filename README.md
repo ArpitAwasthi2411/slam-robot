@@ -61,7 +61,7 @@ tools/                       serial_probe.py (debug/calibrate ESP32), dashboard_
 rviz/robot.rviz              RViz2 layout for the laptop
 udev/ scripts/               stable /dev names, laptop ethernet setup, systemd autostart
 hardware/                    pin map, wiring, BOM, CAD, photos
-docs/                        deploy, calibration, navigation (app + API), exploration, remote access,
+docs/                        START_TODAY (do this first), deploy, calibration, navigation (app + API), exploration, remote access,
                              mobile app, troubleshooting, roadmap
 maps/                        saved maps (.pgm + .yaml)
 ```
