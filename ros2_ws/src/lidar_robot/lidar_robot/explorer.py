@@ -16,15 +16,17 @@ import numpy as np
 
 @dataclass
 class ExploreParams:
-    min_frontier_cells: int = 10        # ignore frontiers shorter than ~0.5 m at 5 cm/cell
+    min_frontier_cells: int = 15        # ignore frontiers shorter than ~0.75 m at 5 cm/cell
     standoff: float = 0.05              # extra clearance (m) beyond robot_radius for goal points
     search_radius: float = 1.2          # m: look this far from a frontier for a safe goal point
     blacklist_radius: float = 0.6       # m: failed or finished goals block this area
-    gain_per_cell: float = 0.015        # m of path we'd travel extra per frontier cell gained
+    gain_per_cell: float = 0.03         # m of path we'd travel extra per frontier cell gained
     max_candidates: int = 6             # path-plan only the best few by straight-line score
     max_goal_time: float = 120.0        # s before a goal is abandoned
     speed: float = 0.15                 # m/s while exploring (slow = sharp map)
     turn_speed: float = 0.45            # rad/s while exploring
+    scan_spin: bool = True              # turn once on the spot at every goal (walls from all angles)
+    scan_speed: float = 0.4             # rad/s for that turn (~16 s per turn)
 
 
 @dataclass
@@ -144,3 +146,36 @@ def choose_goal(frontiers, planner, pose, blacklist, params=None, robot_radius=0
 def mapped_area(grid):
     """Known free area in m²."""
     return float(np.count_nonzero(~grid.occ & ~grid.unknown)) * grid.resolution ** 2
+
+
+class MapAutoSaver:
+    """Saves the map once when an exploration finishes (watch the navigator's explore status).
+
+    update(explore_status) is cheap; call it whenever a new status arrives. save_fn(name) runs in a
+    background thread (map saving can take seconds while Cartographer writes its state).
+    """
+
+    def __init__(self, save_fn, prefix='explore'):
+        import threading
+        self._threading = threading
+        self.save_fn, self.prefix = save_fn, prefix
+        self._was_active = False
+        self.info = {'state': 'idle'}
+
+    def update(self, explore):
+        if not explore:
+            return
+        active = bool(explore.get('active'))
+        if self._was_active and not active and explore.get('state') == 'done':
+            import time
+            name = time.strftime(f'{self.prefix}_%Y%m%d_%H%M%S')
+            self.info = {'state': 'saving', 'name': name}
+            self._threading.Thread(target=self._save, args=(name,), daemon=True).start()
+        self._was_active = active
+
+    def _save(self, name):
+        try:
+            res = self.save_fn(name)
+            self.info = {'state': 'saved', 'name': name, 'result': str(res)}
+        except Exception as e:  # noqa: BLE001 - report any failure to the app
+            self.info = {'state': 'failed', 'name': name, 'result': str(e)}

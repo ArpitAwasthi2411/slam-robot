@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'ros2_ws', 'src', 'lidar_robot'))
 
 from lidar_robot.commands import CommandParser                    # noqa: E402
 from lidar_robot.dashboard_server import DashboardServer          # noqa: E402
+from lidar_robot.explorer import MapAutoSaver                    # noqa: E402
 from lidar_robot.kinematics import wrap_angle                     # noqa: E402
 from lidar_robot.mapsave import save_map                          # noqa: E402
 from lidar_robot.navigator_core import NavigatorCore              # noqa: E402
@@ -124,6 +125,7 @@ class SimBackend:
         self.map_version = 0
         self.cmd = (0.0, 0.0)
         self.source = 'none'
+        self.autosave = MapAutoSaver(self.save_map)
         self._push_map()
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -189,6 +191,7 @@ class SimBackend:
                     last_map = t0
                 pose = (self.x, self.y, self.yaw)
                 nav_cmd = self.nav.step(pose, self.front, dt)
+                self.autosave.update(self.nav.explore)
                 (tv, tw), tt = self.teleop
                 if self.estop:
                     cmd, self.source = (0.0, 0.0), 'estop'
@@ -292,6 +295,7 @@ class SimBackend:
                 'places': self.places.summary(),
                 'tune': dict(self.tune), 'fw': '2.3-sim', 'telemetry': self.telemetry_on,
                 'turns': round(self.odom_turns, 3), 'sep': SEP, 'test_running': bool(self.tests.result.get('running')),
+                'autosave': self.autosave.info,
             }
 
     def get_map(self, since):

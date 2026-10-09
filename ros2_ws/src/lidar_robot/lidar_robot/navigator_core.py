@@ -32,6 +32,7 @@ from lidar_robot.tuning import (TuningStore, apply_follower, follower_values, ra
                                 FOLLOWER_RANGES)
 
 IDLE, PLANNING, DRIVING, DWELL, WAITING = 'IDLE', 'PLANNING', 'DRIVING', 'DWELL', 'WAITING'
+SCANNING = 'SCANNING'          # exploration: turning slowly on the spot so the LiDAR sees every wall
 
 
 def _reason_code(planner_error):
@@ -79,6 +80,7 @@ class NavigatorCore:
         self._idle_since = clock()
         self._pose = None
         self._pose_lost_for = 0.0
+        self._scan = None
         self.grid = None                # latest GridMap (for exploration)
         self.explore_params = ExploreParams()
         self.explore = {'active': False, 'state': 'off'}
@@ -303,6 +305,19 @@ class NavigatorCore:
                 self._set(IDLE, self.message if self.state == WAITING else 'idle')
             return 0.0, 0.0
 
+        if self.state == SCANNING and (self._scan or {}).get('mid') != m.id:
+            self._set(PLANNING, f'next stop: {m.current.label}')      # scan belonged to a canceled goal
+        if self.state == SCANNING:
+            d = math.atan2(math.sin(pose[2] - self._scan['last']), math.cos(pose[2] - self._scan['last']))
+            self._scan['acc'] += abs(d)
+            self._scan['last'] = pose[2]
+            self._scan['t'] += dt
+            if self._scan['acc'] < 2 * math.pi * 0.97 and self._scan['t'] < self._scan['limit']:
+                return 0.0, self._scan['w']
+            self._set(DWELL, f'at {m.current.label}')
+            self._dwell_until = now
+            return 0.0, 0.0
+
         if self.state == DWELL:
             if now < self._dwell_until:
                 return 0.0, 0.0
@@ -329,6 +344,11 @@ class NavigatorCore:
             last = m.next_stop == len(m.stops) - 1
             self._dwell_until = now + (0.0 if last else self.dwell_s)
             self._set(DWELL, f'at {m.current.label}')
+            if m.source == 'explore' and self.explore_params.scan_spin:
+                w = self.explore_params.scan_speed
+                self._scan = {'mid': m.id, 'acc': 0.0, 'last': pose[2], 'w': w, 't': 0.0,
+                              'limit': 2 * math.pi / max(0.1, w) * 2.0 + 5.0}
+                self._set(SCANNING, 'scanning the area')
             return 0.0, 0.0
         if event in ('BLOCKED', 'OFF_PATH'):
             self._replans += 1
@@ -395,6 +415,8 @@ class NavigatorCore:
         p = self.explore_params
         p.speed = min(0.4, max(0.05, float(req.get('speed', p.speed))))
         p.turn_speed = min(1.2, max(0.2, float(req.get('turn_speed', p.turn_speed))))
+        if 'scan_spin' in req:
+            p.scan_spin = bool(req['scan_spin'])
         if not self.explore.get('active'):
             self.explore = {'active': True, 'state': 'running', 'started': self.clock(), 'goals_done': 0,
                             'skipped': 0, 'blacklist': [], 'frontiers': [], 'target': None,
@@ -464,7 +486,7 @@ class NavigatorCore:
         e['none_count'] = 0
         e['target'] = (round(gx, 2), round(gy, 2))
         e['goal_started'] = now
-        e['message'] = f'heading to an unexplored area ({f.size * self.grid.resolution:.1f} m of edge)'
+        e['message'] = f'heading to an unmapped spot ({f.size * self.grid.resolution:.1f} m of open edge)'
         self._enqueue([Stop('unexplored area', gx, gy, None)], 0, 'explore', 'explore')
 
     def _mission_ended(self, m, ok):

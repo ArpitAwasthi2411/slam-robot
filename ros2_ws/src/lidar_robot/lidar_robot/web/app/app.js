@@ -91,6 +91,7 @@ async function scan() {
   const quick = [...new Set([
     ...store.get('robots', []).map(r => r.base),
     'http://10.42.0.1:8080', 'http://169.254.1.2:8080', 'http://robot.local:8080', 'http://robot:8080',
+    'http://slam-robot:8080',                       // Tailscale MagicDNS name (robot far away on mobile data)
   ])];
   prog.textContent = 'Checking the usual addresses…';
   (await Promise.all(quick.map(b => probe(b, 1500)))).forEach(add);
@@ -161,15 +162,21 @@ function disconnect() {
 async function pollState(g) {
   while (g === S.gen) {
     try {
+      const t0 = performance.now();
       const st = await get('/api/state', { timeout: 2500 });
       if (g !== S.gen) return;
+      const rtt = performance.now() - t0;
+      S.rtt = S.rtt ? S.rtt * 0.8 + rtt * 0.2 : rtt;
       S.st = st; S.fails = 0; S.lastOk = performance.now();
       onState(st);
     } catch (e) {
       S.fails++;
       onLinkLost();
     }
-    await sleep(S.fails ? Math.min(2000, 250 * S.fails) : 140);
+    // fast on local Wi-Fi; slower over mobile data (high delay) or when the app is in the background
+    const busy = joy.active || S.tab === 'lab';
+    const every = document.hidden ? 2000 : busy ? 140 : (S.rtt > 150 ? 400 : 140);
+    await sleep(S.fails ? Math.min(2000, 250 * S.fails) : every);
   }
 }
 async function pollMap(g) {
@@ -194,6 +201,8 @@ function onState(st) {
   if (st.estop) { mode = 'Stopped'; cls = 'estop'; }
   else if (link.esp_mode === 'RC') { mode = 'Remote control'; cls = 'rc'; }
   else if (st.test_running) { mode = 'Running test'; cls = 'auto'; }
+  else if (navs.state === 'SCANNING') { mode = 'Scanning'; cls = 'auto'; }
+  else if (navs.explore && navs.explore.active) { mode = 'Mapping'; cls = 'auto'; }
   else if (navs.state === 'DRIVING') { mode = navs.goal ? `To ${navs.goal.label}` : 'Driving'; cls = 'auto'; }
   else if (navs.state === 'DWELL') { mode = 'At a stop'; cls = 'auto'; }
   else if (link.cmd_source === 'teleop') { mode = 'Driving'; cls = 'auto'; }
@@ -209,13 +218,14 @@ function onState(st) {
   if (!st.bridge_alive) b = '<b>Motor board not talking.</b> Check the ESP32 USB cable, then restart with robot_up.';
   else if (!st.pose) b = '<b>Waiting for the robot’s position.</b> Is the LiDAR spinning?';
   else if (navs && navs.localized === false) b = '<b>Confirm the position.</b> Drive a little until the orange dots sit on the walls, then press Position OK.';
-  banner.innerHTML = b; banner.hidden = !b;
+  banner.innerHTML = b; banner.hidden = !b; banner.classList.remove('link');
   $('#d-locok').hidden = !(navs && navs.localized === false);
 
   // drive readout
   const od = st.odom || {};
   $('#d-v').textContent = fmt(od.v); $('#d-w').textContent = fmt(od.w);
 
+  renderExplore(st);
   if (S.tab === 'go') renderGo(st);
   if (S.tab === 'status') renderStatus(st);
   if (S.tab === 'lab') labOnState(st);
@@ -223,6 +233,11 @@ function onState(st) {
 }
 function onLinkLost() {
   if (S.fails === 3) toast('Lost contact with the robot. Retrying…', true);
+  if (S.fails >= 3) {
+    const banner = $('#m-banner'), busy = S.st && S.st.nav && ((S.st.nav.missions && S.st.nav.missions.active) || (S.st.nav.explore && S.st.nav.explore.active));
+    banner.innerHTML = `<b>Link to the robot lost.</b> ${busy ? 'It carries on with its job by itself; ' : ''}reconnecting… The STOP button works again once the link is back.`;
+    banner.classList.add('link'); banner.hidden = false;
+  }
   $('#t-dot').className = 'dot bad';
   if (S.fails >= 3) { $('#t-mode').textContent = 'Offline'; $('#t-mode').className = 'chip'; }
 }
@@ -313,6 +328,20 @@ function drawMap() {
   };
   if (navs.preview && navs.preview.path && navs.state !== 'DRIVING') line(navs.preview.path, 'rgba(47,183,166,.85)', [7, 6], 3);
   if (navs.path && navs.path.length) line(pose ? [[pose.x, pose.y], ...navs.path] : navs.path, '#2fb7a6', [], 4);
+  // exploration: open map edges (frontiers) and the area it is heading to
+  const ex = navs.explore;
+  if (ex && ex.active) {
+    for (const f of ex.frontiers || []) {
+      const [x, y] = W2S(f[0], f[1]), r = Math.min(14, 3 + Math.sqrt(f[2]) * 0.9) * DPR;
+      cx.fillStyle = 'rgba(229,72,127,.22)'; cx.beginPath(); cx.arc(x, y, r, 0, 7); cx.fill();
+      cx.fillStyle = '#e5487f'; cx.beginPath(); cx.arc(x, y, 2.4 * DPR, 0, 7); cx.fill();
+    }
+    if (ex.target) {
+      const [x, y] = W2S(ex.target[0], ex.target[1]);
+      cx.save(); cx.strokeStyle = '#e5487f'; cx.lineWidth = 2.5 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
+      cx.beginPath(); cx.arc(x, y, 13 * DPR, 0, 7); cx.stroke(); cx.restore();
+    }
+  }
   // places
   const pl = (st.places && st.places.places) || [];
   cx.font = `600 ${12 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center';
@@ -513,6 +542,52 @@ $('#estop').onclick = () => { haptic(60); post('/api/estop', { on: true }).catch
 let placeFilter = '';
 $('#g-search').oninput = e => { placeFilter = e.target.value.trim().toLowerCase(); if (S.st) renderGo(S.st, true); };
 let lastPlacesKey = '';
+// ------------------------------------------------------------------ drive: map by itself (exploration)
+let xSpeed = +store.get('xspeed', 0.18), xSeenSave = null;
+function xSetSpeed(v) {
+  xSpeed = v; store.set('xspeed', v);
+  $$('[data-xs]').forEach(b => { const on = +b.dataset.xs === v; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+}
+$$('[data-xs]').forEach(b => b.onclick = () => { haptic(8); xSetSpeed(+b.dataset.xs); });
+xSetSpeed(xSpeed);
+$('#x-spin').checked = store.get('xspin', true);
+$('#x-spin').onchange = e => store.set('xspin', e.target.checked);
+$('#x-go').onclick = async () => {
+  const ok = await confirmBox('Map this area by itself?',
+    'Clear the floor of people’s feet and bags, open the doors you want mapped, and stay close to the STOP button. ' +
+    'The robot drives slowly to every unmapped spot, then returns and saves the map.', 'Start mapping');
+  if (!ok) return;
+  try { await nav({ type: 'explore_start', speed: xSpeed, turn_speed: xSpeed < 0.15 ? 0.35 : 0.45, scan_spin: $('#x-spin').checked }); toast('Mapping started'); haptic(30); setFollow(true); }
+  catch (e) { toast(e.message, true); }
+};
+$('#x-stop').onclick = async () => {
+  try { await nav({ type: 'explore_stop' }); toast('Mapping stopped. Save the map if you want to keep it.'); haptic(20); }
+  catch (e) { toast(e.message, true); }
+};
+function renderExplore(st) {
+  const ex = (st.nav && st.nav.explore) || {}, on = !!ex.active;
+  $('#x-card').classList.toggle('running', on);
+  $('#x-idle').hidden = on; $('#x-run').hidden = !on;
+  if (on) {
+    $('#x-msg').textContent = st.nav.state === 'SCANNING' ? 'Turning once to see every wall…' : (ex.message || 'Exploring');
+    $('#x-area').textContent = fin(ex.area) ? fmt(ex.area, 1) : '–';
+    $('#x-done').textContent = (ex.goals_done || 0) + (ex.skipped ? ` +${ex.skipped} skipped` : '');
+    $('#x-left').textContent = (ex.frontiers || []).length;
+    $('#x-time').textContent = secs(ex.elapsed_s);
+  }
+  const a = st.autosave || {}, last = $('#x-last');
+  if (!on && (ex.state === 'done' || ex.state === 'stopped')) {
+    last.hidden = false;
+    last.innerHTML = ex.state === 'done'
+      ? `Last run: <b>${fmt(ex.area, 1)} m²</b> mapped, ${ex.goals_done || 0} areas in ${secs(ex.elapsed_s)}. ` +
+        (a.state === 'saved' ? `Saved as <b>${esc(a.name)}</b>.` : a.state === 'saving' ? 'Saving the map…' : a.state === 'failed' ? `Map not saved: ${esc(a.result || '')}` : '')
+      : `Stopped: ${esc(ex.message || '')}`;
+  } else last.hidden = true;
+  // one toast when a save finishes (not for saves that happened before we connected)
+  if (xSeenSave === null) xSeenSave = a.name || '';
+  else if (a.state === 'saved' && a.name !== xSeenSave) { xSeenSave = a.name; toast(`Mapping done. Map saved as ${a.name}`); haptic(40); }
+}
+
 function renderGo(st, force) {
   const navs = st.nav || {}, pose = st.pose;
   // mission card
@@ -594,6 +669,7 @@ function renderStatus(st) {
   const cls = (good, warn) => good ? 'ok' : warn ? 'warn' : 'bad';
   const items = [
     ['Robot address', BASE.replace('http://', ''), ''],
+    ['Link delay', fin(S.rtt) ? `${Math.round(S.rtt)} ms round trip` : '–', cls(S.rtt < 250, S.rtt < 700)],
     ['Motor board', st.bridge_alive && L.connected ? `${fmt(L.rx_hz, 0)} Hz on ${L.port || '?'}` : 'not connected', cls(st.bridge_alive && L.rx_hz > 30, st.bridge_alive)],
     ['Firmware', st.fw ? `v${st.fw}` : 'unknown', cls(st.fw && st.fw >= '2.3', st.fw)],
     ['LiDAR', st.scan ? `${fmt(st.scan.hz, 1)} scans/s` : '–', cls(st.scan && st.scan.hz > 5, st.scan && st.scan.hz > 0)],

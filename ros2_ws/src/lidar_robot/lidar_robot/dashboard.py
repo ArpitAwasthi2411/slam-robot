@@ -27,6 +27,7 @@ from std_msgs.msg import Bool, Empty, String
 from tf2_ros import Buffer, TransformListener, TransformException
 
 from lidar_robot.dashboard_server import DashboardServer
+from lidar_robot.explorer import MapAutoSaver
 from lidar_robot.kinematics import yaw_from_quaternion, quaternion_from_yaw, wrap_angle
 from lidar_robot.mapsave import save_map
 from lidar_robot.tuning import TelemetryBuffer, TestRunner, ranges_for_app, WHEEL_RANGES
@@ -69,6 +70,7 @@ class DashboardNode(Node):
         self.estop = False                 # mirrors the bridge's value (bridge is authoritative)
         self.nav_status = {}
         self.nav_status_t = 0.0
+        self.autosave = MapAutoSaver(self.save_map)      # exploration finished -> save the map
         self.places = {'places': [], 'home': None, 'version': -1}
         self.pending = {}                  # req_id -> [Event, response]
         self.req_ids = itertools.count(1)
@@ -169,7 +171,8 @@ class DashboardNode(Node):
             self.nav_status = json.loads(msg.data)
             self.nav_status_t = time.monotonic()
         except ValueError:
-            pass
+            return
+        self.autosave.update(self.nav_status.get('explore'))
 
     def _on_places(self, msg):
         try:
@@ -243,6 +246,7 @@ class DashboardNode(Node):
             'nav': self.nav_status if time.monotonic() - self.nav_status_t < 2.0 else None,
             'tune': rs.get('tune'), 'fw': rs.get('fw'), 'telemetry': rs.get('telemetry'),
             'turns': odom.get('turns'), 'sep': rs.get('sep'), 'test_running': bool(self.tests.result.get('running')),
+            'autosave': self.autosave.info,
             'places': self.places,
         }
 
