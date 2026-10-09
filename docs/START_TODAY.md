@@ -108,6 +108,14 @@ reconnects when it comes back, and the robot keeps doing its job meanwhile.
 Need internet on the robot again (LLM, `apt`, `git`)? Run `setup_wifi.sh hotspot …` to join the
 phone; run `setup_wifi.sh ap robot1234` to go back.
 
+**If `apt install` says "Temporary failure resolving 'ports.ubuntu.com'"** (the Pi has no internet):
+- `ping -c 2 8.8.8.8` works but `ping google.com` doesn't → only DNS is missing:
+  `sudo resolvectl dns wlan0 8.8.8.8` and try again.
+- `ip -4 addr show wlan0` shows no address → the Pi didn't join the hotspot. Set the phone hotspot
+  to **2.4 GHz** (Hotspot → Advanced → AP band), check the password, rerun `setup_wifi.sh hotspot …`.
+- Or skip Wi-Fi and share the **laptop's** internet through the ethernet cable (see "Internet for the
+  Pi through the cable" below).
+
 **If step 3 fails:**
 - *"a netplan file configures wlan0"*: the Pi's original Wi-Fi setup is in a netplan file. The
   script prints its name. Open it with `sudo nano <file>`, delete the `wifis:` part (keep `ethernets:`),
@@ -201,3 +209,28 @@ Option 5 step by step: `docs/remote_access.md`.
 | Firmware shows 2.2 in Status | step A not done or a different ESP32 port: re-flash |
 | One wheel runs away | an `*_ENC_DIR` is wrong: check with `serial_probe.py --push` (stop the robot first) |
 | Map smears / doubles | drive slower; use Map by itself on Careful; check `laser_x` is -0.13 |
+
+---
+
+## Internet for the Pi through the cable (when Wi-Fi won't cooperate)
+
+The laptop shares its own internet with the Pi over the ethernet cable. Nothing is permanent: it's
+gone after a reboot.
+
+LAPTOP (laptop on Wi-Fi with internet):
+```bash
+WAN=$(ip route show default | awk '{print $5; exit}'); echo "laptop internet is on: $WAN"
+sudo sysctl -w net.ipv4.ip_forward=1
+sudo iptables -t nat -A POSTROUTING -o "$WAN" -j MASQUERADE
+sudo iptables -I FORWARD -i enx006f0000324d -o "$WAN" -j ACCEPT
+sudo iptables -I FORWARD -i "$WAN" -o enx006f0000324d -m state --state RELATED,ESTABLISHED -j ACCEPT
+```
+PI:
+```bash
+ETH=$(ip -o -4 addr show | awk '/169.254.1.2/{print $2}'); echo "pi cable is: $ETH"
+sudo ip route replace default via 169.254.1.1 dev "$ETH"
+sudo resolvectl dns "$ETH" 8.8.8.8 && sudo resolvectl domain "$ETH" '~.'
+ping -c 2 google.com
+sudo apt update && sudo apt install -y network-manager
+```
+
