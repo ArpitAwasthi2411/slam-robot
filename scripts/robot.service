@@ -12,7 +12,10 @@ Wants=network-online.target
 User=arpit
 Environment=ROS_DOMAIN_ID=0
 Environment=ROS_LOCALHOST_ONLY=0
-ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/arpit/ros2_ws/install/setup.bash && exec ros2 launch lidar_robot bringup.launch.py'
+# Optional launch arguments, e.g. to drive on a saved map:
+#   echo 'ROBOT_ARGS=slam_mode:=localization map:=/home/arpit/maps/lab.pbstream' > /home/arpit/robot.env
+EnvironmentFile=-/home/arpit/robot.env
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/arpit/ros2_ws/install/setup.bash && exec ros2 launch lidar_robot bringup.launch.py $ROBOT_ARGS'
 Restart=on-failure
 RestartSec=5
 KillSignal=SIGINT

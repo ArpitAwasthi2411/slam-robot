@@ -38,7 +38,7 @@ from tf2_ros import Buffer, TransformListener, TransformException
 from lidar_robot.commands import CommandParser
 from lidar_robot.follower import FollowerParams
 from lidar_robot.goal_logic import front_clearance_from_scan
-from lidar_robot.kinematics import yaw_from_quaternion
+from lidar_robot.kinematics import compose_2d, yaw_from_quaternion
 from lidar_robot.navigator_core import NavigatorCore
 from lidar_robot.places import PlaceStore
 from lidar_robot.planner import GridMap, Planner, PlannerParams
@@ -72,7 +72,9 @@ class NavigatorNode(Node):
         d('dwell_s', 3.0)
         d('auto_return_s', 0.0)
         d('max_replans', 3)
-        d('pose_timeout', 1.0)
+        d('pose_timeout', 1.0)          # wheel odometry (odom->base_link) older than this = position lost
+        d('map_tf_timeout', 10.0)       # SLAM's map->odom correction may lag this much (it changes slowly)
+        d('odom_frame', 'odom')
         d('require_localization_confirm', False)   # bringup sets true in slam_mode:=localization
         d('llm_model', 'llama-3.1-8b-instant')
         g = lambda n: self.get_parameter(n).value  # noqa: E731
@@ -82,6 +84,8 @@ class NavigatorNode(Node):
         self.half_width = float(g('robot_half_width'))
         self.cone = math.radians(float(g('front_cone_deg')))
         self.pose_timeout = float(g('pose_timeout'))
+        self.map_tf_timeout = float(g('map_tf_timeout'))
+        self.odom_frame = g('odom_frame')
 
         self.places = PlaceStore(g('places_file'))
         key = os.environ.get('GROQ_API_KEY')
@@ -261,17 +265,36 @@ class NavigatorNode(Node):
         self._publish_places()
 
     # ---------------------------------------------------------------- loop
-    def _pose(self):
-        try:
-            tf = self.tf_buffer.lookup_transform(self.global_frame, self.base_frame, Time())
-        except TransformException:
-            return None
+    def _lookup(self, parent, child):
+        tf = self.tf_buffer.lookup_transform(parent, child, Time())
         age = (self.get_clock().now() - Time.from_msg(tf.header.stamp)).nanoseconds / 1e9
-        if age > self.pose_timeout:
-            return None
         t = tf.transform
         return (t.translation.x, t.translation.y,
-                yaw_from_quaternion(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w))
+                yaw_from_quaternion(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w)), age
+
+    def _pose(self):
+        """Robot pose in the global frame.
+
+        map->base_link = (map->odom from SLAM) ∘ (odom->base_link from the wheels, 50 Hz).
+        SLAM's correction can arrive a second or more late on a busy Pi; it changes slowly, so it
+        may be old. Only the wheel part has to be fresh. (Looking up map->base_link directly would
+        take the OLDER of the two and report the robot as lost.)
+        """
+        try:
+            if self.global_frame == self.odom_frame:
+                pose, age = self._lookup(self.global_frame, self.base_frame)
+                return pose if age <= self.pose_timeout else None
+            odom_pose, odom_age = self._lookup(self.odom_frame, self.base_frame)
+            if odom_age > self.pose_timeout:
+                return None
+            correction, map_age = self._lookup(self.global_frame, self.odom_frame)
+            if map_age > self.map_tf_timeout:
+                self.get_logger().warn(f'SLAM correction (map->odom) is {map_age:.1f} s old: is Cartographer '
+                                       'running and keeping up?', throttle_duration_sec=10.0)
+                return None
+            return compose_2d(correction, odom_pose)
+        except TransformException:
+            return None
 
     def _tick(self):
         pose = self._pose()
