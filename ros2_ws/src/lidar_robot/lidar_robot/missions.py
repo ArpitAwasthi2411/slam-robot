@@ -32,6 +32,10 @@ class Mission:
     state: str = 'QUEUED'           # QUEUED, ACTIVE, DONE, FAILED, CANCELED
     attempts: int = 0
     message: str = ''
+    repeat: int = 0                 # extra rounds after this one; -1 = patrol until canceled
+    round: int = 1
+    skip_unreachable: bool = False  # routes: skip a point that can't be reached instead of failing
+    skips: int = 0                  # consecutive skipped points (all skipped in a row = fail)
 
     @property
     def current(self):
@@ -40,7 +44,8 @@ class Mission:
     def summary(self):
         return {'id': self.id, 'priority': self.priority, 'source': self.source, 'text': self.text,
                 'state': self.state, 'message': self.message,
-                'stops': [s.label for s in self.stops], 'next_stop': self.next_stop}
+                'stops': [s.label for s in self.stops], 'next_stop': self.next_stop,
+                'repeat': self.repeat, 'round': self.round}
 
 
 class MissionQueue:

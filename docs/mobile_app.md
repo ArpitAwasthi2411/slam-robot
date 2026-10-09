@@ -4,7 +4,7 @@ One app for everyday use and for research:
 
 | Tab | What it does |
 |---|---|
-| **Drive** | Live map with LiDAR, route and places. Joystick, top-speed limit, Save map, Position OK. **Map by itself**: the robot explores and maps the floor on its own ([exploration.md](exploration.md)) |
+| **Drive** | Live map with LiDAR, route and places. Joystick, top-speed limit, Save map, Position OK. **Map tools** (left side of the map): **Goal** (tap = go there, drag = go there and face that way, like RViz *2D Goal Pose*; a new goal replaces the old one), **Route** (tap several points, optional facing per point, *Loop* = patrol until canceled; unreachable points are skipped), **Measure** (drag = distance in m), **Home**. Long-press: Go here / Save as place / Set home here. **Map by itself** ([exploration.md](exploration.md)) |
 | **Go** | Say where to go ("take this to lab 3 then come back"), places list with Route and Go, mission card with Cancel/Resume, Save place here, Set home. Long-press the map to send the robot anywhere |
 | **Lab** | **Wheels**: the ESP32 speed loop (Kp, Ki, start-up PWM, top speed, acceleration ramp) with live wheel-speed chart and a step test that grades the tuning. **Path following**: look-ahead, steering gain, accelerations, turn-on-the-spot thresholds. **Drive tests**: straight-line drift test and spin test that computes the correct `wheel_separation` |
 | **Status** | Link health, firmware, LiDAR rate, position, sensors, navigator, activity log |
@@ -119,6 +119,7 @@ Phone (Pathik) ── HTTP/JSON ──► dashboard node :8080 ──► ROS 2 t
 - **Navigator**: requests `get_tune` and `tune` (with `save`), persisted to `~/maps/tuning.json`.
 - **Dashboard**: CORS for the APK (file:// origin), the app served at `/`, test runner for scripted motions,
   gzip for large responses (about 4× less mobile data), map auto-save when exploration finishes.
+- **Map tools**: `goto_pose` with `yaw` and `replace`, `goto_poses` (`waypoints`, `repeat`: 0..99 or -1 = patrol), `go_home` with `replace`.
 - **Exploration**: `explore_start` / `explore_stop` navigator requests, `nav.explore` + `autosave` in `/api/state`
   ([exploration.md](exploration.md)).
 - Tests: `ros2_ws/src/lidar_robot/test/test_tuning_lab.py`, `test_explorer.py`.

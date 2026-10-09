@@ -203,7 +203,9 @@ function onState(st) {
   else if (st.test_running) { mode = 'Running test'; cls = 'auto'; }
   else if (navs.state === 'SCANNING') { mode = 'Scanning'; cls = 'auto'; }
   else if (navs.explore && navs.explore.active) { mode = 'Mapping'; cls = 'auto'; }
+  else if (navs.missions && navs.missions.active && navs.missions.active.repeat === -1) { mode = `Patrol, round ${navs.missions.active.round}`; cls = 'auto'; }
   else if (navs.state === 'DRIVING') { mode = navs.goal ? `To ${navs.goal.label}` : 'Driving'; cls = 'auto'; }
+  else if (navs.state === 'PLANNING' || (navs.state === 'WAITING' && navs.missions && navs.missions.active)) { mode = 'Planning'; cls = 'auto'; }
   else if (navs.state === 'DWELL') { mode = 'At a stop'; cls = 'auto'; }
   else if (link.cmd_source === 'teleop') { mode = 'Driving'; cls = 'auto'; }
   else if (!st.bridge_alive) { mode = 'No motor link'; }
@@ -361,6 +363,9 @@ function drawMap() {
     const [x, y] = W2S(S.pick[0], S.pick[1]);
     cx.strokeStyle = '#f4b33c'; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(x, y, 10 * DPR, 0, 7); cx.stroke();
   }
+  // goal heading arrow (where the robot will face)
+  if (navs.goal && fin(navs.goal.yaw)) drawArrow(navs.goal.x, navs.goal.y, navs.goal.yaw, Math.max(0.35, 24 / view.scale), '#2fb7a6', 3);
+  drawTools();
   if (!pose) return;
   const c = Math.cos(pose.yaw), s = Math.sin(pose.yaw);
   const R = (bx, by) => W2S(pose.x + c * bx - s * by, pose.y + s * bx + c * by);
@@ -401,10 +406,13 @@ $('#m-follow').onclick = () => { setFollow(!view.follow); haptic(8); };
 cv.addEventListener('pointerdown', e => {
   cv.setPointerCapture(e.pointerId);
   ptrs.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
-  if (ptrs.size === 1) {
+  if (ptrs.size === 1 && T.tool) {
+    T.drag = { sx: e.offsetX, sy: e.offsetY, a: S2W(e.offsetX, e.offsetY), b: S2W(e.offsetX, e.offsetY), px: 0 };
+    mapDirty = true;
+  } else if (ptrs.size === 1) {
     const sx = e.offsetX, sy = e.offsetY;
     press = { sx, sy, t: setTimeout(() => { press = null; openAction(S2W(sx, sy)); }, 520) };
-  } else { if (press) { clearTimeout(press.t); press = null; } }
+  } else { if (press) { clearTimeout(press.t); press = null; } T.drag = null; }
   if (ptrs.size === 2) {
     const [a, b] = [...ptrs.values()];
     pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), scale: view.scale };
@@ -416,7 +424,12 @@ cv.addEventListener('pointermove', e => {
   const dx = e.offsetX - p.x, dy = e.offsetY - p.y;
   p.x = e.offsetX; p.y = e.offsetY;
   if (press && Math.hypot(e.offsetX - press.sx, e.offsetY - press.sy) > 9) { clearTimeout(press.t); press = null; }
-  if (ptrs.size === 1 && !press) {
+  if (ptrs.size === 1 && T.drag) {
+    T.drag.b = S2W(e.offsetX, e.offsetY);
+    T.drag.px = Math.hypot(e.offsetX - T.drag.sx, e.offsetY - T.drag.sy);
+    if (T.tool === 'measure') renderMode();
+    mapDirty = true;
+  } else if (ptrs.size === 1 && !press) {
     if (view.follow) setFollow(false);
     view.x -= dx / view.scale; view.y += dy / view.scale; mapDirty = true;
   } else if (ptrs.size === 2 && pinch) {
@@ -424,10 +437,135 @@ cv.addEventListener('pointermove', e => {
     view.scale = clamp(pinch.scale * Math.hypot(a.x - b.x, a.y - b.y) / Math.max(1, pinch.d), 6, 260); mapDirty = true;
   }
 });
-const endPtr = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (press) { clearTimeout(press.t); press = null; } };
+const endPtr = e => {
+  const wasTool = T.drag && ptrs.size === 1 && e.type === 'pointerup';
+  ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (press) { clearTimeout(press.t); press = null; }
+  if (wasTool) toolRelease(T.drag);
+  if (T.tool !== 'measure') T.drag = null;
+  mapDirty = true;
+};
 cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
 cv.addEventListener('wheel', e => { e.preventDefault(); view.scale = clamp(view.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 6, 260); mapDirty = true; }, { passive: false });
 cv.addEventListener('contextmenu', e => e.preventDefault());
+
+// ------------------------------------------------------------------ map tools: goal (like RViz 2D Goal Pose), route, measure
+const T = { tool: null, drag: null, route: [], loop: false, sent: null };
+const DRAG_PX = 14;                                   // shorter drags = tap (no heading)
+const headingOf = d => d.px > DRAG_PX ? Math.atan2(d.b[1] - d.a[1], d.b[0] - d.a[0]) : null;
+const deg = r => `${Math.round(((r * 57.2958) % 360 + 360) % 360)}°`;
+function setTool(tool) {
+  T.tool = T.tool === tool ? null : tool;
+  $('#m-hint').classList.add('gone');
+  T.drag = null;
+  if (T.tool !== 'route') { T.route = []; }
+  $$('.round.tool').forEach(b => { const on = b.dataset.tool === T.tool; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  renderMode(); mapDirty = true;
+}
+$$('.round.tool').forEach(b => b.onclick = () => { haptic(10); setTool(b.dataset.tool); });
+function renderMode() {
+  const bar = $('#m-mode'), wrap = cv.parentElement;
+  let html = '';
+  if (T.tool === 'goal') {
+    html = T.sent ? `<span class="grow"><b>Goal sent</b> ${T.sent}</span><button class="btn" data-m="cancel">Cancel</button><button class="btn ghost" data-m="close">Done</button>`
+      : `<span class="grow"><b>Goal.</b> Tap a spot to send the robot. Drag to choose which way it faces.</span><button class="btn ghost" data-m="close">Done</button>`;
+  } else if (T.tool === 'route') {
+    const n = T.route.length;
+    html = `<span class="grow"><b>${n ? `${n} point${n > 1 ? 's' : ''}` : 'Route.'}</b> ${n ? '' : 'Tap points in order (drag = facing).'}</span>
+      ${n ? '<button class="btn ghost" data-m="undo">Undo</button>' : ''}
+      <label><input type="checkbox" data-m="loop" ${T.loop ? 'checked' : ''}>Loop</label>
+      <button class="btn primary" data-m="go" ${n ? '' : 'disabled'}>Go</button>
+      <button class="btn ghost" data-m="close" aria-label="Close">✕</button>`;
+  } else if (T.tool === 'measure') {
+    const d = T.drag && T.drag.px > 3 ? Math.hypot(T.drag.b[0] - T.drag.a[0], T.drag.b[1] - T.drag.a[1]) : null;
+    html = `<span class="grow"><b>${d == null ? 'Measure.' : `${fmt(d, 2)} m`}</b> ${d == null ? 'Drag between two points.' : `heading ${deg(Math.atan2(T.drag.b[1] - T.drag.a[1], T.drag.b[0] - T.drag.a[0]))}`}</span><button class="btn ghost" data-m="close">Done</button>`;
+  }
+  bar.innerHTML = html; bar.hidden = !html; wrap.classList.toggle('mode-on', !!html);
+  $$('[data-m]', bar).forEach(el => {
+    const a = el.dataset.m;
+    if (a === 'loop') el.onchange = () => { T.loop = el.checked; };
+    else el.onclick = () => modeAction(a);
+  });
+}
+async function modeAction(a) {
+  haptic(10);
+  if (a === 'close') { T.sent = null; setTool(T.tool); return; }
+  if (a === 'undo') { T.route.pop(); renderMode(); mapDirty = true; return; }
+  if (a === 'cancel') {
+    try { await nav({ type: 'cancel' }); toast('Goal canceled'); } catch (e) { toast(e.message, true); }
+    T.sent = null; renderMode(); return;
+  }
+  if (a === 'go') {
+    const waypoints = T.route.map((p, i) => ({ x: +p.x.toFixed(3), y: +p.y.toFixed(3), yaw: p.yaw == null ? null : +p.yaw.toFixed(3), label: `point ${i + 1}` }));
+    try {
+      await nav({ type: 'goto_poses', waypoints, repeat: T.loop ? -1 : 0, replace: true });
+      toast(T.loop ? `Patrolling ${waypoints.length} points until you cancel` : `Route of ${waypoints.length} points started`);
+      haptic(25); setFollow(true); T.route = []; setTool('route');
+    } catch (e) { toast(e.message, true); }
+  }
+}
+async function toolRelease(d) {
+  if (T.tool === 'goal') {
+    const yaw = headingOf(d), [x, y] = d.a;
+    try {
+      await nav({ type: 'goto_pose', x, y, yaw, label: 'map goal', replace: true });
+      T.sent = yaw == null ? `to ${fmt(x, 1)}, ${fmt(y, 1)}` : `facing ${deg(yaw)}`;
+      haptic(25); renderMode();
+    } catch (e) { toast(e.message, true); }
+  } else if (T.tool === 'route') {
+    if (T.route.length >= 30) { toast('30 points at most', true); return; }
+    T.route.push({ x: d.a[0], y: d.a[1], yaw: headingOf(d) }); haptic(12); renderMode();
+  }
+}
+$('#m-home').onclick = async () => {
+  haptic(15);
+  try { await nav({ type: 'go_home', replace: true }); toast('Going home'); setFollow(true); } catch (e) { toast(e.message, true); }
+};
+function drawArrow(x0, y0, yaw, len, color, width) {
+  const k = view.scale * DPR, [ax, ay] = W2S(x0, y0), [bx, by] = W2S(x0 + len * Math.cos(yaw), y0 + len * Math.sin(yaw));
+  const ang = Math.atan2(by - ay, bx - ax), h = Math.min(14 * DPR, 0.4 * len * k);
+  cx.save(); cx.strokeStyle = cx.fillStyle = color; cx.lineWidth = width * DPR; cx.lineCap = 'round';
+  cx.beginPath(); cx.moveTo(ax, ay); cx.lineTo(bx, by); cx.stroke();
+  cx.beginPath(); cx.moveTo(bx, by); cx.lineTo(bx - h * Math.cos(ang - 0.45), by - h * Math.sin(ang - 0.45));
+  cx.lineTo(bx - h * Math.cos(ang + 0.45), by - h * Math.sin(ang + 0.45)); cx.closePath(); cx.fill(); cx.restore();
+}
+function drawTools() {
+  const k = view.scale * DPR;
+  // route points
+  if (T.route.length) {
+    cx.save(); cx.strokeStyle = 'rgba(244,179,60,.8)'; cx.lineWidth = 2.5 * DPR; cx.setLineDash([6 * DPR, 5 * DPR]);
+    cx.beginPath(); T.route.forEach((p, i) => { const [x, y] = W2S(p.x, p.y); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
+    if (T.loop && T.route.length > 2) { const [x, y] = W2S(T.route[0].x, T.route[0].y); cx.lineTo(x, y); }
+    cx.stroke(); cx.restore();
+    cx.font = `700 ${12 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+    T.route.forEach((p, i) => {
+      if (p.yaw != null) drawArrow(p.x, p.y, p.yaw, Math.max(0.35, 26 / view.scale), '#f4b33c', 2.5);
+      const [x, y] = W2S(p.x, p.y);
+      cx.fillStyle = '#f4b33c'; cx.beginPath(); cx.arc(x, y, 11 * DPR, 0, 7); cx.fill();
+      cx.fillStyle = '#2a1a10'; cx.fillText(String(i + 1), x, y + 0.5 * DPR);
+    });
+    cx.textBaseline = 'alphabetic';
+  }
+  // the drag in progress
+  const d = T.drag;
+  if (!d) return;
+  const [ax, ay] = W2S(d.a[0], d.a[1]);
+  if (T.tool === 'measure') {
+    if (d.px < 3) return;
+    const [bx, by] = W2S(d.b[0], d.b[1]);
+    cx.save(); cx.strokeStyle = '#f3e9d8'; cx.lineWidth = 2 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
+    cx.beginPath(); cx.moveTo(ax, ay); cx.lineTo(bx, by); cx.stroke(); cx.restore();
+    [[ax, ay], [bx, by]].forEach(([x, y]) => { cx.fillStyle = '#f3e9d8'; cx.beginPath(); cx.arc(x, y, 4 * DPR, 0, 7); cx.fill(); });
+    const m = Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]);
+    cx.font = `700 ${13 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center';
+    const tx = (ax + bx) / 2, ty = (ay + by) / 2 - 10 * DPR, label = `${m.toFixed(2)} m`, w = cx.measureText(label).width + 12 * DPR;
+    cx.fillStyle = 'rgba(34,22,40,.9)'; cx.fillRect(tx - w / 2, ty - 14 * DPR, w, 20 * DPR);
+    cx.fillStyle = '#f3e9d8'; cx.fillText(label, tx, ty);
+    return;
+  }
+  const color = T.tool === 'goal' ? '#2fb7a6' : '#f4b33c';
+  cx.strokeStyle = color; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(ax, ay, 12 * DPR, 0, 7); cx.stroke();
+  if (d.px > DRAG_PX) drawArrow(d.a[0], d.a[1], headingOf(d), Math.max(Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), 0.3), color, 3.5);
+}
 
 // ------------------------------------------------------------------ action sheet (map long-press)
 function openAction([x, y]) {
@@ -456,6 +594,11 @@ $('#a-save').onclick = async () => {
   if (!name) return;
   try { await nav({ type: 'add_place', name, x, y, yaw: 0 }); toast(`Saved ${name}`); }
   catch (e) { toast(e.message, true); }
+};
+$('#a-home').onclick = async () => {
+  const [x, y] = S.pick; closeAction();
+  if (!await confirmBox('Set home here?', 'The robot returns to this spot for “go home” and after exploring.', 'Set home')) return;
+  try { await nav({ type: 'set_home', x, y, yaw: 0 }); toast('Home set'); } catch (e) { toast(e.message, true); }
 };
 function ask(title, placeholder) {
   return new Promise(resolve => {
