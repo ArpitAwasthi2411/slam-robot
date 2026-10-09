@@ -17,8 +17,8 @@ Arguments
   nav_mode      planner     planner (navigator: A* routes, places, missions) | direct (goal_controller) | none
   dashboard     true        web dashboard on http://<pi>:8080
   places        ~/maps/places.json
-  lidar_port    /dev/rplidar if it exists (scripts/setup_ports.sh), else /dev/ttyUSB0
-  esp32_port    auto           (/dev/esp32, /dev/ttyACM* [S3], /dev/ttyUSB* except lidar_port [classic])
+  lidar_port    auto           the USB-serial port that is NOT the ESP32 (or give a path, e.g. /dev/ttyUSB0)
+  esp32_port    auto           the port that streams ODM lines (found at every start, any USB socket)
   laser_x/y/z/yaw              LiDAR pose on the robot (base_link -> laser)
   us_x / us_y / us_side_deg / us_z   ultrasonic mounts: centre at (us_x, 0), left/right at
                                (us_x, +-us_y) angled +-us_side_deg outwards, height us_z
@@ -56,7 +56,26 @@ def _setup(context):
         if not use_odom:
             raise RuntimeError('localization mode is configured with wheel odometry; use use_odometry:=true')
 
-    actions = [LogInfo(msg=f'[bringup] odom={use_odom} slam={slam} slam_mode={slam_mode} '
+    # ---- serial ports: found by what each device sends, so USB sockets / ttyUSB numbers don't matter
+    lidar_port, esp_port = cfg('lidar_port'), cfg('esp32_port')
+    port_msg = ''
+    if lidar_port == 'auto' or esp_port == 'auto':
+        from lidar_robot.ports import detect_ports
+        try:
+            found_esp, found_lidar = detect_ports()
+        except Exception as e:  # noqa: BLE001 - never block the launch on detection
+            found_esp, found_lidar = None, None
+            port_msg = f' (port detection failed: {e})'
+        if esp_port == 'auto' and found_esp:
+            esp_port = found_esp
+        if lidar_port == 'auto':
+            lidar_port = found_lidar or ('/dev/rplidar' if os.path.exists('/dev/rplidar') else '/dev/ttyUSB0')
+        if not found_esp:
+            port_msg += (' ESP32 not detected (no ODM data on any port): check its USB cable, or that no other '
+                         'launch/serial_probe is holding the port. The bridge keeps searching.')
+    actions_ports = [LogInfo(msg=f'[bringup] ports: ESP32={esp_port}  LiDAR={lidar_port}{port_msg}')]
+
+    actions = actions_ports + [LogInfo(msg=f'[bringup] odom={use_odom} slam={slam} slam_mode={slam_mode} '
                            f'map={map_file or "-"} nav_mode={nav_mode} dashboard={cfg("dashboard")}')]
 
     actions.append(Node(
@@ -81,15 +100,15 @@ def _setup(context):
 
     actions.append(Node(
         package='sllidar_ros2', executable='sllidar_node', name='sllidar_node', output='screen',
-        parameters=[{'channel_type': 'serial', 'serial_port': cfg('lidar_port'),
+        parameters=[{'channel_type': 'serial', 'serial_port': lidar_port,
                      'serial_baudrate': 115200, 'frame_id': 'laser', 'inverted': False,
                      'angle_compensate': True, 'scan_mode': 'Sensitivity'}]))
 
     # In LiDAR-only mode Cartographer owns odom->base_link, so the bridge must not publish it.
     actions.append(Node(
         package='lidar_robot', executable='esp32_bridge', name='esp32_bridge', output='screen',
-        parameters=[params, {'serial_port': cfg('esp32_port'), 'publish_tf': use_odom,
-                             'exclude_ports': cfg('lidar_port')}]))
+        parameters=[params, {'serial_port': esp_port, 'publish_tf': use_odom,
+                             'exclude_ports': lidar_port}]))
 
     if slam:
         if slam_mode == 'localization':
@@ -131,7 +150,7 @@ def generate_launch_description():
     args = [
         ('use_odometry', 'true'), ('slam', 'true'), ('slam_mode', 'mapping'), ('map', ''),
         ('nav_mode', 'planner'), ('dashboard', 'true'), ('places', '~/maps/places.json'),
-        ('lidar_port', '/dev/rplidar' if os.path.exists('/dev/rplidar') else '/dev/ttyUSB0'),
+        ('lidar_port', 'auto'),
         ('esp32_port', 'auto'),
         ('laser_x', '-0.13'), ('laser_y', '0.0'), ('laser_z', '0.10'), ('laser_yaw', '0.0'),
         ('us_x', '0.22'), ('us_y', '0.12'), ('us_side_deg', '30'), ('us_z', '0.06'),

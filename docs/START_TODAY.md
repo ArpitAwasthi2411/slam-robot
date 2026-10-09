@@ -203,7 +203,7 @@ Option 5 step by step: `docs/remote_access.md`.
 | Symptom | Fix |
 |---|---|
 | `ping 169.254.1.2` fails | cable in? `bash scripts/setup_laptop_link.sh` on the laptop |
-| `/dev/esp32` or `/dev/rplidar` missing | `sudo bash ~/slam-robot/scripts/setup_ports.sh` |
+| ESP32 / LiDAR ports mixed up | not needed any more: the launch finds both ports itself at every start (log line `[bringup] ports: ESP32=… LiDAR=…`). Just `robot_restart` |
 | LiDAR `80008000` | unplug LiDAR 5 s, replug, `robot_up` |
 | Pathik doesn't find the robot | phone and robot on the same network? `setup_wifi.sh status`; type the address by hand |
 | Firmware shows 2.2 in Status | step A not done or a different ESP32 port: re-flash |
