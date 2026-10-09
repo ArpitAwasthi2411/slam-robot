@@ -30,12 +30,23 @@ need_nm() {
     sleep 2
   fi
   # netplan must not also manage wlan0, or the two fight over it
-  if grep -lqs "$IFACE" /etc/netplan/*.yaml 2>/dev/null && ! grep -qs "renderer: NetworkManager" /etc/netplan/*.yaml; then
-    echo "WARNING: a netplan file configures $IFACE:"
-    grep -ls "$IFACE" /etc/netplan/*.yaml
-    echo "Remove the wifis: section for $IFACE from it (keep the ethernet part), run 'sudo netplan apply', then rerun."
-    exit 1
-  fi
+  # (e.g. the Pi image's 50-cloud-init.yaml): drop only its wifis: part, keep ethernet, keep a backup
+  for f in $(grep -ls "wifis:" /etc/netplan/*.yaml 2>/dev/null); do
+    cp "$f" "/root/$(basename "$f").bak"
+    python3 - "$f" <<'PY'
+import sys, yaml
+p = sys.argv[1]
+d = yaml.safe_load(open(p)) or {}
+d.get('network', {}).pop('wifis', None)
+yaml.safe_dump(d, open(p, 'w'), default_flow_style=False)
+PY
+    chmod 600 "$f"
+    echo "Removed the Wi-Fi part of $f (backup: /root/$(basename "$f").bak)"
+    # stop cloud-init from writing it back at the next boot
+    [ -d /etc/cloud/cloud.cfg.d ] && echo 'network: {config: disabled}' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+    netplan apply || true
+    sleep 3
+  done
   iw reg set IN 2>/dev/null || true      # Wi-Fi country (India): needed for access-point mode
   rfkill unblock wifi 2>/dev/null || true
   nmcli radio wifi on || true
