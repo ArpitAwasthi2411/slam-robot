@@ -89,6 +89,7 @@ def build_world():
 
 class SimBackend:
     def __init__(self, explore=False):
+        self.explore_mode = explore
         self.world = build_world()
         self.known = bytearray(W * H)            # 0 unknown, 1 free, 101 occupied (dashboard encoding)
         if not explore:                          # "localization mode": the whole floor is already mapped
@@ -296,6 +297,7 @@ class SimBackend:
                 'tune': dict(self.tune), 'fw': '2.3-sim', 'telemetry': self.telemetry_on,
                 'turns': round(self.odom_turns, 3), 'sep': SEP, 'test_running': bool(self.tests.result.get('running')),
                 'autosave': self.autosave.info,
+                'slam_mode': 'mapping' if self.explore_mode else 'localization',
             }
 
     def get_map(self, since):
@@ -325,6 +327,14 @@ class SimBackend:
 
     def cancel_goal(self):
         return self.nav_request({'type': 'cancel'})
+
+    def relocalize(self, body):
+        x, y, yaw = float(body['x']), float(body['y']), float(body.get('yaw', 0.0))
+        if self.explore_mode:
+            raise ValueError('Set position is for a saved map (localization mode).')
+        with self.lock:                     # the simulator "relocalizes" by moving its robot there
+            self.x, self.y, self.yaw = x, y, yaw
+        return {'ok': True, 'trajectory': 1}
 
     def save_map(self, name):
         with self.lock:

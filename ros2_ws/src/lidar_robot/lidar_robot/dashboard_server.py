@@ -173,6 +173,8 @@ def make_handler(backend, index_path, app_dir=None):
                     return self._send(200, backend.nav_request(body))
                 elif url.path == '/api/save_map':
                     return self._send(200, {'ok': True, 'saved': backend.save_map(str(body.get('name', 'map')))})
+                elif url.path == '/api/relocalize':
+                    return self._optional('relocalize', body)
                 elif url.path == '/api/esp':
                     return self._optional('esp_command', body)
                 elif url.path == '/api/test':

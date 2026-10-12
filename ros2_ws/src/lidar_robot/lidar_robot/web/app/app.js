@@ -62,9 +62,10 @@ async function probe(base, timeout = 900) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeout);
   try {
+    const t0 = performance.now();
     const r = await fetch(base + '/api/ping', { signal: ctl.signal, cache: 'no-store' });
     const j = await r.json();
-    if (j && j.api) return { base, ...j };
+    if (j && j.api) return { base, ...j, ms: Math.round(performance.now() - t0) };
   } catch (e) { /* not a robot */ } finally { clearTimeout(t); }
   return null;
 }
@@ -84,10 +85,10 @@ async function scan() {
   const add = r => {
     if (!r || found.has(r.base)) return;
     found.set(r.base, r);
-    renderFound([...found.values()]);
+    renderFound([...found.values()], true);
     haptic(20);
   };
-  list.innerHTML = '';
+  $('#c-card-name').textContent = 'Looking…';
   const quick = [...new Set([
     ...store.get('robots', []).map(r => r.base),
     'http://10.42.0.1:8080', 'http://169.254.1.2:8080', 'http://robot.local:8080', 'http://robot:8080',
@@ -106,17 +107,37 @@ async function scan() {
   }
   prog.textContent = found.size ? `${found.size} robot${found.size > 1 ? 's' : ''} found` :
     'No robot found. Check the Wi‑Fi and that robot_up is running, or type the address.';
-  btn.disabled = false; btn.textContent = 'Find again';
+  btn.disabled = false;
   scanning = false;
+  renderFound(found.size ? [...found.values()] : store.get('robots', []), found.size > 0);
+  if (!found.size) btn.textContent = 'Find again';
 }
-function renderFound(robots) {
-  $('#c-list').innerHTML = robots.map((r, i) => `
+function netType(base) {
+  const h = (base || '').replace(/^https?:\/\//, '').replace(/:\d+$/, '');
+  if (h === '10.42.0.1') return 'Robot Wi‑Fi';
+  if (h.startsWith('169.254.')) return 'Cable';
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h) || h.endsWith('.ts.net') || (!/\./.test(h) && h !== 'localhost')) return 'Internet (Tailscale)';
+  if (h === 'localhost' || h.startsWith('127.')) return 'This device';
+  return 'Same Wi‑Fi';
+}
+let foundRobots = [];
+function renderFound(robots, live = false) {
+  foundRobots = robots;
+  $('#c-list').innerHTML = robots.length ? robots.map((r, i) => `
     <li><button data-i="${i}">
       <svg viewBox="0 0 64 64"><use href="#mark"/></svg>
-      <span><b>${esc(r.robot || 'robot')}</b><small>${esc(r.base.replace('http://', ''))}${r.fw ? `, firmware ${esc(r.fw)}` : ''}</small></span>
-      <span class="go">Connect</span>
-    </button></li>`).join('');
+      <span><b>${esc(r.robot || 'robot')}</b><small>${esc(r.base.replace('http://', ''))} · ${esc(netType(r.base))}</small></span>
+      <span class="go">${live ? 'Live' : 'Saved'}</span>
+    </button></li>`).join('') : '<li class="empty">No saved robots yet.</li>';
   $$('#c-list button').forEach(b => b.onclick = () => connect(robots[+b.dataset.i]));
+  const top = live && robots[0];
+  $('#c-card-name').textContent = top ? (top.robot || 'robot') : (scanning ? 'Looking…' : 'No robot found yet');
+  $('#c-card-net').textContent = top ? netType(top.base) : '–';
+  $('#c-card-lat').textContent = top && fin(top.ms) ? `${top.ms} ms` : '–';
+  $('#c-card-fw').textContent = top && top.fw ? `Firmware ${top.fw}` : '–';
+  const btn = $('#c-scan');
+  if (top && !scanning) { btn.textContent = `Connect to ${top.robot || 'robot'}`; btn.onclick = () => connect(top); }
+  else if (!scanning) { btn.textContent = 'Find robot'; btn.onclick = scan; }
 }
 function normalizeAddr(s) {
   s = s.trim();
@@ -130,7 +151,7 @@ function normalizeAddr(s) {
 const S = {
   st: null, gen: 0, fails: 0, lastOk: 0, robot: null,
   map: null, mapVer: -1, mapImg: null,
-  tab: 'drive', lab: 'wheels',
+  tab: 'drive', lab: 'health',
 };
 
 async function connect(robot) {
@@ -209,7 +230,8 @@ function onState(st) {
   else if (navs.state === 'DWELL') { mode = 'At a stop'; cls = 'auto'; }
   else if (link.cmd_source === 'teleop') { mode = 'Driving'; cls = 'auto'; }
   else if (!st.bridge_alive) { mode = 'No motor link'; }
-  chip.textContent = mode; chip.className = 'chip ' + cls;
+  chip.textContent = mode; chip.className = 'chip glass ' + cls;
+  $('#t-link').textContent = `${netType(BASE)}${fin(S.rtt) ? ` · ${Math.round(S.rtt)} ms` : ''}`;
 
   $('#estopped').hidden = !st.estop;
   $('#estop').hidden = !!st.estop;
@@ -219,7 +241,7 @@ function onState(st) {
   let b = '';
   if (!st.bridge_alive) b = '<b>Motor board not talking.</b> Check the ESP32 USB cable, then restart with robot_up.';
   else if (!st.pose) b = '<b>Waiting for the robot’s position.</b> Is the LiDAR spinning?';
-  else if (navs && navs.localized === false) b = '<b>Confirm the position.</b> Drive a little until the orange dots sit on the walls, then press Position OK.';
+  else if (navs && navs.localized === false) b = '<b>Confirm the position.</b> Drive a little until the orange dots sit on the walls, then Map → Position OK. Wrong place? Use the Locate tool.';
   banner.innerHTML = b; banner.hidden = !b; banner.classList.remove('link');
   $('#d-locok').hidden = !(navs && navs.localized === false);
 
@@ -228,9 +250,9 @@ function onState(st) {
   $('#d-v').textContent = fmt(od.v); $('#d-w').textContent = fmt(od.w);
 
   renderExplore(st);
+  renderMapStats(st);
   if (S.tab === 'go') renderGo(st);
-  if (S.tab === 'status') renderStatus(st);
-  if (S.tab === 'lab') labOnState(st);
+  if (S.tab === 'lab') { if (S.lab === 'health') renderStatus(st); labOnState(st); }
   mapDirty = true;
 }
 function onLinkLost() {
@@ -241,20 +263,18 @@ function onLinkLost() {
     banner.classList.add('link'); banner.hidden = false;
   }
   $('#t-dot').className = 'dot bad';
-  if (S.fails >= 3) { $('#t-mode').textContent = 'Offline'; $('#t-mode').className = 'chip'; }
+  if (S.fails >= 3) { $('#t-mode').textContent = 'Offline'; $('#t-mode').className = 'chip glass'; $('#t-link').textContent = 'reconnecting…'; }
 }
 
 // ------------------------------------------------------------------ tabs & sheet
 function setTab(tab) {
   S.tab = tab;
   $$('.tab').forEach(t => { const on = t.dataset.tab === tab; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
-  ['drive', 'go', 'lab', 'status'].forEach(n => { $('#p-' + n).hidden = n !== tab; });
+  ['go', 'map', 'lab'].forEach(n => { $('#p-' + n).hidden = n !== tab; });
+  ['drive', 'go', 'map', 'lab'].forEach(n => document.body.classList.toggle('tab-' + n, n === tab));
   const sheet = $('#sheet');
-  sheet.classList.toggle('tall', tab === 'lab');
-  sheet.classList.toggle('mid', tab === 'go' || tab === 'status');
-  document.body.classList.toggle('sheet-tall', tab === 'lab');
-  document.body.classList.toggle('sheet-mid', tab === 'go' || tab === 'status');
   sheet.scrollTop = 0;
+  if (tab !== 'drive' && T.tool === 'draw') setTool('draw');
   if (tab === 'lab') labEnter(); else telemetry(false);
   if (S.st) onState(S.st);
   setTimeout(resize, 260);
@@ -280,7 +300,7 @@ function buildMap(m) {
   const raw = atob(m.data), w = m.width, h = m.height;
   const off = document.createElement('canvas'); off.width = w; off.height = h;
   const g = off.getContext('2d'), img = g.createImageData(w, h), d = img.data;
-  const FREE = [0x34, 0x24, 0x3e], WALL = [0xf3, 0xe9, 0xd8], MID = [0x6f, 0x5a, 0x78];
+  const FREE = [0x1f, 0x1f, 0x26], WALL = [0xf1, 0xe7, 0xd3], MID = [0x4a, 0x47, 0x52];
   for (let y = 0; y < h; y++) {
     const row = (h - 1 - y) * w;            // map row 0 is the bottom (smallest y)
     for (let x = 0; x < w; x++) {
@@ -301,9 +321,13 @@ function buildMap(m) {
 function drawMap() {
   const st = S.st, W = cv.width, H = cv.height, k = view.scale * DPR;
   const pose = st && st.pose;
-  if (view.follow && pose) { view.x = pose.x; view.y = pose.y; }
+  if (view.follow && pose) {
+    // keep the robot in the middle of the part of the map that isn't covered by the sheet
+    const covered = (S.tab === 'drive' ? 0 : ($('#sheet').offsetHeight || 0)) * 0.5;
+    view.x = pose.x; view.y = pose.y - covered / view.scale;
+  }
   cx.setTransform(1, 0, 0, 1, 0, 0);
-  cx.fillStyle = '#221628'; cx.fillRect(0, 0, W, H);
+  cx.fillStyle = '#0d0d10'; cx.fillRect(0, 0, W, H);
   if (S.mapImg) {
     const m = S.map, [sx, sy] = W2S(m.origin[0], m.origin[1] + m.height * m.resolution);
     cx.imageSmoothingEnabled = false;
@@ -311,7 +335,7 @@ function drawMap() {
   }
   // 1 m grid (scale reference)
   if (k > 18 * DPR) {
-    cx.strokeStyle = 'rgba(243,233,216,0.05)'; cx.lineWidth = 1;
+    cx.strokeStyle = 'rgba(255,255,255,0.035)'; cx.lineWidth = 1;
     const [x0, y1] = S2W(0, 0), [x1, y0] = S2W(W / DPR, H / DPR);
     cx.beginPath();
     for (let gx = Math.floor(x0); gx <= x1; gx++) { const [px] = W2S(gx, 0); cx.moveTo(px, 0); cx.lineTo(px, H); }
@@ -321,26 +345,27 @@ function drawMap() {
   if (!st) return;
   const navs = st.nav || {};
   // preview route (dashed) and active route
-  const line = (pts, color, dash, width) => {
+  const line = (pts, color, dash, width, glow) => {
     if (!pts || pts.length < 2) return;
     cx.save(); cx.strokeStyle = color; cx.lineWidth = width * DPR; cx.lineJoin = cx.lineCap = 'round';
+    if (glow) { cx.shadowColor = color; cx.shadowBlur = 14 * DPR; }
     cx.setLineDash(dash.map(v => v * DPR)); cx.beginPath();
     pts.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
     cx.stroke(); cx.restore();
   };
-  if (navs.preview && navs.preview.path && navs.state !== 'DRIVING') line(navs.preview.path, 'rgba(47,183,166,.85)', [7, 6], 3);
-  if (navs.path && navs.path.length) line(pose ? [[pose.x, pose.y], ...navs.path] : navs.path, '#2fb7a6', [], 4);
+  if (navs.preview && navs.preview.path && navs.state !== 'DRIVING') line(navs.preview.path, 'rgba(45,226,200,.8)', [7, 6], 3);
+  if (navs.path && navs.path.length) line(pose ? [[pose.x, pose.y], ...navs.path] : navs.path, '#2de2c8', [], 4, true);
   // exploration: open map edges (frontiers) and the area it is heading to
   const ex = navs.explore;
   if (ex && ex.active) {
     for (const f of ex.frontiers || []) {
       const [x, y] = W2S(f[0], f[1]), r = Math.min(14, 3 + Math.sqrt(f[2]) * 0.9) * DPR;
       cx.fillStyle = 'rgba(229,72,127,.22)'; cx.beginPath(); cx.arc(x, y, r, 0, 7); cx.fill();
-      cx.fillStyle = '#e5487f'; cx.beginPath(); cx.arc(x, y, 2.4 * DPR, 0, 7); cx.fill();
+      cx.fillStyle = '#e8407c'; cx.beginPath(); cx.arc(x, y, 2.4 * DPR, 0, 7); cx.fill();
     }
     if (ex.target) {
       const [x, y] = W2S(ex.target[0], ex.target[1]);
-      cx.save(); cx.strokeStyle = '#e5487f'; cx.lineWidth = 2.5 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
+      cx.save(); cx.strokeStyle = '#e8407c'; cx.lineWidth = 2.5 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
       cx.beginPath(); cx.arc(x, y, 13 * DPR, 0, 7); cx.stroke(); cx.restore();
     }
   }
@@ -350,28 +375,33 @@ function drawMap() {
   const diamond = (x, y, r, fill) => { cx.beginPath(); cx.moveTo(x, y - r); cx.lineTo(x + r, y); cx.lineTo(x, y + r); cx.lineTo(x - r, y); cx.closePath(); cx.fillStyle = fill; cx.fill(); };
   for (const p of pl) {
     const [x, y] = W2S(p.x, p.y);
-    diamond(x, y, 7 * DPR, '#2fb7a6'); diamond(x, y, 3 * DPR, '#221628');
-    if (k > 22 * DPR) { cx.fillStyle = 'rgba(243,233,216,.85)'; cx.fillText(p.name, x, y - 12 * DPR); }
+    diamond(x, y, 7 * DPR, '#2de2c8'); diamond(x, y, 3 * DPR, '#0d0d10');
+    if (k > 22 * DPR) {
+      const w = cx.measureText(p.name).width + 12 * DPR;
+      cx.fillStyle = 'rgba(20,20,25,.8)'; cx.fillRect(x - w / 2, y - 26 * DPR, w, 17 * DPR);
+      cx.fillStyle = '#f2ede6'; cx.fillText(p.name, x, y - 13 * DPR);
+    }
   }
   const home = st.places && st.places.home;
-  if (home) { const [x, y] = W2S(home.x, home.y); diamond(x, y, 8 * DPR, '#f4b33c'); diamond(x, y, 3.5 * DPR, '#221628'); }
+  if (home) { const [x, y] = W2S(home.x, home.y); diamond(x, y, 8 * DPR, '#ff9f2e'); diamond(x, y, 3.5 * DPR, '#0d0d10'); }
   if (navs.goal) {
     const [x, y] = W2S(navs.goal.x, navs.goal.y);
-    cx.strokeStyle = '#2fb7a6'; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(x, y, 11 * DPR, 0, 7); cx.stroke();
+    cx.save(); cx.strokeStyle = '#2de2c8'; cx.shadowColor = '#2de2c8'; cx.shadowBlur = 12 * DPR;
+    cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(x, y, 11 * DPR, 0, 7); cx.stroke(); cx.restore();
   }
   if (S.pick) {
     const [x, y] = W2S(S.pick[0], S.pick[1]);
-    cx.strokeStyle = '#f4b33c'; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(x, y, 10 * DPR, 0, 7); cx.stroke();
+    cx.strokeStyle = '#ff9f2e'; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(x, y, 10 * DPR, 0, 7); cx.stroke();
   }
   // goal heading arrow (where the robot will face)
-  if (navs.goal && fin(navs.goal.yaw)) drawArrow(navs.goal.x, navs.goal.y, navs.goal.yaw, Math.max(0.35, 24 / view.scale), '#2fb7a6', 3);
+  if (navs.goal && fin(navs.goal.yaw)) drawArrow(navs.goal.x, navs.goal.y, navs.goal.yaw, Math.max(0.35, 24 / view.scale), '#2de2c8', 3);
   drawTools();
   if (!pose) return;
   const c = Math.cos(pose.yaw), s = Math.sin(pose.yaw);
   const R = (bx, by) => W2S(pose.x + c * bx - s * by, pose.y + s * bx + c * by);
   // LiDAR returns
   const pts = (st.scan && st.scan.points) || [];
-  cx.fillStyle = '#f4b33c';
+  cx.fillStyle = '#ff9f2e';
   const ps = Math.max(2, 2.2 * DPR);
   for (const p of pts) { const [x, y] = R(p[0], p[1]); cx.fillRect(x - ps / 2, y - ps / 2, ps, ps); }
   // ultrasonic cones
@@ -390,11 +420,12 @@ function drawMap() {
   // robot: drive axle at base_link, chassis behind it
   const body = [[0.07, 0.21], [0.07, -0.21], [-0.37, -0.21], [-0.37, 0.21]].map(p => R(p[0], p[1]));
   cx.beginPath(); body.forEach((p, i) => i ? cx.lineTo(p[0], p[1]) : cx.moveTo(p[0], p[1])); cx.closePath();
-  cx.fillStyle = 'rgba(229,72,127,.88)'; cx.fill();
-  cx.lineWidth = 2 * DPR; cx.strokeStyle = '#f3e9d8'; cx.stroke();
+  cx.save(); cx.shadowColor = '#e8407c'; cx.shadowBlur = 16 * DPR;
+  cx.fillStyle = 'rgba(232,64,124,.92)'; cx.fill(); cx.restore();
+  cx.lineWidth = 2 * DPR; cx.strokeStyle = '#f2ede6'; cx.stroke();
   const arrow = [[0.17, 0], [0.0, 0.1], [0.03, 0], [0.0, -0.1]].map(p => R(p[0], p[1]));
   cx.beginPath(); arrow.forEach((p, i) => i ? cx.lineTo(p[0], p[1]) : cx.moveTo(p[0], p[1])); cx.closePath();
-  cx.fillStyle = '#f3e9d8'; cx.fill();
+  cx.fillStyle = '#f2ede6'; cx.fill();
 }
 (function frame() { if (mapDirty && !$('#main').hidden) { mapDirty = false; drawMap(); } requestAnimationFrame(frame); })();
 
@@ -407,7 +438,9 @@ cv.addEventListener('pointerdown', e => {
   cv.setPointerCapture(e.pointerId);
   ptrs.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
   if (ptrs.size === 1 && T.tool) {
-    T.drag = { sx: e.offsetX, sy: e.offsetY, a: S2W(e.offsetX, e.offsetY), b: S2W(e.offsetX, e.offsetY), px: 0 };
+    if (T.tool === 'draw' && T.draw) { ptrs.delete(e.pointerId); return; }         // finish or discard first
+    T.drag = { sx: e.offsetX, sy: e.offsetY, a: S2W(e.offsetX, e.offsetY), b: S2W(e.offsetX, e.offsetY), px: 0,
+      pts: [S2W(e.offsetX, e.offsetY)], lx: e.offsetX, ly: e.offsetY };
     mapDirty = true;
   } else if (ptrs.size === 1) {
     const sx = e.offsetX, sy = e.offsetY;
@@ -427,6 +460,9 @@ cv.addEventListener('pointermove', e => {
   if (ptrs.size === 1 && T.drag) {
     T.drag.b = S2W(e.offsetX, e.offsetY);
     T.drag.px = Math.hypot(e.offsetX - T.drag.sx, e.offsetY - T.drag.sy);
+    if (T.tool === 'draw' && Math.hypot(e.offsetX - T.drag.lx, e.offsetY - T.drag.ly) > 4) {
+      T.drag.pts.push(T.drag.b); T.drag.lx = e.offsetX; T.drag.ly = e.offsetY;
+    }
     if (T.tool === 'measure') renderMode();
     mapDirty = true;
   } else if (ptrs.size === 1 && !press) {
@@ -449,7 +485,7 @@ cv.addEventListener('wheel', e => { e.preventDefault(); view.scale = clamp(view.
 cv.addEventListener('contextmenu', e => e.preventDefault());
 
 // ------------------------------------------------------------------ map tools: goal (like RViz 2D Goal Pose), route, measure
-const T = { tool: null, drag: null, route: [], loop: false, sent: null };
+const T = { tool: null, drag: null, route: [], loop: false, sent: null, draw: null };
 const DRAG_PX = 14;                                   // shorter drags = tap (no heading)
 const headingOf = d => d.px > DRAG_PX ? Math.atan2(d.b[1] - d.a[1], d.b[0] - d.a[0]) : null;
 const deg = r => `${Math.round(((r * 57.2958) % 360 + 360) % 360)}°`;
@@ -458,10 +494,12 @@ function setTool(tool) {
   $('#m-hint').classList.add('gone');
   T.drag = null;
   if (T.tool !== 'route') { T.route = []; }
-  $$('.round.tool').forEach(b => { const on = b.dataset.tool === T.tool; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  if (T.tool !== 'draw') closePath();
+  if (T.tool && S.tab !== 'drive' && S.tab !== 'map') setTab('drive');
+  $$('.tool[data-tool]').forEach(b => { const on = b.dataset.tool === T.tool; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
   renderMode(); mapDirty = true;
 }
-$$('.round.tool').forEach(b => b.onclick = () => { haptic(10); setTool(b.dataset.tool); });
+$$('.tool[data-tool]').forEach(b => b.onclick = () => { haptic(10); setTool(b.dataset.tool); });
 function renderMode() {
   const bar = $('#m-mode'), wrap = cv.parentElement;
   let html = '';
@@ -473,8 +511,12 @@ function renderMode() {
     html = `<span class="grow"><b>${n ? `${n} point${n > 1 ? 's' : ''}` : 'Route.'}</b> ${n ? '' : 'Tap points in order (drag = facing).'}</span>
       ${n ? '<button class="btn ghost" data-m="undo">Undo</button>' : ''}
       <label><input type="checkbox" data-m="loop" ${T.loop ? 'checked' : ''}>Loop</label>
-      <button class="btn primary" data-m="go" ${n ? '' : 'disabled'}>Go</button>
+      <button class="btn grad" data-m="go" ${n ? '' : 'disabled'}>Go</button>
       <button class="btn ghost" data-m="close" aria-label="Close">✕</button>`;
+  } else if (T.tool === 'draw' && !T.draw) {
+    html = `<span class="grow"><b>Draw a path.</b> Drag your finger the way the robot should drive.</span><button class="btn ghost" data-m="close">Done</button>`;
+  } else if (T.tool === 'locate') {
+    html = `<span class="grow"><b>Set position.</b> Press where the robot really is, drag the way it faces.</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'measure') {
     const d = T.drag && T.drag.px > 3 ? Math.hypot(T.drag.b[0] - T.drag.a[0], T.drag.b[1] - T.drag.a[1]) : null;
     html = `<span class="grow"><b>${d == null ? 'Measure.' : `${fmt(d, 2)} m`}</b> ${d == null ? 'Drag between two points.' : `heading ${deg(Math.atan2(T.drag.b[1] - T.drag.a[1], T.drag.b[0] - T.drag.a[0]))}`}</span><button class="btn ghost" data-m="close">Done</button>`;
@@ -503,7 +545,49 @@ async function modeAction(a) {
     } catch (e) { toast(e.message, true); }
   }
 }
+// ---- draw a path
+function closePath() {
+  T.draw = null; $('#path-sheet').hidden = true; document.body.classList.remove('path-open'); mapDirty = true;
+}
+async function finishDrawing(raw) {
+  if (raw.length < 3) return;
+  const pts = raw.map(([x, y]) => [+x.toFixed(3), +y.toFixed(3)]);
+  try {
+    const r = await nav({ type: 'check_path', points: pts });
+    T.draw = { raw: pts, path: r.path, blocked: r.blocked || [], length: r.length, eta: r.eta_s };
+    $('#ps-len').textContent = `${fmt(r.length, 1)} m`;
+    $('#ps-eta').textContent = secs(r.eta_s);
+    const bad = T.draw.blocked;
+    $('#ps-warn').hidden = !bad.length;
+    $('#ps-warn').textContent = bad.length ? `Too close to a wall at ${fmt(bad[0][0], 1)} m (red). Redraw that part.` : '';
+    $('#ps-go').disabled = !!bad.length;
+    $('#path-sheet').hidden = false; document.body.classList.add('path-open');
+    renderMode(); mapDirty = true; haptic(15);
+  } catch (e) { toast(e.message, true); }
+}
+$('#ps-close').onclick = () => { closePath(); renderMode(); };
+$('#ps-redraw').onclick = () => { closePath(); renderMode(); };
+$('#ps-go').onclick = async () => {
+  if (!T.draw) return;
+  try {
+    await nav({ type: 'follow_path', points: T.draw.raw, repeat: $('#ps-loop').checked ? -1 : 0, replace: true });
+    toast($('#ps-loop').checked ? 'Following your path on a loop' : 'Following your path'); haptic(25); setFollow(true);
+    T.lastDrawn = T.draw.path;
+    closePath(); setTool('draw');
+  } catch (e) { toast(e.message, true); }
+};
+
 async function toolRelease(d) {
+  if (T.tool === 'draw') { await finishDrawing(d.pts || []); return; }
+  if (T.tool === 'locate') {
+    const pose = S.st && S.st.pose, yaw = headingOf(d) ?? (pose ? pose.yaw : 0), [x, y] = d.a;
+    if (!await confirmBox('Robot is here?', `Set the robot's position to ${fmt(x, 1)}, ${fmt(y, 1)} m facing ${deg(yaw)}. The LiDAR then re-matches the map from there.`, 'Set position')) return;
+    try {
+      await post('/api/relocalize', { x, y, yaw });
+      toast('Position set. When the orange dots sit on the walls, tap Position OK (Map tab).'); haptic(25); setTool('locate');
+    } catch (e) { toast(e.message, true); }
+    return;
+  }
   if (T.tool === 'goal') {
     const yaw = headingOf(d), [x, y] = d.a;
     try {
@@ -538,31 +622,52 @@ function drawTools() {
     cx.stroke(); cx.restore();
     cx.font = `700 ${12 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center'; cx.textBaseline = 'middle';
     T.route.forEach((p, i) => {
-      if (p.yaw != null) drawArrow(p.x, p.y, p.yaw, Math.max(0.35, 26 / view.scale), '#f4b33c', 2.5);
+      if (p.yaw != null) drawArrow(p.x, p.y, p.yaw, Math.max(0.35, 26 / view.scale), '#ff9f2e', 2.5);
       const [x, y] = W2S(p.x, p.y);
-      cx.fillStyle = '#f4b33c'; cx.beginPath(); cx.arc(x, y, 11 * DPR, 0, 7); cx.fill();
+      cx.fillStyle = '#ff9f2e'; cx.beginPath(); cx.arc(x, y, 11 * DPR, 0, 7); cx.fill();
       cx.fillStyle = '#2a1a10'; cx.fillText(String(i + 1), x, y + 0.5 * DPR);
     });
     cx.textBaseline = 'alphabetic';
   }
+  // drawn path: live stroke, then the checked path with blocked stretches in red
+  const glowLine = (pts, color, w, dash) => {
+    if (!pts || pts.length < 2) return;
+    cx.save(); cx.strokeStyle = color; cx.shadowColor = color; cx.shadowBlur = 16 * DPR; cx.lineWidth = w * DPR;
+    cx.lineCap = cx.lineJoin = 'round'; if (dash) cx.setLineDash(dash.map(v => v * DPR));
+    cx.beginPath(); pts.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); }); cx.stroke(); cx.restore();
+  };
+  if (T.tool === 'draw' && T.drag && T.drag.pts) glowLine(T.drag.pts, '#2de2c8', 4);
+  if (T.draw && T.draw.path) {
+    glowLine(T.draw.path, '#2de2c8', 5);
+    if (T.draw.blocked.length) {
+      let acc = 0; const P = T.draw.path, red = [];
+      for (let i = 1; i < P.length; i++) {
+        acc += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
+        if (T.draw.blocked.some(([a, b]) => acc >= a - 0.1 && acc <= b + 0.1)) red.push([P[i - 1], P[i]]);
+      }
+      red.forEach(seg => glowLine(seg, '#ef3b2d', 6));
+    }
+    const P = T.draw.path, [ex, ey] = W2S(P[P.length - 1][0], P[P.length - 1][1]);
+    cx.fillStyle = '#e8407c'; cx.beginPath(); cx.arc(ex, ey, 7 * DPR, 0, 7); cx.fill();
+  }
   // the drag in progress
   const d = T.drag;
-  if (!d) return;
+  if (!d || T.tool === 'draw') return;
   const [ax, ay] = W2S(d.a[0], d.a[1]);
   if (T.tool === 'measure') {
     if (d.px < 3) return;
     const [bx, by] = W2S(d.b[0], d.b[1]);
-    cx.save(); cx.strokeStyle = '#f3e9d8'; cx.lineWidth = 2 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
+    cx.save(); cx.strokeStyle = '#f2ede6'; cx.lineWidth = 2 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
     cx.beginPath(); cx.moveTo(ax, ay); cx.lineTo(bx, by); cx.stroke(); cx.restore();
-    [[ax, ay], [bx, by]].forEach(([x, y]) => { cx.fillStyle = '#f3e9d8'; cx.beginPath(); cx.arc(x, y, 4 * DPR, 0, 7); cx.fill(); });
+    [[ax, ay], [bx, by]].forEach(([x, y]) => { cx.fillStyle = '#f2ede6'; cx.beginPath(); cx.arc(x, y, 4 * DPR, 0, 7); cx.fill(); });
     const m = Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]);
     cx.font = `700 ${13 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center';
     const tx = (ax + bx) / 2, ty = (ay + by) / 2 - 10 * DPR, label = `${m.toFixed(2)} m`, w = cx.measureText(label).width + 12 * DPR;
     cx.fillStyle = 'rgba(34,22,40,.9)'; cx.fillRect(tx - w / 2, ty - 14 * DPR, w, 20 * DPR);
-    cx.fillStyle = '#f3e9d8'; cx.fillText(label, tx, ty);
+    cx.fillStyle = '#f2ede6'; cx.fillText(label, tx, ty);
     return;
   }
-  const color = T.tool === 'goal' ? '#2fb7a6' : '#f4b33c';
+  const color = T.tool === 'goal' ? '#2de2c8' : T.tool === 'locate' ? '#e8407c' : '#ff9f2e';
   cx.strokeStyle = color; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(ax, ay, 12 * DPR, 0, 7); cx.stroke();
   if (d.px > DRAG_PX) drawArrow(d.a[0], d.a[1], headingOf(d), Math.max(Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), 0.3), color, 3.5);
 }
@@ -633,14 +738,19 @@ const joy = { x: 0, y: 0, active: false, id: null };
 function drawJoy() {
   const W = jc.width, R = W / 2, r = R * 0.34;
   jx.clearRect(0, 0, W, W);
-  jx.beginPath(); jx.arc(R, R, R - 3, 0, 7); jx.fillStyle = '#221628'; jx.fill();
-  jx.lineWidth = 2; jx.strokeStyle = '#4a3657'; jx.stroke();
-  jx.beginPath(); jx.arc(R, R, (R - 3) * 0.55, 0, 7); jx.strokeStyle = '#3b2946'; jx.stroke();
-  jx.strokeStyle = '#3b2946'; jx.beginPath(); jx.moveTo(R, 14); jx.lineTo(R, W - 14); jx.moveTo(14, R); jx.lineTo(W - 14, R); jx.stroke();
-  const kx = R + joy.x * (R - r - 4), ky = R - joy.y * (R - r - 4);
+  jx.beginPath(); jx.arc(R, R, R - 6, 0, 7); jx.fillStyle = 'rgba(16,16,20,.82)'; jx.fill();
+  jx.save(); jx.shadowColor = '#2de2c8'; jx.shadowBlur = joy.active ? 22 : 12;
+  jx.lineWidth = 4; jx.strokeStyle = joy.active ? '#2de2c8' : 'rgba(45,226,200,.75)'; jx.stroke(); jx.restore();
+  jx.fillStyle = 'rgba(45,226,200,.8)';
+  [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(([dx, dy]) => {        // direction carets
+    const cxp = R + dx * (R - 20), cyp = R + dy * (R - 20), a = Math.atan2(dy, dx);
+    jx.beginPath(); jx.moveTo(cxp + Math.cos(a) * 7, cyp + Math.sin(a) * 7);
+    jx.lineTo(cxp + Math.cos(a + 2.4) * 7, cyp + Math.sin(a + 2.4) * 7); jx.lineTo(cxp + Math.cos(a - 2.4) * 7, cyp + Math.sin(a - 2.4) * 7); jx.fill();
+  });
+  const kx = R + joy.x * (R - r - 8), ky = R - joy.y * (R - r - 8);
   jx.beginPath(); jx.arc(kx, ky, r, 0, 7);
-  jx.fillStyle = joy.active ? '#f4b33c' : '#4a3657'; jx.fill();
-  jx.lineWidth = 3; jx.strokeStyle = '#f3e9d8'; jx.stroke();
+  jx.fillStyle = joy.active ? 'rgba(45,226,200,.28)' : 'rgba(30,30,37,.95)'; jx.fill();
+  jx.lineWidth = 3; jx.strokeStyle = joy.active ? '#2de2c8' : 'rgba(45,226,200,.6)'; jx.stroke();
 }
 function joyFrom(e) {
   const r = jc.getBoundingClientRect(), R = r.width / 2;
@@ -731,6 +841,18 @@ function renderExplore(st) {
   else if (a.state === 'saved' && a.name !== xSeenSave) { xSeenSave = a.name; toast(`Mapping done. Map saved as ${a.name}`); haptic(40); }
 }
 
+function renderMapStats(st) {
+  const box = $('#m-stats'), ex = (st.nav && st.nav.explore) || {};
+  if (S.tab !== 'map' || T.tool) { box.hidden = true; return; }
+  const m = st.map;
+  if (ex.active) box.innerHTML = `<b>${fmt(ex.area, 1)} m²</b><small>${(ex.frontiers || []).length} open edges · ${secs(ex.elapsed_s)}</small>`;
+  else if (m) box.innerHTML = `<b>${fmt(m.width * m.resolution, 1)} × ${fmt(m.height * m.resolution, 1)} m</b><small>${st.slam_mode === 'localization' ? 'saved map' : 'mapping live'}</small>`;
+  box.hidden = !m && !ex.active;
+  $('#map-mode-note').textContent = st.slam_mode === 'localization'
+    ? 'Running on a saved map. If the robot is in the wrong place, use the Locate tool, then Position OK.'
+    : st.slam_mode === 'mapping' ? 'Building a new map. Save it when it looks right, to drive on it later.' : '';
+}
+
 function renderGo(st, force) {
   const navs = st.nav || {}, pose = st.pose;
   // mission card
@@ -766,9 +888,9 @@ function renderGo(st, force) {
   if (home && (!placeFilter || 'home'.includes(placeFilter))) rows.push({ name: 'Home', home: true, d: dist(home) });
   pl.filter(match).map(p => ({ ...p, d: dist(p) })).sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9)).forEach(p => rows.push(p));
   $('#g-places').innerHTML = rows.length ? rows.map((p, i) => `
-    <li class="${p.home ? 'home' : ''}"><span class="p-name">${esc(p.name)}<span class="p-sub">${fin(p.d) ? `${fmt(p.d, 1)} m away` : ''}${p.aliases && p.aliases.length ? `${fin(p.d) ? ', ' : ''}also “${esc(p.aliases[0])}”` : ''}</span></span>
-      <button class="btn small" data-i="${i}" data-a="route">Route</button>
-      <button class="btn small primary" data-i="${i}" data-a="go">Go</button></li>`).join('')
+    <li class="${p.home ? 'home' : ''}"><span class="p-name">${esc(p.name)}<span class="p-sub">${fin(p.d) ? `${fmt(p.d, 1)} m away` : '–'}</span></span>
+      <span class="p-act"><button class="btn small" data-i="${i}" data-a="route">Route</button>
+      <button class="btn small grad" data-i="${i}" data-a="go">Go</button></span></li>`).join('')
     : `<li class="empty">${pl.length ? 'No place matches that search.' : 'No places yet. Drive somewhere and tap “Save place here”, or long‑press the map.'}</li>`;
   $$('#g-places button').forEach(b => b.onclick = async () => {
     const p = rows[+b.dataset.i];
@@ -783,18 +905,87 @@ function renderGo(st, force) {
     } catch (e) { toast(e.message, true); }
   });
 }
-$('#g-cmd').onsubmit = async e => {
-  e.preventDefault();
-  const input = $('#g-cmd-in'), text = input.value.trim(); if (!text) return;
-  const out = $('#g-reply'); out.textContent = 'Thinking…';
+// ---- semantic commands: understand -> show the plan as a timeline -> send
+function say(text) {
+  if (!text) return;
+  try { if (native && native.speak) native.speak(text); else if (window.speechSynthesis) speechSynthesis.speak(new SpeechSynthesisUtterance(text)); } catch (e) { /* silent */ }
+}
+const waitTxt = s => s >= 60 ? `wait ${fmt(s / 60, s % 60 ? 1 : 0)} min` : `wait ${Math.round(s)} s`;
+async function planCommand(text, fromVoice) {
+  const out = $('#g-reply'), plan = $('#g-plan');
+  text = (text || '').trim(); if (!text) return;
+  out.textContent = 'Understanding…'; plan.hidden = true;
   try {
-    const r = await nav({ type: 'command', text });
-    const it = r.interpretation || {};
+    const r = await nav({ type: 'command', text, dry_run: true });
+    const it = r.interpretation || {}, p = r.plan || { steps: [] };
     const src = it.source === 'llm' ? 'Understood by the language model' : 'Understood offline';
-    out.innerHTML = `<span class="src">${src}.</span> ${esc(it.reply || r.status || 'Done.')}`;
-    if (it.notes && it.notes.length) out.innerHTML += ` <span class="muted">${esc(it.notes.join(' '))}</span>`;
-    input.value = ''; haptic(15);
+    out.innerHTML = `<span class="src">${src}.</span> ${esc(it.reply || '')} ${it.notes && it.notes.length ? `<span class="muted">${esc(it.notes.join(' '))}</span>` : ''}`;
+    if (it.intent === 'stop' || it.intent === 'status') {          // act at once: never delay a stop
+      const done = await nav({ type: 'command', text });
+      if (done.status) out.innerHTML += ` <b>${esc(done.status)}</b>`;
+      say(it.intent === 'stop' ? 'Stopping.' : done.status);
+      return;
+    }
+    if (!p.steps.length) { if (fromVoice) say(it.reply || 'Sorry, I did not get a place.'); return; }
+    const tags = [`<span class="step"><span class="tag start">Start</span><small>here</small></span>`];
+    p.steps.forEach(st => {
+      tags.push('<span class="tl-arrow">›</span>');
+      tags.push(st.kind === 'home'
+        ? `<span class="step"><span class="tag home">Return</span><small>home</small></span>`
+        : `<span class="step"><span class="tag go">Go</span><small>${esc(st.label)}</small></span>`);
+      if (st.wait_s > 0) tags.push(`<span class="tl-arrow">›</span><span class="step"><span class="tag wait">Wait</span><small>${esc(waitTxt(st.wait_s))}</small></span>`);
+    });
+    const missing = p.steps.some(st => st.missing);
+    plan.innerHTML = `<h3>Plan ${p.priority >= 3 ? '· urgent' : ''}</h3><div class="timeline">${tags.join('')}</div>
+      ${missing ? '<p class="note">Home is not set, so it will not come back. Set home first.</p>' : ''}
+      <div class="row gap"><button class="btn ghost" data-p="edit">Edit</button><button class="btn grad grow" data-p="send">Send to robot</button></div>`;
+    plan.hidden = false;
+    $('[data-p=edit]', plan).onclick = () => { plan.hidden = true; $('#g-cmd-in').focus(); };
+    $('[data-p=send]', plan).onclick = async () => {
+      try {
+        const res = await nav({ type: 'command', text });
+        plan.hidden = true; $('#g-cmd-in').value = '';
+        toast(res.interpretation && res.interpretation.reply ? res.interpretation.reply : 'On the way'); haptic(25); setFollow(true);
+        say(res.interpretation && res.interpretation.reply);
+      } catch (e) { toast(e.message, true); }
+    };
+    if (fromVoice) say(it.reply ? `${it.reply} Shall I go?` : 'Shall I go?');
   } catch (err) { out.textContent = err.message; }
+}
+$('#g-cmd').onsubmit = e => { e.preventDefault(); planCommand($('#g-cmd-in').value, false); };
+$('#g-cmd-in').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); planCommand($('#g-cmd-in').value, false); } });
+
+// ---- voice: Android speech recognizer through the APK, or the browser's when it has one
+const voice = { on: false, rec: null };
+function voiceUI(on, title, sub) {
+  voice.on = on;
+  $('#g-voice').classList.toggle('listening', on);
+  $('#g-voice-t').textContent = title || (on ? 'Listening…' : 'Tap and speak');
+  $('#g-voice-s').textContent = sub || (on ? 'Say where to go' : 'Pathik understands places, waits and “come back”');
+  if (!on) $$('#g-wave i').forEach(i => { i.style.height = ''; });
+}
+window.__pathikVoice = (kind, text) => {
+  if (kind === 'partial') { $('#g-cmd-in').value = text; voiceUI(true, 'Listening…', text); }
+  else if (kind === 'level') {
+    const lv = clamp((+text + 2) / 12, 0, 1);
+    $$('#g-wave i').forEach((i, n) => { i.style.height = `${6 + lv * 24 * (0.5 + 0.5 * Math.abs(Math.sin(n * 1.7 + performance.now() / 120)))}px`; });
+  }
+  else if (kind === 'final') { $('#g-cmd-in').value = text; voiceUI(false); if (text) planCommand(text, true); }
+  else if (kind === 'error') { voiceUI(false); toast(text, true); }
+  else if (kind === 'end') voiceUI(true, 'Thinking…', $('#g-cmd-in').value);
+};
+$('#g-voice').onclick = () => {
+  haptic(20);
+  if (voice.on) { try { if (native && native.stopListening) native.stopListening(); else if (voice.rec) voice.rec.stop(); } catch (e) { /* */ } voiceUI(false); return; }
+  if (native && native.listen) { voiceUI(true); native.listen('en-IN'); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('Voice works in the Pathik app (APK). In a browser, type the command.', true); return; }
+  const rec = new SR(); voice.rec = rec;
+  rec.lang = 'en-IN'; rec.interimResults = true;
+  rec.onresult = ev => { const r = ev.results[ev.results.length - 1]; window.__pathikVoice(r.isFinal ? 'final' : 'partial', r[0].transcript); };
+  rec.onerror = ev => window.__pathikVoice('error', ev.error === 'not-allowed' ? 'Microphone blocked (browsers need https for voice)' : `Voice error: ${ev.error}`);
+  rec.onend = () => { if (voice.on) voiceUI(false); };
+  voiceUI(true); rec.start();
 };
 $('#g-here').onclick = async () => {
   const name = await ask('Name this place', 'e.g. HOD office');
@@ -811,8 +1002,8 @@ function renderStatus(st) {
   const L = st.link || {}, p = st.pose, n = st.nav || {}, se = st.sensors || {};
   const cls = (good, warn) => good ? 'ok' : warn ? 'warn' : 'bad';
   const items = [
-    ['Robot address', BASE.replace('http://', ''), ''],
-    ['Link delay', fin(S.rtt) ? `${Math.round(S.rtt)} ms round trip` : '–', cls(S.rtt < 250, S.rtt < 700)],
+    ['Network', `${netType(BASE)} · ${BASE.replace('http://', '')}`, ''],
+    ['Link delay', fin(S.rtt) ? `${Math.round(S.rtt)} ms` : '–', cls(S.rtt < 250, S.rtt < 700)],
     ['Motor board', st.bridge_alive && L.connected ? `${fmt(L.rx_hz, 0)} Hz on ${L.port || '?'}` : 'not connected', cls(st.bridge_alive && L.rx_hz > 30, st.bridge_alive)],
     ['Firmware', st.fw ? `v${st.fw}` : 'unknown', cls(st.fw && st.fw >= '2.3', st.fw)],
     ['LiDAR', st.scan ? `${fmt(st.scan.hz, 1)} scans/s` : '–', cls(st.scan && st.scan.hz > 5, st.scan && st.scan.hz > 0)],
@@ -825,13 +1016,13 @@ function renderStatus(st) {
     ['Ultrasonics', se.us ? se.us.map(v => fin(v) ? `${Math.round(v * 100)} cm` : 'clear').join(', ') : 'not fitted', ''],
     ['IMU', se.imu_ok ? 'working' : 'not fitted', ''],
   ];
-  $('#s-list').innerHTML = items.map(([k, v, c]) => `<div><dt>${esc(k)}</dt><dd class="${c}">${esc(v)}</dd></div>`).join('');
+  $('#s-list').innerHTML = items.map(([k, v, c]) => `<div class="tile"><dt>${esc(k)}</dt><dd class="${c}">${esc(v)}</dd></div>`).join('');
   const ev = n.events || [];
-  $('#s-events').innerHTML = ev.length ? ev.slice(0, 12).map(e => `<li><time>${clock(e.t)}</time><span>${esc(e.text)}</span></li>`).join('')
+  $('#s-events').innerHTML = ev.length ? ev.slice(0, 14).map(e => `<li class="${esc(e.level || '')}"><time>${clock(e.t)}</time><span>${esc(e.text)}</span></li>`).join('')
     : '<li><time></time><span class="muted">Nothing yet.</span></li>';
 }
 $('#s-disconnect').onclick = disconnect;
-$('#t-robot').onclick = () => setTab('status');
+$('#t-robot').onclick = () => { setTab('lab'); lab_set('health'); };
 
 // ------------------------------------------------------------------ Tuning Lab
 const WHEEL_LABELS = { kp: 'Proportional gain, Kp', ki: 'Integral gain, Ki', pwm_min: 'Start‑up PWM', max_mms: 'Top wheel speed', accel: 'Acceleration ramp' };
@@ -844,13 +1035,12 @@ const STEP = { kp: 0.01, ki: 0.01, pwm_min: 1, max_mms: 5, accel: 25, max_linear
 const lab = { wheelRanges: null, wheel: {}, wheelEdit: 0, wheelDirty: false, follow: {}, followRanges: null, followDirty: false,
   live: false, seq: 0, samples: [], frozen: null, test: 'straight', testResult: null, telemT: null };
 
-$$('.seg-b').forEach(b => b.onclick = () => {
-  lab_set(b.dataset.lab);
-});
+$$('[data-lab]').forEach(b => b.onclick = () => { haptic(8); lab_set(b.dataset.lab); });
 function lab_set(which) {
   S.lab = which;
-  $$('.seg-b').forEach(x => { const on = x.dataset.lab === which; x.classList.toggle('on', on); x.setAttribute('aria-selected', on); });
-  ['wheels', 'path', 'tests'].forEach(n => { $('#lab-' + n).hidden = n !== which; });
+  $$('[data-lab]').forEach(x => { const on = x.dataset.lab === which; x.classList.toggle('on', on); x.setAttribute('aria-selected', on); });
+  ['health', 'wheels', 'path', 'tests'].forEach(n => { $('#lab-' + n).hidden = n !== which; });
+  if (which === 'health' && S.st) renderStatus(S.st);
   if (which === 'path') loadFollower();
   if (which !== 'wheels') telemetry(false); else if ($('#w-live').checked) telemetry(true);
   setTimeout(resize, 30);
@@ -935,7 +1125,7 @@ function chartFrame(c, xr, yr, yUnit) {
   g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
   const X = x => pad.l + (x - xr[0]) / (xr[1] - xr[0] || 1) * (W - pad.l - pad.r);
   const Y = y => H - pad.b - (y - yr[0]) / (yr[1] - yr[0] || 1) * (H - pad.t - pad.b);
-  g.font = `${11 * DPR}px Instrument, sans-serif`; g.fillStyle = '#8d7b96'; g.strokeStyle = 'rgba(243,233,216,.07)'; g.lineWidth = 1;
+  g.font = `${11 * DPR}px Instrument, sans-serif`; g.fillStyle = '#6f6b76'; g.strokeStyle = 'rgba(255,255,255,.06)'; g.lineWidth = 1;
   const ticks = (a, b, n) => { const s = (b - a) / n, p = Math.pow(10, Math.floor(Math.log10(s))), m = s / p, st = (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; const out = []; for (let v = Math.ceil(a / st) * st; v <= b + 1e-9; v += st) out.push(+v.toFixed(6)); return out; };
   g.textAlign = 'right';
   for (const v of ticks(yr[0], yr[1], 4)) { const y = Y(v); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(W - pad.r, y); g.stroke(); g.fillText(v + (yUnit || ''), pad.l - 5 * DPR, y + 4 * DPR); }
@@ -953,7 +1143,7 @@ function drawWheelChart() {
   const data = lab.frozen || lab.samples;
   if (!data.length) {
     const g = c.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, c.width, c.height);
-    g.fillStyle = '#8d7b96'; g.font = `${13 * DPR}px Instrument, sans-serif`; g.textAlign = 'center';
+    g.fillStyle = '#6f6b76'; g.font = `${13 * DPR}px Instrument, sans-serif`; g.textAlign = 'center';
     g.fillText(lab.live ? 'Waiting for wheel data…' : 'Turn on Live, or run a step test', c.width / 2, c.height / 2);
     return;
   }
@@ -963,9 +1153,9 @@ function drawWheelChart() {
   const pad = (hi - lo) * 0.1;
   const f = chartFrame(c, [0, Math.max(1, (t1 - t0) / 1000)], [lo - pad, hi + pad], '');
   const pt = i => data.map(s => [(s[0] - t0) / 1000, s[i]]);
-  f.series(pt(1), 'rgba(243,233,216,.6)', [5, 4], 1.5);
-  f.series(pt(4), 'rgba(243,233,216,.35)', [2, 4], 1.5);
-  f.series(pt(2), '#f4b33c'); f.series(pt(5), '#2fb7a6');
+  f.series(pt(1), '#ff9f2e', [5, 4], 1.8);
+  f.series(pt(4), 'rgba(255,159,46,.5)', [2, 4], 1.5);
+  f.series(pt(2), '#ffc15a', [], 2.2); f.series(pt(5), '#2de2c8', [], 2.2);
 }
 $('#w-step').onclick = async () => {
   const btn = $('#w-step'), v = +$('#w-step-v').value;
@@ -1081,15 +1271,15 @@ function drawTestChart() {
     const pts = s.map(q => { const dx = q[1] - x0, dy = q[2] - y0; return [dx * c0 - dy * s0, (dx * s0 + dy * c0) * 100]; });
     const xmax = Math.max(0.5, ...pts.map(p => p[0])), ymax = Math.max(5, ...pts.map(p => Math.abs(p[1]))) * 1.2;
     const f = chartFrame(c, [0, xmax], [-ymax, ymax], ' cm');
-    f.series([[0, 0], [xmax, 0]], 'rgba(243,233,216,.4)', [5, 5], 1.5);
-    f.series(pts, '#e5487f', [], 3);
+    f.series([[0, 0], [xmax, 0]], 'rgba(255,255,255,.3)', [5, 5], 1.5);
+    f.series(pts, '#e8407c', [], 3);
   } else {
     const yaw = unwrap(s.map(q => q[3])).map(v => v * 57.2958);
     const odo = s.map(q => fin(q[8]) ? (q[8] - s[0][8]) * 360 : null);
     const tmax = s[s.length - 1][0], all = [...yaw, ...odo.filter(fin)];
     const f = chartFrame(c, [0, tmax], [Math.min(0, ...all), Math.max(10, ...all) * 1.05], '°');
-    f.series(s.map((q, i) => [q[0], yaw[i]]), '#e5487f', [], 3);
-    if (odo.some(fin)) f.series(s.map((q, i) => [q[0], odo[i]]).filter(p => fin(p[1])), '#f4b33c', [6, 4], 2);
+    f.series(s.map((q, i) => [q[0], yaw[i]]), '#e8407c', [], 3);
+    if (odo.some(fin)) f.series(s.map((q, i) => [q[0], odo[i]]).filter(p => fin(p[1])), '#ff9f2e', [6, 4], 2);
   }
 }
 function showTestMetrics(r) {
