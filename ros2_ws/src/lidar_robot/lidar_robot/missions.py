@@ -18,6 +18,8 @@ class Stop:
     x: float
     y: float
     yaw: Optional[float] = None
+    path: Optional[list] = None     # drawn path to follow to this stop (instead of a planned route)
+    wait_s: float = 0.0             # extra wait at this stop ("wait 2 minutes")
 
 
 @dataclass

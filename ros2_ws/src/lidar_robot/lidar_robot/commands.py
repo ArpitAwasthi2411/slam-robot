@@ -25,6 +25,11 @@ STOP = re.compile(r'\b(stop|halt|cancel|abort|freeze|emergency stop|wait there)\
 HOME = re.compile(r'\b((go|come|return|head|get)\s+(back\s+)?(home|to base|to (the )?dock)|come back|go back|return|dock|go home)\b')
 STATUS = re.compile(r'\b(where are you|status|what are you doing|are you busy|battery)\b')
 NAV_VERB = re.compile(r'\b(go|goto|take|bring|deliver|drop|carry|navigate|move|drive|head|visit|reach|escort|guide|show)\b')
+WAIT = re.compile(r'\b(?:wait|stay|pause|hold)\s+(?:there\s+)?(?:for\s+)?(\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|half an?)\s*'
+                  r'(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\b')
+NUM_WORDS = {'a': 1, 'an': 1, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7,
+             'eight': 8, 'nine': 9, 'ten': 10, 'fifteen': 15, 'twenty': 20, 'thirty': 30, 'half a': 0.5, 'half an': 0.5}
+MAX_WAIT_S = 3600
 SPLIT = re.compile(r'\s*(?:,|;|\bthen\b|\band then\b|\bafter that\b|\bfollowed by\b|\band\b)\s*')
 
 
@@ -75,8 +80,11 @@ class CommandParser:
                     notes.append(f'unknown place: "{chunk}"')
         if found:
             names = [p['name'] for p in found]
-            return self._result('navigate', names, prio, 'Going to ' + ' then '.join(names) + '.',
-                                'rules', notes)
+            res = self._result('navigate', names, prio, 'Going to ' + ' then '.join(names) + '.', 'rules', notes)
+            res.update(self._steps_from_text(text, found))
+            if res['then_home']:
+                res['reply'] = res['reply'][:-1] + ', then coming back.'
+            return res
         if HOME.search(t):
             return self._result('return_home', [], prio, 'Returning home.', 'rules', [])
         hint = notes[0] if notes else 'I could not find a known place in that.'
@@ -90,7 +98,9 @@ class CommandParser:
             'intent (one of navigate, return_home, stop, status, unknown), '
             'targets (ordered list of place names, ONLY copied exactly from the provided list), '
             'priority (0 low, 1 normal, 2 high, 3 urgent), '
-            'reply (one short friendly sentence to say back). '
+            'reply (one short friendly sentence to say back), '
+            'waits (list of seconds to wait at each target, same order as targets, 0 if none), '
+            'then_home (true if the user wants the robot to come back / return afterwards). '
             'Never invent places. If a requested place is not in the list, leave it out and say so in reply. '
             'Known places: ' + json.dumps(catalog))
         body = {'model': self.model, 'temperature': 0, 'max_tokens': 200,
@@ -120,12 +130,51 @@ class CommandParser:
         except (TypeError, ValueError):
             prio = 1
         reply = str(d.get('reply', ''))[:200]
-        return self._result(intent, names, prio, reply, 'llm', notes)
+        res = self._result(intent, names, prio, reply, 'llm', notes)
+        if intent == 'navigate':
+            from_text = self._steps_from_text(text, [self.places.get(n) for n in names])
+            waits = d.get('waits') if isinstance(d.get('waits'), list) else []
+            for i, st in enumerate(from_text['steps']):
+                try:
+                    w = float(waits[i]) if i < len(waits) else 0.0
+                except (TypeError, ValueError):
+                    w = 0.0
+                st['wait_s'] = max(st['wait_s'], min(MAX_WAIT_S, max(0.0, w)))
+            res['steps'] = from_text['steps']
+            res['then_home'] = bool(d.get('then_home')) or from_text['then_home']
+        return res
+
+    # ---------------------------------------------------------------- multi-step plans
+    def _steps_from_text(self, text, places):
+        """'take this to Lab 3, wait 2 mins, then come back' -> steps with waits + then_home."""
+        t = normalize(text)
+        pos = []
+        for p in places:
+            best = None
+            for label in [p['name']] + list(p.get('aliases', [])):
+                m = re.search(r'\b' + re.escape(normalize(label)) + r'\b', t) if normalize(label) else None
+                if m and (best is None or m.start() < best):
+                    best = m.start()
+            pos.append(best)
+        steps = [{'place': p['name'], 'wait_s': 0.0} for p in places]
+        for m in WAIT.finditer(t):
+            n = m.group(1)
+            val = NUM_WORDS.get(n, None) if not n[0].isdigit() else float(n)
+            unit = m.group(2)
+            secs = val * (60 if unit[0] == 'm' else 3600 if unit[0] == 'h' else 1)
+            before = [i for i, ps in enumerate(pos) if ps is not None and ps < m.start()]
+            i = before[-1] if before else 0
+            if steps:
+                steps[i]['wait_s'] = float(min(MAX_WAIT_S, secs))
+        first = min([ps for ps in pos if ps is not None], default=0)
+        home = [m for m in HOME.finditer(t) if m.start() > first]
+        return {'steps': steps, 'then_home': bool(home and steps)}
 
     @staticmethod
     def _result(intent, targets, priority, reply, source, notes):
         return {'intent': intent, 'targets': targets, 'priority': priority, 'reply': reply,
-                'source': source, 'notes': notes}
+                'source': source, 'notes': notes,
+                'steps': [{'place': n, 'wait_s': 0.0} for n in targets], 'then_home': False}
 
 
 def _http_post_json(url, body, headers, timeout):

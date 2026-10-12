@@ -2,7 +2,16 @@ package com.arpit.pathik;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.Manifest;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
+import java.util.ArrayList;
+import java.util.Locale;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -27,13 +36,18 @@ import java.util.Set;
 /** Pathik: a full-screen WebView around the app bundled in assets/app, plus a few native helpers. */
 public class MainActivity extends Activity {
     private WebView web;
+    private SpeechRecognizer recognizer;
+    private TextToSpeech tts;
+    private boolean ttsReady = false;
+    private static final int REQ_MIC = 7;
+    private String pendingLang = null;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         web = new WebView(this);
-        web.setBackgroundColor(Color.parseColor("#221628"));
+        web.setBackgroundColor(Color.parseColor("#0d0d10"));
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -51,6 +65,12 @@ public class MainActivity extends Activity {
         });
         web.addJavascriptInterface(new Bridge(this), "PathikNative");
         setContentView(web);
+        tts = new TextToSpeech(this, status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                tts.setLanguage(new Locale("en", "IN"));
+                ttsReady = true;
+            }
+        });
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl("file:///android_asset/app/index.html");
     }
@@ -69,6 +89,69 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() { moveTaskToBack(true); }   // keep the connection; don't tear the app down
+
+    @Override
+    protected void onDestroy() {
+        if (recognizer != null) recognizer.destroy();
+        if (tts != null) tts.shutdown();
+        super.onDestroy();
+    }
+
+    // ---------------------------------------------------------------- voice
+    /** Send a voice event to the page: window.__pathikVoice(kind, text). */
+    void voiceEvent(String kind, String text) {
+        String safe = text == null ? "" : text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ");
+        runOnUiThread(() -> web.evaluateJavascript("window.__pathikVoice && window.__pathikVoice('" + kind + "','" + safe + "')", null));
+    }
+
+    void startListening(String lang) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingLang = lang;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+            return;
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) { voiceEvent("error", "No speech recognizer on this phone (install Google app)"); return; }
+        if (recognizer == null) {
+            recognizer = SpeechRecognizer.createSpeechRecognizer(this);
+            recognizer.setRecognitionListener(new RecognitionListener() {
+                public void onReadyForSpeech(Bundle b) { voiceEvent("ready", ""); }
+                public void onBeginningOfSpeech() { }
+                public void onRmsChanged(float rms) { voiceEvent("level", String.valueOf(rms)); }
+                public void onBufferReceived(byte[] buf) { }
+                public void onEndOfSpeech() { voiceEvent("end", ""); }
+                public void onError(int err) {
+                    String m = err == SpeechRecognizer.ERROR_NO_MATCH || err == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                        ? "Didn't catch that. Try again." : err == SpeechRecognizer.ERROR_NETWORK || err == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
+                        ? "Speech recognition needs internet (or the offline English pack)" : "Voice error " + err;
+                    voiceEvent("error", m);
+                }
+                public void onResults(Bundle r) {
+                    ArrayList<String> l = r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    voiceEvent("final", l != null && !l.isEmpty() ? l.get(0) : "");
+                }
+                public void onPartialResults(Bundle r) {
+                    ArrayList<String> l = r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (l != null && !l.isEmpty()) voiceEvent("partial", l.get(0));
+                }
+                public void onEvent(int t, Bundle b) { }
+            });
+        }
+        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang == null || lang.isEmpty() ? "en-IN" : lang);
+        i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        recognizer.startListening(i);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
+        super.onRequestPermissionsResult(code, perms, res);
+        if (code == REQ_MIC) {
+            if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED) startListening(pendingLang);
+            else voiceEvent("error", "Microphone permission is needed for voice commands");
+        }
+    }
 
     /** Methods callable from JavaScript as window.PathikNative.* */
     static class Bridge {
@@ -112,6 +195,22 @@ public class MainActivity extends Activity {
                 if (on) act.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 else act.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             });
+        }
+
+        /** Voice commands: results arrive in window.__pathikVoice(kind, text). */
+        @JavascriptInterface
+        public void listen(final String lang) { act.runOnUiThread(() -> act.startListening(lang)); }
+
+        @JavascriptInterface
+        public void stopListening() { act.runOnUiThread(() -> { if (act.recognizer != null) act.recognizer.stopListening(); }); }
+
+        @JavascriptInterface
+        public boolean canListen() { return true; }
+
+        /** Speak a short reply through the phone. */
+        @JavascriptInterface
+        public void speak(String text) {
+            if (act.ttsReady && text != null) act.tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "pathik");
         }
 
         @JavascriptInterface

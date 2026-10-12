@@ -38,6 +38,7 @@ from tf2_ros import Buffer, TransformListener, TransformException
 from lidar_robot.commands import CommandParser
 from lidar_robot.follower import FollowerParams
 from lidar_robot.goal_logic import front_clearance_from_scan
+from lidar_robot.speech import Speaker
 from lidar_robot.kinematics import compose_2d, yaw_from_quaternion
 from lidar_robot.navigator_core import NavigatorCore
 from lidar_robot.places import PlaceStore
@@ -70,6 +71,8 @@ class NavigatorNode(Node):
         d('robot_half_width', 0.25)
         d('front_cone_deg', 25.0)
         d('dwell_s', 3.0)
+        d('speech', True)                  # speak through a speaker on the Pi (needs espeak-ng)
+        d('speech_voice', 'en-in')
         d('auto_return_s', 0.0)
         d('max_replans', 3)
         d('pose_timeout', 1.0)          # wheel odometry (odom->base_link) older than this = position lost
@@ -93,6 +96,10 @@ class NavigatorNode(Node):
         self.planner_params = PlannerParams(robot_radius=float(g('robot_radius')),
                                             soft_radius=float(g('soft_radius')),
                                             allow_unknown=bool(g('allow_unknown')))
+        self.speaker = Speaker(enabled=bool(self.get_parameter('speech').value),
+                               voice=str(self.get_parameter('speech_voice').value))
+        if self.speaker.enabled and not self.speaker.available:
+            self.get_logger().info('robot voice off: install espeak-ng and connect a speaker to enable it')
         self.core = NavigatorCore(
             self.places,
             self.planner_params,
@@ -306,6 +313,9 @@ class NavigatorNode(Node):
             with self.core_lock:
                 v, w = self.core.step(pose, front, self.dt)
                 active = bool(self.core.queue.active)
+                says, self.core.say_queue = self.core.say_queue, []
+            for key, text in says:
+                self.speaker.say(text, key=key, gap_s=12.0 if key == 'make_way' else 3.0)
         except Exception as e:                           # stop, report, keep the node alive
             self.get_logger().error(f'navigator step failed: {e}\n{traceback.format_exc()}')
             self.cmd_pub.publish(Twist())

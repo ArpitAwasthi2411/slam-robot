@@ -23,6 +23,7 @@ Failure reason codes (for logs, the dashboard and future LLM error recovery):
 import math
 import time
 
+from lidar_robot import drawn_path
 from lidar_robot.commands import CommandParser
 from lidar_robot.explorer import ExploreParams, find_frontiers, choose_goal, mapped_area
 from lidar_robot.follower import FollowerParams, PathFollower
@@ -80,7 +81,9 @@ class NavigatorCore:
         self._idle_since = clock()
         self._pose = None
         self._pose_lost_for = 0.0
-        self.pose_lost_fail_s = 30.0          # wait this long for the position to come back before giving up
+        self.pose_lost_fail_s = 30.0
+        self.say_queue = []                   # (key, text): the ROS node speaks these (speech.Speaker)
+        self._blocked_since = None          # wait this long for the position to come back before giving up
         self._scan = None
         self.grid = None                # latest GridMap (for exploration)
         self.explore_params = ExploreParams()
@@ -136,6 +139,35 @@ class NavigatorCore:
                 if req.get('replace'):
                     self._cancel_all('new goal')
                 return self._enqueue([st], req.get('priority', 1), req.get('source', 'dashboard'), st.label)
+            if t == 'check_path':
+                path = drawn_path.prepare(req.get('points') or [])
+                bad = drawn_path.check(self.planner, path, self.planner.p.robot_radius) if self.planner.has_map() else []
+                length = path_length(path)
+                return {'ok': True, 'path': [[round(x, 3), round(y, 3)] for x, y in path[::2]] + [list(path[-1])],
+                        'length': round(length, 2), 'blocked': bad,
+                        'eta_s': round(length / max(0.05, self.follower.p.max_linear * 0.7))}
+            if t == 'follow_path':
+                path = drawn_path.prepare(req.get('points') or [])
+                if not self.planner.has_map():
+                    raise ValueError('no map yet')
+                bad = drawn_path.check(self.planner, path, self.planner.p.robot_radius)
+                if bad and not req.get('allow_close'):
+                    raise ValueError(f'the path passes too close to a wall at {bad[0][0]:.1f} m '
+                                     '(shown in red): redraw that part')
+                repeat = int(req.get('repeat', 0))
+                if repeat < -1 or repeat > 99:
+                    raise ValueError('repeat must be -1 (loop) or 0..99')
+                if req.get('replace'):
+                    self._cancel_all('new drawn path')
+                end = path[-1]
+                yaw = req.get('yaw')
+                st = Stop(req.get('label') or 'drawn path', end[0], end[1], None if yaw is None else float(yaw), path=path)
+                r = self._enqueue([st], req.get('priority', 1), req.get('source', 'dashboard'),
+                                  f'drawn path {path_length(path):.1f} m')
+                m = self._mission_by_id(r['mission']['id'])
+                m.repeat = repeat
+                r['mission'] = m.summary()
+                return r
             if t == 'goto_poses':
                 pts = req.get('waypoints') or []
                 if not isinstance(pts, list) or not 1 <= len(pts) <= 30:
@@ -149,14 +181,13 @@ class NavigatorCore:
                     self._cancel_all('new route')
                 text = req.get('label') or (f'patrol of {len(stops)} points' if repeat == -1 else f'route of {len(stops)} points')
                 r = self._enqueue(stops, req.get('priority', 1), req.get('source', 'dashboard'), text)
-                m = self.queue.active if (self.queue.active and self.queue.active.id == r['mission']['id']) else \
-                    next(q for q in self.queue.queue if q.id == r['mission']['id'])
+                m = self._mission_by_id(r['mission']['id'])
                 m.repeat = repeat
                 m.skip_unreachable = len(stops) > 1
                 r['mission'] = m.summary()
                 return r
             if t == 'command':
-                return self._command(req.get('text', ''))
+                return self._command(req.get('text', ''), dry_run=bool(req.get('dry_run')))
             if t == 'preview':
                 return self._preview(req, pose)
             if t == 'cancel':
@@ -243,6 +274,11 @@ class NavigatorCore:
     def _stop_from_place(p):
         return Stop(p['name'], p['x'], p['y'], p.get('yaw'))
 
+    def _mission_by_id(self, mid):
+        if self.queue.active and self.queue.active.id == mid:
+            return self.queue.active
+        return next(q for q in self.queue.queue if q.id == mid)
+
     def _cancel_all(self, why):
         if self.explore.get('active'):
             self._explore_stop(why)
@@ -272,9 +308,12 @@ class NavigatorCore:
             raise ValueError('home is not set (use "Set home here")')
         return self._enqueue([Stop('home', h['x'], h['y'], h.get('yaw'))], priority, source, 'home')
 
-    def _command(self, text):
+    def _command(self, text, dry_run=False):
         c = self.parser.parse(text)
         res = {'ok': True, 'interpretation': c}
+        if dry_run:                              # the app shows the plan as a timeline before sending it
+            res['plan'] = self._plan_summary(c)
+            return res
         if c['intent'] == 'stop':
             self.queue.cancel()
             self.follower.clear()
@@ -282,12 +321,31 @@ class NavigatorCore:
         elif c['intent'] == 'return_home':
             res.update(self._go_home(c['priority'], 'command'))
         elif c['intent'] == 'navigate':
-            stops = [self._stop_from_place(self.places.get(n)) for n in c['targets']]
+            stops = []
+            for st in c.get('steps') or [{'place': n, 'wait_s': 0.0} for n in c['targets']]:
+                stop = self._stop_from_place(self.places.get(st['place']))
+                stop.wait_s = float(st.get('wait_s') or 0.0)
+                stops.append(stop)
+            h = self.places.home
+            if c.get('then_home') and h:
+                stops.append(Stop('home', h['x'], h['y'], h.get('yaw')))
             res.update(self._enqueue(stops, c['priority'], 'command', text))
         elif c['intent'] == 'status':
             res['status'] = self.status()['message']
         self._log(f'command "{text}" -> {c["intent"]} {c["targets"]} via {c["source"]}')
         return res
+
+    def _plan_summary(self, c):
+        steps = []
+        if c['intent'] == 'navigate':
+            steps = [{'kind': 'go', 'label': st['place'], 'wait_s': st.get('wait_s', 0.0)}
+                     for st in (c.get('steps') or [{'place': n, 'wait_s': 0.0} for n in c['targets']])]
+            if c.get('then_home'):
+                steps.append({'kind': 'home', 'label': 'home', 'wait_s': 0.0,
+                              'missing': not self.places.home})
+        elif c['intent'] == 'return_home':
+            steps = [{'kind': 'home', 'label': 'home', 'wait_s': 0.0, 'missing': not self.places.home}]
+        return {'intent': c['intent'], 'priority': c['priority'], 'steps': steps}
 
     def _preview(self, req, pose):
         if not pose:
@@ -388,11 +446,14 @@ class NavigatorCore:
         v, w, event = self.follower.step(pose, front_clearance, dt)
         if event == 'ARRIVED':
             m.skips = 0
+            if m.source not in ('explore',) and m.current.label not in ('map goal', 'drawn path') \
+                    and not m.current.label.startswith('point '):
+                self.say_queue.append(('arrived', f'Arrived at {m.current.label}.'))
             self._log(f'arrived at {m.current.label}')
             self.follower.clear()
             self._replans = 0
             last = m.next_stop == len(m.stops) - 1
-            self._dwell_until = now + (0.0 if last else self.dwell_s)
+            self._dwell_until = now + (0.0 if last else self.dwell_s) + m.current.wait_s
             self._set(DWELL, f'at {m.current.label}')
             if m.source == 'explore' and self.explore_params.scan_spin:
                 w = self.explore_params.scan_speed
@@ -410,14 +471,25 @@ class NavigatorCore:
             self.follower.clear()
             self._set(PLANNING, f'{why}, replanning')
             return 0.0, 0.0
+        if self.follower.blocked:
+            if self._blocked_since is None:
+                self._blocked_since = now
+            elif now - self._blocked_since > 1.5:
+                self.say_queue.append(('make_way', 'Excuse me, please make way.'))
+        else:
+            self._blocked_since = None
         self.message = (f'blocked, waiting… ({m.current.label})' if self.follower.blocked
                         else f'driving to {m.current.label}')
         return v, w
 
     def _plan_current(self, m, pose, now):
         stop = m.current
-        path = self.planner.plan(pose[:2], (stop.x, stop.y),
-                                 self._dynamic_obstacles() if self._replans else ())
+        extra = self._dynamic_obstacles() if self._replans else ()
+        if stop.path:
+            path = drawn_path.route_from_pose(self.planner, pose, stop.path,
+                                              from_nearest=bool(self._replans), extra_obstacles=extra)
+        else:
+            path = self.planner.plan(pose[:2], (stop.x, stop.y), extra)
         if path is None:
             m.attempts += 1
             code = _reason_code(self.planner.last_error)

@@ -142,7 +142,9 @@ def _setup(context):
     if _truthy(cfg('dashboard')):
         actions.append(Node(
             package='lidar_robot', executable='dashboard', name='dashboard', output='screen',
-            parameters=[params, {'global_frame': goal_frame, 'nav_mode': nav_mode}]))
+            parameters=[params, {'global_frame': goal_frame, 'nav_mode': nav_mode,
+                                 'slam_mode': slam_mode if slam else 'off',
+                                 'carto_config_dir': os.path.join(share, 'config')}]))
     return actions
 
 

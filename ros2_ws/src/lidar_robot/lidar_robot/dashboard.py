@@ -47,6 +47,8 @@ class DashboardNode(Node):
         self.declare_parameter('map_dir', os.path.expanduser('~/maps'))
         self.declare_parameter('scan_decimation', 3)
         self.declare_parameter('nav_mode', 'planner')
+        self.declare_parameter('slam_mode', 'mapping')           # bringup passes the real one
+        self.declare_parameter('carto_config_dir', '')
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
         self.global_frame = gp('global_frame')
         self.fallback_frame = gp('fallback_frame')
@@ -107,6 +109,19 @@ class DashboardNode(Node):
             self.write_state_cli = self.create_client(WriteState, 'write_state')
         except ImportError:
             self._WriteState = None
+        self.slam_mode = str(self.get_parameter('slam_mode').value)
+        self.carto_config_dir = str(self.get_parameter('carto_config_dir').value)
+        self._carto = None
+        try:                                # Cartographer trajectory services, for "Set position"
+            from cartographer_ros_msgs.srv import FinishTrajectory, GetTrajectoryStates, StartTrajectory
+            self._carto = {
+                'types': (FinishTrajectory, GetTrajectoryStates, StartTrajectory),
+                'finish': self.create_client(FinishTrajectory, 'finish_trajectory'),
+                'states': self.create_client(GetTrajectoryStates, 'get_trajectory_states'),
+                'start': self.create_client(StartTrajectory, 'start_trajectory'),
+            }
+        except ImportError:
+            pass
 
         port = int(gp('port'))
         self.server = DashboardServer(self, port=port)
@@ -247,6 +262,7 @@ class DashboardNode(Node):
             'tune': rs.get('tune'), 'fw': rs.get('fw'), 'telemetry': rs.get('telemetry'),
             'turns': odom.get('turns'), 'sep': rs.get('sep'), 'test_running': bool(self.tests.result.get('running')),
             'autosave': self.autosave.info,
+            'slam_mode': self.slam_mode,
             'places': self.places,
         }
 
@@ -376,6 +392,55 @@ class DashboardNode(Node):
             saved += ' (WARNING: no .pbstream saved: Cartographer write_state unavailable, '
             saved += 'localization mode will not work with this map)'
         return saved
+
+    def _call(self, cli, req, timeout=5.0):
+        if not cli.service_is_ready():
+            raise ValueError(f'Cartographer service {cli.srv_name} is not available (is SLAM running?)')
+        with self.lock:
+            fut = cli.call_async(req)
+        t0 = time.monotonic()
+        while not fut.done() and time.monotonic() - t0 < timeout:
+            time.sleep(0.05)
+        if not fut.done() or fut.result() is None:
+            raise ValueError(f'Cartographer did not answer {cli.srv_name}')
+        return fut.result()
+
+    def relocalize(self, body):
+        """'Set position' (like RViz 2D Pose Estimate): restart Cartographer's localization at a pose.
+
+        Finishes the active localization trajectory and starts a new one with an initial pose relative
+        to the frozen map trajectory, so scan matching starts from where the operator says the robot is.
+        """
+        x, y, yaw = float(body['x']), float(body['y']), float(body.get('yaw', 0.0))
+        if not all(math.isfinite(v) for v in (x, y, yaw)):
+            raise ValueError('pose must be finite numbers')
+        if self.slam_mode != 'localization':
+            raise ValueError('Set position is for a saved map (localization mode). While mapping, the map '
+                             'is built around the robot, so its position is always right by definition.')
+        if not self._carto:
+            raise ValueError('cartographer_ros_msgs not installed')
+        FinishTrajectory, GetTrajectoryStates, StartTrajectory = self._carto['types']
+        st = self._call(self._carto['states'], GetTrajectoryStates.Request()).trajectory_states
+        ids, states = list(st.trajectory_id), list(st.trajectory_state)
+        frozen = [i for i, s_ in zip(ids, states) if s_ == 2]          # FROZEN = the saved map
+        active = [i for i, s_ in zip(ids, states) if s_ == 0]          # ACTIVE = current localization
+        for i in active:
+            self._call(self._carto['finish'], FinishTrajectory.Request(trajectory_id=int(i)))
+        req = StartTrajectory.Request()
+        req.configuration_directory = self.carto_config_dir
+        req.configuration_basename = 'cartographer_localization.lua'
+        req.use_initial_pose = True
+        req.initial_pose.position.x, req.initial_pose.position.y = x, y
+        qx, qy, qz, qw = quaternion_from_yaw(yaw)
+        req.initial_pose.orientation.x, req.initial_pose.orientation.y = qx, qy
+        req.initial_pose.orientation.z, req.initial_pose.orientation.w = qz, qw
+        req.relative_to_trajectory_id = int(frozen[0]) if frozen else 0
+        res = self._call(self._carto['start'], req)
+        if res.status.code != 0:
+            raise ValueError(f'Cartographer refused the new pose: {res.status.message}')
+        self.get_logger().info(f'Set position: x={x:.2f} y={y:.2f} yaw={math.degrees(yaw):.0f}° '
+                               f'(new trajectory {res.trajectory_id})')
+        return {'ok': True, 'trajectory': int(res.trajectory_id)}
 
     def _write_pbstream(self, path):
         """Ask Cartographer to save its full state (needed for slam_mode:=localization)."""

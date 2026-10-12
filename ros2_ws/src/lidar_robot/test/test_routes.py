@@ -92,3 +92,16 @@ def test_long_position_loss_fails_the_mission(tmp_path):
         nav.step(None, float('inf'), 0.05)
         clk.t += 0.05
     assert nav.queue.active is None and nav.last_failure['code'] == 'POSE_LOST'
+
+
+def test_voice_style_command_plan_then_run(tmp_path):
+    nav, clk = setup(tmp_path)
+    r = nav.handle({'type': 'command', 'text': 'take this to lab 3, wait 1 minute, then come back', 'dry_run': True},
+                   (1.0, 1.0, 0.0))
+    assert r['ok'] and nav.queue.active is None and not nav.queue.queue          # preview only
+    assert [(s['kind'], s['label'], s['wait_s']) for s in r['plan']['steps']] == [('go', 'Lab 3', 60.0), ('home', 'home', 0.0)]
+    nav.handle({'type': 'command', 'text': 'take this to lab 3, wait 1 minute, then come back'}, (1.0, 1.0, 0.0))
+    x, y, _ = run(nav, clk, (1.0, 1.0, 0.0), 400)
+    assert math.hypot(x - 1.0, y - 1.0) < 0.25                          # back home
+    arrive = next(e['t'] for e in nav.events if e['text'] == 'arrived at Lab 3')
+    assert nav.queue.history[0].stops[0].wait_s == 60.0 and arrive

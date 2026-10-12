@@ -4,10 +4,13 @@ One app for everyday use and for research:
 
 | Tab | What it does |
 |---|---|
-| **Drive** | Live map with LiDAR, route and places. Joystick, top-speed limit, Save map, Position OK. **Map tools** (left side of the map): **Goal** (tap = go there, drag = go there and face that way, like RViz *2D Goal Pose*; a new goal replaces the old one), **Route** (tap several points, optional facing per point, *Loop* = patrol until canceled; unreachable points are skipped), **Measure** (drag = distance in m), **Home**. Long-press: Go here / Save as place / Set home here. **Map by itself** ([exploration.md](exploration.md)) |
-| **Go** | Say where to go ("take this to lab 3 then come back"), places list with Route and Go, mission card with Cancel/Resume, Save place here, Set home. Long-press the map to send the robot anywhere |
-| **Lab** | **Wheels**: the ESP32 speed loop (Kp, Ki, start-up PWM, top speed, acceleration ramp) with live wheel-speed chart and a step test that grades the tuning. **Path following**: look-ahead, steering gain, accelerations, turn-on-the-spot thresholds. **Drive tests**: straight-line drift test and spin test that computes the correct `wheel_separation` |
-| **Status** | Link health, firmware, LiDAR rate, position, sensors, navigator, activity log |
+| **Drive** | Full-screen live map with the **tool rail**: **Flag** (tap = go there, drag = also face that way, like RViz *2D Goal Pose*), **Draw** (draw a path with your finger; it's smoothed and checked against walls, red = too close; Loop = patrol), **Route** (tap points, optional loop), **Measure**, **Locate** (set the robot's real position on a saved map, like RViz *2D Pose Estimate*), **Home**, **Follow**. Joystick, speed slider, STOP |
+| **Go** | Type or **speak** a command (*"take this to Lab 3, wait 2 mins, then come back"*). Pathik shows the plan as a timeline (Start → Go → Wait → Return) before you send it. Saved places with distance, Go / Route |
+| **Map** | Map by itself (exploration) with live m² / open edges / time, Save map, Position OK |
+| **Lab** | **Health** (network, link delay, motor board, LiDAR, position, navigator, diagnostics log), **Wheels** (speed-loop tuning + live chart + step test), **Path** (path-follower tuning), **Tests** (straight line, spin) |
+
+The connection pill at the top shows how you're connected (Robot Wi‑Fi, Same Wi‑Fi, Cable, or **Internet (Tailscale)**) and the delay.
+Tap it for the Health page.
 
 The big **STOP** button is on every screen. Releasing it needs a 1-second hold.
 
@@ -123,3 +126,16 @@ Phone (Pathik) ── HTTP/JSON ──► dashboard node :8080 ──► ROS 2 t
 - **Exploration**: `explore_start` / `explore_stop` navigator requests, `nav.explore` + `autosave` in `/api/state`
   ([exploration.md](exploration.md)).
 - Tests: `ros2_ws/src/lidar_robot/test/test_tuning_lab.py`, `test_explorer.py`.
+
+## 6. Voice and the robot's own voice
+
+- **Commands by voice** (Go tab → *Tap and speak*): uses the phone's speech recognizer (Google). Allow the
+  microphone the first time. Works best with internet; for offline use, download the English (India) offline
+  speech pack in Android settings. The reply is spoken back by the phone.
+- **The robot speaks** ("Excuse me, please make way" when blocked, "Arrived at Lab 3") through any speaker on
+  the Pi (USB speaker or 3.5 mm jack):
+  ```bash
+  sudo apt install -y espeak-ng      # once, with internet on the Pi
+  sudo systemctl restart robot
+  ```
+  Turn it off with the navigator parameter `speech: false` in `config/robot_params.yaml`.

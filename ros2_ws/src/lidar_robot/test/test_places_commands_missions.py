@@ -94,3 +94,15 @@ def test_mission_priorities_and_preemption():
     q.finish('DONE')
     assert q.next() is b
     assert q.cancel() == 1 and q.active is None
+
+
+def test_multi_step_command_with_wait_and_return(tmp_path):
+    from lidar_robot.commands import CommandParser
+    p = CommandParser(store(tmp_path))
+    c = p.parse('take this to Lab 3, wait 2 mins, then come back')
+    assert c['intent'] == 'navigate' and c['targets'] == ['Lab 3']
+    assert c['steps'] == [{'place': 'Lab 3', 'wait_s': 120.0}] and c['then_home'] is True
+    c = p.parse('go to the library and wait 30 seconds then the hod office')
+    assert [s['place'] for s in c['steps']] == ['Library', 'HOD office']
+    assert c['steps'][0]['wait_s'] == 30.0 and c['steps'][1]['wait_s'] == 0.0 and not c['then_home']
+    assert p.parse('go to lab 3 and wait five minutes')['steps'][0]['wait_s'] == 300.0
