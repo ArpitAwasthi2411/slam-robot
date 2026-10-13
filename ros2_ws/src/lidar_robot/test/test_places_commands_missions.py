@@ -101,7 +101,7 @@ def test_multi_step_command_with_wait_and_return(tmp_path):
     p = CommandParser(store(tmp_path))
     c = p.parse('take this to Lab 3, wait 2 mins, then come back')
     assert c['intent'] == 'navigate' and c['targets'] == ['Lab 3']
-    assert c['steps'] == [{'place': 'Lab 3', 'wait_s': 120.0}] and c['then_home'] is True
+    assert c['steps'] == [{'place': 'Lab 3', 'wait_s': 120.0, 'confirm': False}] and c['then_home'] is True
     c = p.parse('go to the library and wait 30 seconds then the hod office')
     assert [s['place'] for s in c['steps']] == ['Library', 'HOD office']
     assert c['steps'][0]['wait_s'] == 30.0 and c['steps'][1]['wait_s'] == 0.0 and not c['then_home']

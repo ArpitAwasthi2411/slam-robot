@@ -36,7 +36,9 @@ from std_msgs.msg import Bool, Empty, String
 from tf2_ros import Buffer, TransformListener, TransformException
 
 from lidar_robot.commands import CommandParser
+from lidar_robot.battery import BatteryMonitor
 from lidar_robot.follower import FollowerParams
+from lidar_robot.footprint import Footprint
 from lidar_robot.goal_logic import front_clearance_from_scan
 from lidar_robot.speech import Speaker
 from lidar_robot.kinematics import compose_2d, yaw_from_quaternion
@@ -69,6 +71,16 @@ class NavigatorNode(Node):
         d('stop_distance', 0.38)
         d('slow_distance', 0.80)
         d('robot_half_width', 0.25)
+        # the body: a rectangle around the drive axle (base_link). MEASURE YOUR ROBOT:
+        d('footprint_front', 0.07)         # axle -> front bumper (m)
+        d('footprint_rear', 0.37)          # axle -> back edge (m)
+        d('footprint_half_width', 0.21)    # centre line -> side (m)
+        d('footprint_margin', 0.04)        # extra keep-out (m)
+        d('battery_cells', 3)
+        d('battery_low_pct', 25)
+        d('battery_critical_pct', 12)
+        d('confirm_timeout_s', 300.0)      # "wait for OK" stops give up after this
+        d('dock_offset', 0.55)             # m in front of the dock where the reverse starts
         d('front_cone_deg', 25.0)
         d('dwell_s', 3.0)
         d('speech', True)                  # speak through a speaker on the Pi (needs espeak-ng)
@@ -111,7 +123,12 @@ class NavigatorNode(Node):
                            stop_distance=float(g('stop_distance')), slow_distance=float(g('slow_distance'))),
             parser=parser, dwell_s=float(g('dwell_s')), auto_return_s=float(g('auto_return_s')),
             max_replans=int(g('max_replans')),
-            tuning_path=os.path.join(os.path.dirname(g('places_file')), 'tuning.json'))
+            tuning_path=os.path.join(os.path.dirname(g('places_file')), 'tuning.json'),
+            footprint=Footprint(float(g('footprint_front')), float(g('footprint_rear')),
+                                float(g('footprint_half_width')), float(g('footprint_margin'))),
+            battery=BatteryMonitor(cells=int(g('battery_cells')), low_pct=float(g('battery_low_pct')),
+                                   critical_pct=float(g('battery_critical_pct'))),
+            confirm_timeout_s=float(g('confirm_timeout_s')), dock_offset=float(g('dock_offset')))
         self.core.localized = not bool(g('require_localization_confirm'))
         self.core_lock = threading.RLock()       # callbacks + map worker thread share the core
         self.topic_estop = False
@@ -211,10 +228,20 @@ class NavigatorNode(Node):
 
     def _on_bridge_status(self, msg: String):
         try:
-            self.bridge_estop = bool(json.loads(msg.data).get('estop', False))
+            st = json.loads(msg.data)
+            self.bridge_estop = bool(st.get('estop', False))
         except (ValueError, AttributeError):
             return
         self._apply_estop()
+        bumps = int(st.get('bumps') or 0)
+        if bumps > getattr(self, '_bumps_seen', bumps):
+            with self.core_lock:
+                self.core.note_bump()
+        self._bumps_seen = bumps
+        bat = st.get('battery') or {}
+        if bat.get('v') is not None and bat.get('fresh', True):
+            with self.core_lock:
+                self.core.set_battery(float(bat['v']), bat.get('a'), bat.get('src', 'ina226'))
 
     def _on_scan(self, msg: LaserScan):
         if self.laser_tf is None:
@@ -234,17 +261,22 @@ class NavigatorNode(Node):
         if pose:                                  # nearby scan points -> dynamic obstacles for replans
             x, y, yaw = pose
             c, s = math.cos(yaw), math.sin(yaw)
-            pts = []
+            pts, near = [], []
             a = msg.angle_min
             for i, r in enumerate(msg.ranges):
-                if i % 2 == 0 and msg.range_min < r < 3.0 and math.isfinite(r):
+                if msg.range_min < r < 3.0 and math.isfinite(r):
                     bx = lx + r * math.cos(a + lyaw)
                     by = ly + r * math.sin(a + lyaw)
-                    pts.append((x + c * bx - s * by, y + s * bx + c * by))
+                    if bx * bx + by * by < 1.0:              # close points: body-shape checks
+                        near.append((bx, by))
+                    if i % 2 == 0:
+                        pts.append((x + c * bx - s * by, y + s * bx + c * by))
                 a += msg.angle_increment
-            pts += to_world(self.us.points_base(), pose)       # things below the LiDAR plane
+            us = self.us.points_base()
+            pts += to_world(us, pose)                          # things below the LiDAR plane
             with self.core_lock:
                 self.core.update_scan_world(pts)
+                self.core.update_scan_base(near + list(us))
 
     def _on_goal(self, msg: PoseStamped):
         o = msg.pose.orientation
@@ -308,6 +340,8 @@ class NavigatorNode(Node):
         front = self.front
         if self.scan_stamp is None or (self.get_clock().now() - self.scan_stamp).nanoseconds > 1e9:
             front = 0.0                                  # no fresh scan: never drive forward
+            with self.core_lock:
+                self.core.update_scan_base([])           # ...and don't trust old body checks
         front = min(front, self.us.front_clearance(self.half_width))
         try:
             with self.core_lock:

@@ -1,5 +1,5 @@
 /*
- * robot_esp32_classic  v2.3  —  CLASSIC ESP32 ONLY (ESP32-WROOM-32 DevKit)
+ * robot_esp32_classic  v2.4  —  CLASSIC ESP32 ONLY (ESP32-WROOM-32 DevKit)
  * -----------------------------------------------------------------------------
  *  Same firmware as firmware/robot_esp32 v2.2, with the ESP32-S3 parts removed.
  *  Arduino IDE: Tools > Board > "ESP32 Dev Module", Upload speed 115200 if uploads fail.
@@ -13,6 +13,8 @@
  *  - E-STOP latch ('E' or the mushroom button): blocks the Pi AND the RC until released ('R')
  *  - MPU-6050 gyro (yaw added to ODM), 3x HC-SR04 ultrasonic (US lines), e-stop button input.
  *    Each can be switched off below (USE_IMU / USE_ULTRASONIC / USE_ESTOP_BUTTON).
+ *  - v2.4: battery voltage + current (INA226 on the same I2C bus, or a divider on GPIO 36)
+ *    -> BAT lines; bumper switches (all in parallel) on GPIO 39 -> BMP lines + instant stop.
  *
  * WIRING (classic ESP32 GPIO)
  *   RC: forward/back channel -> 34, left/right channel -> 35
@@ -22,7 +24,12 @@
  *   MPU-6050  SDA 21, SCL 22, VCC 3.3V, AD0 GND
  *   HC-SR04   TRIG L/C/R 14/16/17   ECHO L/C/R -> level shifter -> 23/27/15
  *   E-stop sense GPIO 5 -> NO contact -> GND
- *   NEVER use 6-11 (flash), 1/3 (USB to Pi), 0/2/12 (boot). 36, 39 free.
+ *   INA226    SDA 21, SCL 22 (shared with the MPU), VCC 3.3V, addr 0x40 (A0, A1 to GND)
+ *             VBUS -> battery +, IN+ / IN- in series with the battery + lead (see docs/hardware/battery_dock.md)
+ *   Battery divider (only if there is no INA226): battery+ -> 100k -> GPIO 36 -> 22k -> GND
+ *   Bumpers   GPIO 39 -> all switches (NO) in parallel -> GND, 10k pull-up from 39 to 3.3V
+ *             (39 has no internal pull-up)
+ *   NEVER use 6-11 (flash), 1/3 (USB to Pi), 0/2/12 (boot).
  *
  * SERIAL PROTOCOL (115200 baud, newline-terminated ASCII)
  *  ESP32 -> Pi
@@ -30,6 +37,8 @@
  *    IMU,<gz_mrad_s>,<ax_mm_s2>,<ay_mm_s2>,<az_mm_s2>
  *    US,<left_mm>,<center_mm>,<right_mm>   0 = no echo / out of range
  *    INFO,<text>
+ *    BAT,<mV>,<mA>,<src>   2 Hz; mA > 0 = discharging, < 0 = charging; src 1 = INA226, 2 = divider
+ *    BMP,<0|1>             bumper released / pressed (pressed also stops the motors at once)
  *  Pi -> ESP32
  *    V,<left_mm_s>,<right_mm_s>   P,<left_pwm>,<right_pwm>   S stop   E e-stop   R release
  *    C print RC pulses   G re-calibrate gyro   ? print config
@@ -54,7 +63,7 @@
 #endif
 
 #define LINK Serial               // classic ESP32: USB-UART chip -> /dev/ttyUSB0 on the Pi
-#define FW_VERSION "2.3"
+#define FW_VERSION "2.4"
 #include <Wire.h>
 #include <Preferences.h>     // tuning values survive reboot (ESP32 flash)
 
@@ -79,6 +88,18 @@
 #define USE_ESTOP_BUTTON   1     // mushroom e-stop sense input
 #define ESTOP_PRESSED_LEVEL LOW  // NO contact to GND, or EN-line divider: both read LOW when pressed
 
+#define USE_INA226         1     // battery monitor on I2C (falls back to the divider if not found)
+#define USE_BAT_ADC        0     // 1 = divider on GPIO 36 (only if there is no INA226; leave 0 if 36 is unwired)
+#define USE_BUMPER         0     // set 1 once the bumper switches are wired to GPIO 39
+#define INA226_ADDR       0x40
+#define SHUNT_OHMS        0.01f  // !! common INA226 boards ship with R100 (0.1 ohm = max 0.8 A).
+                                 //    Swap it for an R010 (0.01 ohm, 2512 size) for up to 8 A.
+#define BAT_CURRENT_SIGN  1      // set -1 if the app shows "charging" while driving
+#define BAT_ADC_PIN       36
+#define BAT_DIVIDER       ((100.0f + 22.0f) / 22.0f)
+#define BAT_PERIOD_MS     500
+#define BUMPER_PIN        39
+#define BUMPER_HOLD_MS    500    // ignore Pi commands this long after a bump (the Pi replans)
 #define I2C_SDA      21
 #define I2C_SCL      22
 #define ESTOP_PIN    5
@@ -383,6 +404,80 @@ void estopButtonUpdate() {
 #endif
 }
 
+// ============================ BATTERY (INA226 / divider) =======================
+static bool ina_ok = false;
+static unsigned long last_bat_ms = 0;
+static uint8_t bump_count = 0;
+static bool bumped = false;
+static unsigned long bump_ms = 0;
+
+static bool i2cWrite16(uint8_t addr, uint8_t reg, uint16_t v) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  Wire.write(v >> 8);
+  Wire.write(v & 0xFF);
+  return Wire.endTransmission() == 0;
+}
+
+static bool i2cRead16(uint8_t addr, uint8_t reg, uint16_t *v) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)addr, 2) != 2) return false;
+  *v = ((uint16_t)Wire.read() << 8) | Wire.read();
+  return true;
+}
+
+void batInit() {
+#if USE_INA226
+  Wire.begin(I2C_SDA, I2C_SCL);                  // harmless if the IMU already started the bus
+  Wire.setTimeOut(5);
+  uint16_t id = 0;
+  // manufacturer ID register 0xFE reads 0x5449 ("TI") on a real INA226
+  ina_ok = i2cRead16(INA226_ADDR, 0xFE, &id) && id == 0x5449 &&
+           i2cWrite16(INA226_ADDR, 0x00, 0x4527);  // 16 averages, 1.1 ms conversions, continuous
+#endif
+#if USE_BAT_ADC
+  if (!ina_ok) { analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db); }
+#endif
+  LINK.printf("INFO,battery sensor: %s\n", ina_ok ? "INA226" : (USE_BAT_ADC ? "divider on GPIO 36" : "none"));
+}
+
+void batUpdate(unsigned long now) {
+  if (now - last_bat_ms < BAT_PERIOD_MS) return;
+  last_bat_ms = now;
+  long mv = 0, ma = 0;
+  int src = 0;
+  if (ina_ok) {
+    uint16_t bus = 0, shunt = 0;
+    if (i2cRead16(INA226_ADDR, 0x02, &bus) && i2cRead16(INA226_ADDR, 0x01, &shunt)) {
+      mv = (long)(bus * 1.25f);                                    // 1.25 mV per bit
+      float shunt_uv = (int16_t)shunt * 2.5f;                       // 2.5 uV per bit, signed
+      ma = (long)(BAT_CURRENT_SIGN * shunt_uv / SHUNT_OHMS / 1000.0f);
+      src = 1;
+    }
+  }
+#if USE_BAT_ADC
+  if (!src) {
+    mv = (long)(analogReadMilliVolts(BAT_ADC_PIN) * BAT_DIVIDER);
+    src = mv > 3000 ? 2 : 0;                                        // nothing connected reads ~0
+  }
+#endif
+  if (src && LINK.availableForWrite() >= 32) LINK.printf("BAT,%ld,%ld,%d\n", mv, ma, src);
+}
+
+// ============================ BUMPERS ==========================================
+void bumperUpdate(unsigned long now) {
+#if USE_BUMPER
+  bool pressed = digitalRead(BUMPER_PIN) == LOW;
+  if (pressed) { if (bump_count < 2) bump_count++; } else bump_count = 0;
+  bool b = bump_count >= 2;                          // 40 ms debounce
+  if (b && !bumped) { bump_ms = now; have_cmd = false; LINK.printf("BMP,1\n"); }
+  if (!b && bumped) LINK.printf("BMP,0\n");
+  bumped = b;
+#endif
+}
+
 // ============================ PWM (core 2.x / 3.x) ============================
 void pwmAttach(uint8_t pin, uint8_t ch) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -633,8 +728,12 @@ void setup() {
   pinMode(ESTOP_PIN, ESTOP_PRESSED_LEVEL == LOW ? INPUT_PULLUP : INPUT_PULLDOWN);
 #endif
   usInit();
+#if USE_BUMPER
+  pinMode(BUMPER_PIN, INPUT);      // input-only pin: needs the external 10k pull-up
+#endif
   delay(300);
   imuInit();                       // calibrates the gyro: keep the robot still at power-up
+  batInit();
   loadTune();
   last_control_ms = millis();
   LINK.printf("INFO,READY,robot_esp32 v%s %s\n", FW_VERSION, BOARD_NAME);
@@ -668,6 +767,8 @@ void loop() {
   loopR.speed_mms = a * (dr * MM_PER_TICK / dt_s) + (1 - a) * loopR.speed_mms;
 
   estopButtonUpdate();
+  bumperUpdate(now);
+  batUpdate(now);
 
   // ---- arbitration: RC > Pi > idle ----
   bool rc_ok = rcValid(steering_last, steering_pw, STEERING_MIN, STEERING_MAX) &&
@@ -678,7 +779,8 @@ void loop() {
   bool rc_active = (thr != 0.0f || str != 0.0f);
   if (rc_active) last_rc_active_ms = now;
 
-  bool pi_fresh = have_cmd && (now - last_cmd_ms) < CMD_TIMEOUT_MS;
+  bool pi_fresh = have_cmd && (now - last_cmd_ms) < CMD_TIMEOUT_MS &&
+                  !(bump_ms && now - bump_ms < BUMPER_HOLD_MS);
   bool rc_holdoff = last_rc_active_ms != 0 && (now - last_rc_active_ms) < RC_HOLDOFF_MS;
 
   // anything other than closed-loop Pi driving: next Pi command ramps up from standstill

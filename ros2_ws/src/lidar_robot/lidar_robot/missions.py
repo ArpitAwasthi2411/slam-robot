@@ -20,6 +20,8 @@ class Stop:
     yaw: Optional[float] = None
     path: Optional[list] = None     # drawn path to follow to this stop (instead of a planned route)
     wait_s: float = 0.0             # extra wait at this stop ("wait 2 minutes")
+    confirm: bool = False           # wait here until someone presses OK ("wait for a signature")
+    dock: bool = False              # approach point of the charging dock: reverse onto it on arrival
 
 
 @dataclass
@@ -47,6 +49,7 @@ class Mission:
         return {'id': self.id, 'priority': self.priority, 'source': self.source, 'text': self.text,
                 'state': self.state, 'message': self.message,
                 'stops': [s.label for s in self.stops], 'next_stop': self.next_stop,
+                'confirm': [i for i, s in enumerate(self.stops) if s.confirm],
                 'repeat': self.repeat, 'round': self.round}
 
 

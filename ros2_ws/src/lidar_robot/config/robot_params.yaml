@@ -59,6 +59,19 @@ navigator:
     slow_distance: 0.80
     robot_half_width: 0.25
     front_cone_deg: 25.0
+    # The body shape (v2.4). base_link = centre of the drive axle. MEASURE these on your robot:
+    #   front = axle -> front bumper, rear = axle -> back edge, half_width = centre line -> side
+    # The planner checks the whole rectangle along every route, and the follower refuses a turn on
+    # the spot that would swing the back into something (it does a short 3-point turn instead).
+    footprint_front: 0.07
+    footprint_rear: 0.37
+    footprint_half_width: 0.21
+    footprint_margin: 0.04       # extra keep-out (m)
+    battery_cells: 3             # 3S Li-ion: 12.6 V full, ~10 V empty
+    battery_low_pct: 25          # go and charge after the current task
+    battery_critical_pct: 12     # go and charge now, refuse new tasks
+    confirm_timeout_s: 300.0     # "wait for OK" stops continue after this
+    dock_offset: 0.55            # m in front of the dock where the reverse onto it starts
     dwell_s: 3.0                 # wait at each intermediate stop (s)
     auto_return_s: 0.0           # >0: drive home after this many idle seconds
     max_replans: 3

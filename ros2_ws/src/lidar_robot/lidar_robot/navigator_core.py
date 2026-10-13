@@ -16,14 +16,32 @@ JSON request API (handle):
   {"type": "delete_place", "name": "Lab 3"}
   {"type": "set_home", "here": true}  or with x/y/yaw
   {"type": "search", "q": "hod"}
+  {"type": "confirm"}                    answer a "wait for OK" stop (state CONFIRM)
+  {"type": "explain", "speak": true}     "why did you stop?" in plain words
+  {"type": "find", "q": "3D printer"}    which room has it (room-level semantics)
+  {"type": "add_room", "name": "Lab 3", "polygon": [[x, y], ...], "contents": [..], "aliases": [..]}
+  {"type": "update_room", "name": "Lab 3", "contents": [..]}  /  {"type": "delete_room", "name": ..}
+  {"type": "goto_room", "name": "Lab 3"}  or  {"type": "goto_room", "thing": "3D printer"}
+  {"type": "set_dock", "here": true}     robot is sitting ON the dock, contacts touching
+  {"type": "go_dock"}                    drive to the dock and reverse onto the contacts
+  {"type": "schedule_add", "name": "Patrol", "at": "10:00", "days": [0,1,2,3,4], "action": {...}}
+  {"type": "schedule_delete", "id": 1} / {"type": "schedule_enable", "id": 1, "on": false}
+  {"type": "mission_log", "n": 50}       evaluation records + summary stats
 
 Failure reason codes (for logs, the dashboard and future LLM error recovery):
-  NO_MAP, NO_PATH, GOAL_IN_OBSTACLE, OUTSIDE_MAP, START_BLOCKED, BLOCKED, POSE_LOST, ESTOP, UNKNOWN_PLACE
+  NO_MAP, NO_PATH, GOAL_IN_OBSTACLE, OUTSIDE_MAP, START_BLOCKED, BLOCKED, POSE_LOST, ESTOP, UNKNOWN_PLACE,
+  DOCK_NO_CONTACT
 """
 import math
+import os
 import time
 
 from lidar_robot import drawn_path
+from lidar_robot.battery import BatteryMonitor
+from lidar_robot.explain import explain
+from lidar_robot.footprint import Footprint, FootprintGuard, check_path
+from lidar_robot.missionlog import MissionLog
+from lidar_robot.schedules import ScheduleStore
 from lidar_robot.commands import CommandParser
 from lidar_robot.explorer import ExploreParams, find_frontiers, choose_goal, mapped_area
 from lidar_robot.follower import FollowerParams, PathFollower
@@ -34,6 +52,9 @@ from lidar_robot.tuning import (TuningStore, apply_follower, follower_values, ra
 
 IDLE, PLANNING, DRIVING, DWELL, WAITING = 'IDLE', 'PLANNING', 'DRIVING', 'DWELL', 'WAITING'
 SCANNING = 'SCANNING'          # exploration: turning slowly on the spot so the LiDAR sees every wall
+CONFIRM = 'CONFIRM'            # at a stop, waiting for someone to press OK
+DOCKING, UNDOCKING, CHARGING = 'DOCKING', 'UNDOCKING', 'CHARGING'
+BATTERY_SOURCES = ('battery', 'auto-home', 'explore-return')
 
 
 def _reason_code(planner_error):
@@ -52,7 +73,8 @@ def _reason_code(planner_error):
 class NavigatorCore:
     def __init__(self, places, planner_params=None, follower_params=None, parser=None,
                  dwell_s=3.0, auto_return_s=0.0, max_replans=3, plan_retry_s=2.0, max_plan_attempts=3,
-                 clock=time.monotonic, tuning_path=None):
+                 clock=time.monotonic, tuning_path=None, footprint=None, data_dir=None, battery=None,
+                 localtime=time.localtime, confirm_timeout_s=300.0, dock_offset=0.55):
         self.places = places
         self.planner = Planner(planner_params or PlannerParams())
         self.follower = PathFollower(follower_params or FollowerParams())
@@ -88,6 +110,23 @@ class NavigatorCore:
         self.grid = None                # latest GridMap (for exploration)
         self.explore_params = ExploreParams()
         self.explore = {'active': False, 'state': 'off'}
+        # body shape, battery, schedules, evaluation log (v2.4)
+        self.footprint = footprint or Footprint()
+        self.body_checks = True                  # False = old behaviour (circle robot), for comparisons
+        self.scan_base = []                      # live scan + ultrasonic points in base_link
+        self.tight_spots = []                    # where the current route barely fits the body
+        self.battery = battery or BatteryMonitor(clock=clock)
+        self._bat_mode = None                    # None | 'low' | 'critical' (already acted on)
+        data_dir = data_dir or (os.path.dirname(tuning_path) if tuning_path else None)
+        self.schedules = ScheduleStore(os.path.join(data_dir, 'schedules.json') if data_dir else None,
+                                       localtime=localtime)
+        self.mlog = MissionLog(os.path.join(data_dir, 'missions.jsonl') if data_dir else None)
+        self._next_sched = 0.0
+        self.confirm_timeout_s = confirm_timeout_s
+        self._confirm_until = 0.0
+        self.dock_offset = dock_offset           # m in front of the dock where the reverse starts
+        self.docked = False
+        self._dock = None
 
     # ---------------------------------------------------------------- inputs
     def set_map(self, grid):
@@ -105,8 +144,25 @@ class NavigatorCore:
     def update_scan_world(self, pts):
         self.scan_world = pts
 
+    def update_scan_base(self, pts):
+        """Scan / ultrasonic points in base_link (robot frame) for the body-shape checks."""
+        self.scan_base = pts
+
+    def set_battery(self, volts, amps=None, src='ina226'):
+        self.battery.update(volts, amps, src)
+
+    def note_bump(self):
+        """A bumper switch (or the simulator) reports contact: count it and find another route."""
+        self.mlog.bump(self.queue.active, 'bumps')
+        self._log('bump detected: stopping and replanning', 'warn')
+        if self.queue.active and self.state == DRIVING:
+            self.follower.clear()
+            self._replans += 1
+            self._set(PLANNING, 'bumped into something, replanning')
+
     def set_estop(self, on):
         if on and not self.estopped:
+            self.mlog.bump(self.queue.active, 'estops')
             self.estopped = True
             self.hold = True
             if self.queue.active:
@@ -255,6 +311,76 @@ class NavigatorCore:
                 self._log(f'follower tuning {"saved" if req.get("save") else "changed"}: '
                           + ', '.join(f'{k}={v:g}' for k, v in applied.items()))
                 return {'ok': True, 'follower': follower_values(self.follower.p), 'saved': bool(req.get('save'))}
+            if t == 'confirm':
+                if self.state != CONFIRM:
+                    return {'ok': False, 'error': 'nothing is waiting for OK'}
+                self._log(f'OK received at {self.queue.active.current.label}')
+                self.say_queue.append(('confirm', 'Thank you.'))
+                self._set(DWELL, 'confirmed')
+                self._dwell_until = self.clock()
+                return {'ok': True}
+            if t == 'explain':
+                r = explain(self)
+                if req.get('speak'):
+                    self.say_queue.append(('explain', r['answer']))
+                return {'ok': True, **r}
+            if t == 'find':
+                return self._find(req.get('q', ''))
+            if t == 'add_room':
+                rec = self.places.add_room(req['name'], req['polygon'], req.get('contents', []), req.get('aliases', []))
+                self._log(f'room saved: {rec["name"]} ({len(rec["contents"])} things)')
+                return {'ok': True, 'room': rec}
+            if t == 'update_room':
+                rec = self.places.update_room(req['name'], req.get('contents'), req.get('aliases'), req.get('new_name'))
+                return {'ok': True, 'room': rec}
+            if t == 'delete_room':
+                self.places.remove_room(req['name'])
+                return {'ok': True}
+            if t == 'goto_room':
+                if req.get('thing'):
+                    hits = self.places.find_thing(req['thing'])
+                    if not hits:
+                        raise ValueError(f'no room has "{req["thing"]}" in its contents list')
+                    room = hits[0][1]
+                else:
+                    room = self.places.get_room(req.get('name', ''))
+                    if not room:
+                        raise ValueError(f'no room called "{req.get("name")}"')
+                tgt = self.places.room_target(room)
+                return self._enqueue([Stop(tgt['name'], tgt['x'], tgt['y'], tgt.get('yaw'))],
+                                     req.get('priority', 1), req.get('source', 'dashboard'), tgt['name'])
+            if t == 'set_dock':
+                if req.get('here'):
+                    if not pose:
+                        raise ValueError('robot pose unknown')
+                    x, y, yaw = pose
+                else:
+                    x, y, yaw = float(req['x']), float(req['y']), float(req['yaw'])
+                self.places.set_dock(x, y, yaw)
+                self.docked = bool(req.get('here'))
+                self._log('charging dock position saved')
+                return {'ok': True, 'dock': self.places.dock}
+            if t == 'go_dock':
+                if req.get('replace'):
+                    self._cancel_all('going to charge')
+                return self._go_dock(req.get('priority', 1), req.get('source', 'dashboard'))
+            if t == 'schedule_add':
+                rec = self.schedules.add(req.get('name'), req.get('at'), req.get('action'), req.get('days'),
+                                         req.get('enabled', True), req.get('id'))
+                self._log(f'schedule saved: {rec["name"]} at {rec["at"]}')
+                return {'ok': True, 'schedule': rec, 'schedules': self.schedules.summary()}
+            if t == 'schedule_delete':
+                self.schedules.remove(req['id'])
+                return {'ok': True, 'schedules': self.schedules.summary()}
+            if t == 'schedule_enable':
+                self.schedules.set_enabled(req['id'], req.get('on', True))
+                return {'ok': True, 'schedules': self.schedules.summary()}
+            if t == 'schedule_list':
+                return {'ok': True, 'schedules': self.schedules.summary()}
+            if t == 'mission_log':
+                n = max(1, min(300, int(req.get('n', 50))))
+                inc = bool(req.get('include_explore'))
+                return {'ok': True, 'missions': self.mlog.recent(n, inc), 'stats': self.mlog.stats(inc)}
             if t == 'search':
                 return {'ok': True, 'results': [{'score': s, **p} for s, p in self.places.search(req.get('q', ''), limit=8, min_score=0.35)]}
             return {'ok': False, 'error': f'unknown request type {t!r}'}
@@ -289,6 +415,8 @@ class NavigatorCore:
             self._log(f'replaced {n} mission(s): {why}')
 
     def _enqueue(self, stops, priority, source, text):
+        if source not in BATTERY_SOURCES and source != 'explore' and self.battery.current_level() == 'critical':
+            raise ValueError(f'battery critical ({self.battery.pct()} %): charge me first')
         for st in stops:
             if not (math.isfinite(st.x) and math.isfinite(st.y)) or (st.yaw is not None and not math.isfinite(st.yaw)):
                 raise ValueError('goal coordinates must be finite numbers')
@@ -302,7 +430,33 @@ class NavigatorCore:
         self._log(f'mission #{m.id} queued: {" -> ".join(s.label for s in stops)} (priority {m.priority})')
         return {'ok': True, 'mission': m.summary()}
 
+    def _go_dock(self, priority, source):
+        d = self.places.dock
+        if not d:
+            raise ValueError('the dock is not set (put the robot on the dock → Set dock here)')
+        ax = d['x'] + self.dock_offset * math.cos(d['yaw'])
+        ay = d['y'] + self.dock_offset * math.sin(d['yaw'])
+        st = Stop('dock', ax, ay, d['yaw'], dock=True)
+        return self._enqueue([st], priority, source, 'charge on the dock')
+
+    def _find(self, q):
+        hits = self.places.find_thing(q)
+        here = self.places.room_at(*self._pose[:2]) if self._pose else None
+        if not hits:
+            p = self.places.search(q, limit=1, min_score=0.6)
+            if p:
+                return {'ok': True, 'answer': f'{p[0][1]["name"]} is a saved place on the map.', 'rooms': []}
+            return {'ok': True, 'answer': f'I don\'t know where "{q}" is. Add it to a room\'s contents list.',
+                    'rooms': []}
+        names = [h[1]['name'] for h in hits if h[0] >= hits[0][0] - 0.1]
+        ans = f'"{hits[0][2]}" is in {" or ".join(names)}.'
+        if here and here['name'] in names:
+            ans += ' That is the room I am in now.'
+        return {'ok': True, 'answer': ans, 'rooms': [{'name': h[1]['name'], 'item': h[2], 'score': h[0]} for h in hits]}
+
     def _go_home(self, priority, source):
+        if self.places.dock and not self.places.home:
+            return self._go_dock(priority, source)
         h = self.places.home
         if not h:
             raise ValueError('home is not set (use "Set home here")')
@@ -323,8 +477,9 @@ class NavigatorCore:
         elif c['intent'] == 'navigate':
             stops = []
             for st in c.get('steps') or [{'place': n, 'wait_s': 0.0} for n in c['targets']]:
-                stop = self._stop_from_place(self.places.get(st['place']))
+                stop = self._stop_from_place(self.places.target(st['place']))
                 stop.wait_s = float(st.get('wait_s') or 0.0)
+                stop.confirm = bool(st.get('confirm'))
                 stops.append(stop)
             h = self.places.home
             if c.get('then_home') and h:
@@ -332,19 +487,40 @@ class NavigatorCore:
             res.update(self._enqueue(stops, c['priority'], 'command', text))
         elif c['intent'] == 'status':
             res['status'] = self.status()['message']
+            b = self.battery.info()
+            if b['pct'] is not None:
+                res['status'] += f' · battery {b["pct"]} %' + (' (charging)' if b['charging'] else '')
+        elif c['intent'] == 'dock':
+            res.update(self._go_dock(c['priority'], 'command'))
+        elif c['intent'] == 'explain':
+            r = explain(self)
+            res['answer'] = r['answer']
+            res['interpretation']['reply'] = r['answer']
+        elif c['intent'] == 'find':
+            r = self._find(c.get('query', ''))
+            res['answer'] = r['answer']
+            res['interpretation']['reply'] = r['answer']
+        elif c['intent'] == 'confirm':
+            if self.state == CONFIRM:
+                self.handle({'type': 'confirm'})
+            else:
+                res['interpretation']['reply'] = 'Nothing is waiting for an OK.' 
         self._log(f'command "{text}" -> {c["intent"]} {c["targets"]} via {c["source"]}')
         return res
 
     def _plan_summary(self, c):
         steps = []
         if c['intent'] == 'navigate':
-            steps = [{'kind': 'go', 'label': st['place'], 'wait_s': st.get('wait_s', 0.0)}
+            steps = [{'kind': 'go', 'label': st['place'], 'wait_s': st.get('wait_s', 0.0),
+                      'confirm': bool(st.get('confirm'))}
                      for st in (c.get('steps') or [{'place': n, 'wait_s': 0.0} for n in c['targets']])]
             if c.get('then_home'):
                 steps.append({'kind': 'home', 'label': 'home', 'wait_s': 0.0,
                               'missing': not self.places.home})
         elif c['intent'] == 'return_home':
             steps = [{'kind': 'home', 'label': 'home', 'wait_s': 0.0, 'missing': not self.places.home}]
+        elif c['intent'] == 'dock':
+            steps = [{'kind': 'dock', 'label': 'charging dock', 'wait_s': 0.0, 'missing': not self.places.dock}]
         return {'intent': c['intent'], 'priority': c['priority'], 'steps': steps}
 
     def _preview(self, req, pose):
@@ -372,8 +548,16 @@ class NavigatorCore:
     # ---------------------------------------------------------------- control loop
     def step(self, pose, front_clearance, dt):
         """pose = (x, y, yaw) in the map frame or None if unknown. Returns (v, w)."""
+        v, w = self._step(pose, front_clearance, dt)
+        self.mlog.sync(self.queue)
+        return v, w
+
+    def _step(self, pose, front_clearance, dt):
         now = self.clock()
         self._pose = pose
+        if now >= self._next_sched:
+            self._next_sched = now + 5.0
+            self._run_schedules()
         if self.estopped or self.hold:
             if self.hold and not self.estopped and (self.queue.active or self.queue.queue):
                 self.message = 'on hold after e-stop: press Resume'
@@ -398,14 +582,42 @@ class NavigatorCore:
             self._set(PLANNING, 'position back, replanning')
         self._pose_lost_for = 0.0
 
+        d = self.places.dock
+        if not self.docked and d and self.battery.charging and self.state != DOCKING \
+                and math.hypot(pose[0] - d['x'], pose[1] - d['y']) < 0.15:
+            self.docked = True                     # started up on the dock / pushed onto it by hand
+        self._battery_policy(pose)
         if self.explore.get('active'):
             self._explore_tick(pose, now)
         m = self.queue.active or self.queue.next()
         if m is None:
+            self.mlog.idle()
+            if self.docked:
+                b = self.battery.info()
+                self._set(CHARGING, 'on the dock' + (f', charging ({b["pct"]} %)' if b['charging'] else
+                                                     (f' ({b["pct"]} %)' if b['pct'] is not None else '')))
+                return 0.0, 0.0
             self._maybe_auto_home(pose, now)
             if self.state not in (IDLE,):
                 self._set(IDLE, self.message if self.state == WAITING else 'idle')
             return 0.0, 0.0
+
+        guard = FootprintGuard(self.footprint, self.scan_base) if (self.scan_base and self.body_checks) else None
+        self.mlog.on_pose(m, pose, dt, blocked=self.follower.blocked,
+                          gap=guard.min_gap if guard else None)
+
+        if self.docked and self.state != DOCKING:     # leave the dock straight before turning anywhere
+            return self._undock(pose, front_clearance)
+        if self.state == DOCKING:
+            return self._docking(m, pose, now)
+        if self.state == CONFIRM:
+            if now > self._confirm_until:
+                self._log(f'nobody pressed OK at {m.current.label} in {self.confirm_timeout_s:.0f} s: continuing', 'warn')
+                self._set(DWELL, 'no OK received, continuing')
+                self._dwell_until = now
+            else:
+                self.message = f'at {m.current.label}: waiting for OK'
+                return 0.0, 0.0
 
         if self.state == SCANNING and (self._scan or {}).get('mid') != m.id:
             self._set(PLANNING, f'next stop: {m.current.label}')      # scan belonged to a canceled goal
@@ -443,9 +655,15 @@ class NavigatorCore:
                 return 0.0, 0.0
             return self._plan_current(m, pose, now)
 
-        v, w, event = self.follower.step(pose, front_clearance, dt)
+        v, w, event = self.follower.step(pose, front_clearance, dt, guard=guard)
         if event == 'ARRIVED':
             m.skips = 0
+            if m.current.dock:
+                self.follower.clear()
+                self._dock = {'t0': now, 'contact_t': None}
+                self._set(DOCKING, 'reversing onto the dock')
+                self._log('at the dock: reversing onto the contacts')
+                return 0.0, 0.0
             if m.source not in ('explore',) and m.current.label not in ('map goal', 'drawn path') \
                     and not m.current.label.startswith('point '):
                 self.say_queue.append(('arrived', f'Arrived at {m.current.label}.'))
@@ -455,6 +673,11 @@ class NavigatorCore:
             last = m.next_stop == len(m.stops) - 1
             self._dwell_until = now + (0.0 if last else self.dwell_s) + m.current.wait_s
             self._set(DWELL, f'at {m.current.label}')
+            if m.current.confirm:
+                self._confirm_until = now + self.confirm_timeout_s
+                self._set(CONFIRM, f'at {m.current.label}: waiting for OK')
+                self.say_queue.append(('confirm', f'I am at {m.current.label}. Please press OK on the app when you are done.'))
+                self._log(f'waiting for OK at {m.current.label}')
             if m.source == 'explore' and self.explore_params.scan_spin:
                 w = self.explore_params.scan_speed
                 self._scan = {'mid': m.id, 'acc': 0.0, 'last': pose[2], 'w': w, 't': 0.0,
@@ -462,6 +685,7 @@ class NavigatorCore:
                 self._set(SCANNING, 'scanning the area')
             return 0.0, 0.0
         if event in ('BLOCKED', 'OFF_PATH'):
+            self.mlog.bump(m, 'replans')
             self._replans += 1
             if self._replans > self.max_replans:
                 self._fail('BLOCKED', f'path to {m.current.label} stays blocked after {self.max_replans} new routes')
@@ -485,11 +709,14 @@ class NavigatorCore:
     def _plan_current(self, m, pose, now):
         stop = m.current
         extra = self._dynamic_obstacles() if self._replans else ()
+        bad = []
         if stop.path:
             path = drawn_path.route_from_pose(self.planner, pose, stop.path,
                                               from_nearest=bool(self._replans), extra_obstacles=extra)
         else:
             path = self.planner.plan(pose[:2], (stop.x, stop.y), extra)
+            if path is not None and self.body_checks:
+                path, bad = self._fit_body(path, pose, stop, extra)
         if path is None:
             m.attempts += 1
             code = _reason_code(self.planner.last_error)
@@ -500,12 +727,129 @@ class NavigatorCore:
                 self._set(WAITING, f'no route to {stop.label} yet ({self.planner.last_error}), retrying')
             return 0.0, 0.0
         m.attempts = 0
-        self.follower.set_path(path, stop.yaw)
+        self.follower.set_path(path, stop.yaw, tight=bool(bad))
+        self.tight_spots = bad[:20]
+        if bad:
+            self._log(f'tight spot near ({bad[0][0]:.1f}, {bad[0][1]:.1f}): my body barely fits, driving slowly', 'warn')
+        self.mlog.on_plan(m, m.next_stop, path_length(path), pose, (stop.x, stop.y))
         self.preview = None
         self._set(DRIVING, f'driving to {stop.label}')
         self._log(f'route to {stop.label}: {path_length(path):.1f} m' +
                   (f' ({self.planner.last_note})' if self.planner.last_note else ''))
         return 0.0, 0.0
+
+    def _fit_body(self, path, pose, stop, extra):
+        """Check the route with the real body shape; if it clips, try a wider berth (one more A*)."""
+        note = self.planner.last_note
+        bad = check_path(self.planner, path, self.footprint, start_yaw=pose[2], end_yaw=stop.yaw)
+        if bad:
+            wide_r = self.footprint.circumradius + self.footprint.margin
+            wide = self.planner.plan(pose[:2], (stop.x, stop.y), extra, radius=wide_r)
+            if wide is not None and not self.planner.last_note \
+                    and path_length(wide) <= 1.5 * path_length(path) + 1.0:
+                bad2 = check_path(self.planner, wide, self.footprint, start_yaw=pose[2], end_yaw=stop.yaw)
+                if len(bad2) < len(bad):
+                    path, bad = wide, bad2
+                    note = 'wide route: keeps the whole body clear'
+        self.planner.last_note = note
+        return path, bad
+
+    def _undock(self, pose, front_clearance):
+        d = self.places.dock
+        if not d or math.hypot(pose[0] - d['x'], pose[1] - d['y']) > 0.30:
+            self.docked = False
+            self._log('off the dock')
+            self._set(PLANNING, 'off the dock')
+            return 0.0, 0.0
+        if front_clearance < self.follower.p.stop_distance:
+            self._set(UNDOCKING, 'leaving the dock: something is in front of me')
+            return 0.0, 0.0
+        self._set(UNDOCKING, 'leaving the dock')
+        return 0.08, 0.0
+
+    def _docking(self, m, pose, now):
+        """Reverse along the dock line until the charger current starts (or the dock pose is reached)."""
+        d = self.places.dock
+        yd = d['yaw']
+        c, s = math.cos(yd), math.sin(yd)
+        ex, ey = pose[0] - d['x'], pose[1] - d['y']
+        along = ex * c + ey * s                    # m in front of the dock (0 = sitting on it)
+        lat = -ex * s + ey * c                     # m to the left of the dock line
+        th = math.atan2(math.sin(pose[2] - yd), math.cos(pose[2] - yd))
+        b = self.battery
+        sensor = b.current_level() != 'unknown' and b.a is not None
+        if sensor and b.charging:
+            if self._dock['contact_t'] is None:
+                self._dock['contact_t'] = now
+            if now - self._dock['contact_t'] > 1.0:        # stable contact for a second
+                return self._docked(m, 'charging started')
+            return 0.0, 0.0
+        if now - self._dock['t0'] > 25.0 or along < -0.05:
+            if not sensor:
+                return self._docked(m, 'docked (no current sensor to confirm the contacts)')
+            self._fail('DOCK_NO_CONTACT', 'reversed onto the dock but no charging current')
+            return 0.0, 0.0
+        if not sensor and along < 0.005:
+            return self._docked(m, 'docked (no current sensor to confirm the contacts)')
+        if abs(th) > 0.35 and along > 0.15:               # line up first (back towards the dock)
+            self.message = 'lining up with the dock'
+            return 0.0, -math.copysign(0.35, th)
+        th_des = max(-0.3, min(0.3, 2.5 * lat))
+        w = max(-0.4, min(0.4, 2.0 * (th_des - th)))
+        v = -0.05 if along > 0.08 else -0.03            # slow for the last few cm
+        self.message = f'reversing onto the dock ({max(0.0, along) * 100:.0f} cm to go)'
+        return v, w
+
+    def _docked(self, m, why):
+        self.docked = True
+        self.queue.finish('DONE', why)
+        self._log(why)
+        self.say_queue.append(('dock', 'Docked. Charging.' if 'charging' in why else 'Docked.'))
+        self._set(CHARGING, why)
+        self._bat_mode = None
+        return 0.0, 0.0
+
+    def _battery_policy(self, pose):
+        lvl = self.battery.current_level()
+        if lvl in ('ok', 'charging', 'unknown'):
+            if lvl != 'unknown':
+                self._bat_mode = None
+            return
+        if self.docked or self._bat_mode == lvl or (self._bat_mode == 'critical' and lvl == 'low'):
+            return
+        active = self.queue.active
+        if active and active.source == 'battery':
+            return
+        self._bat_mode = lvl
+        pct = self.battery.pct()
+        if self.explore.get('active'):
+            self._explore_stop(f'battery {lvl}')
+        try:
+            if self.places.dock:
+                r = self._go_dock(3 if lvl == 'critical' else 2, 'battery')
+            elif self.places.home:
+                r = self._go_home(3 if lvl == 'critical' else 2, 'battery')
+            else:
+                self._log(f'battery {lvl} ({pct} %) but no dock or home is set', 'error')
+                return
+        except ValueError as e:
+            self._log(f'battery {lvl}: {e}', 'error')
+            return
+        self._log(f'battery {lvl} ({pct} %): going to charge' + (' now' if lvl == 'critical' else ' after this task'),
+                  'warn')
+        self.say_queue.append(('battery', 'My battery is low. I am going to charge.'))
+        return r
+
+    def _run_schedules(self):
+        for sch in self.schedules.due():
+            if self.estopped or self.hold:
+                self._log(f'schedule "{sch["name"]}" skipped: e-stop', 'warn')
+                continue
+            res = self.handle(dict(sch['action'], source='schedule'))
+            if res.get('ok'):
+                self._log(f'schedule "{sch["name"]}" started')
+            else:
+                self._log(f'schedule "{sch["name"]}" could not start: {res.get("error")}', 'warn')
 
     def _fail(self, code, text):
         m = self.queue.active
@@ -514,6 +858,7 @@ class NavigatorCore:
         if m and m.skip_unreachable and m.skips + 1 < len(m.stops) and code != 'POSE_LOST':
             m.skips += 1
             m.attempts = 0
+            self.mlog.bump(m, 'skipped')
             self._log(f'skipping {m.current.label}: {text}', 'warn')
             m.next_stop += 1
             if m.current is None and m.repeat != 0:
@@ -539,7 +884,7 @@ class NavigatorCore:
                 return
             self._log(f'mission #{m.id} failed: {text}', 'error')
         self._set(IDLE, f'failed: {text}')
-        self.last_failure = {'code': code, 'text': text, 'mission': m.summary() if m else None}
+        self.last_failure = {'code': code, 'text': text, 'mission': m.summary() if m else None, 't': time.time()}
         self._idle_since = self.clock()
 
     # ---------------------------------------------------------------- exploration
@@ -679,6 +1024,13 @@ class NavigatorCore:
             'missions': self.queue.summary(), 'events': self.events[:15],
             'has_map': self.planner.has_map(),
             'explore': self._explore_status(),
+            'footprint': self.footprint.as_list(), 'tight': self.tight_spots,
+            'battery': self.battery.info(), 'docked': self.docked,
+            'room': (lambda r: r['name'] if r else None)(self.places.room_at(*pose[:2]) if pose else None),
+            'confirm': ({'label': m.current.label, 'left_s': round(max(0.0, self._confirm_until - self.clock()))}
+                        if (self.state == CONFIRM and m and m.current) else None),
+            'schedules': self.schedules.summary(),
+            'log_stats': self.mlog.stats(),
         }
 
 

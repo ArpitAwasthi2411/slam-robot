@@ -76,18 +76,23 @@ class Planner:
 
     def _costs(self, blocked):
         """Distance-to-obstacle (in cells, approx Euclidean via chamfer) -> cost grid."""
-        w, h, res, _, _ = self._meta
-        p = self.p
+        res = self._meta[2]
         big = 1e9
         dist = np.where(blocked, 0.0, big)
         # two-pass chamfer distance transform (3-4 style, units = cells)
         dist = _chamfer(dist)
         dist_m = dist * res
-        lethal = dist_m < p.robot_radius
-        frac = np.clip((p.soft_radius - dist_m) / max(1e-6, p.soft_radius - p.robot_radius), 0.0, 1.0)
+        cost, lethal = self._cost_from_dist(dist_m, self.p.robot_radius)
+        return cost, lethal, dist_m
+
+    def _cost_from_dist(self, dist_m, radius):
+        p = self.p
+        soft = max(p.soft_radius, radius + 0.1)
+        lethal = dist_m < radius
+        frac = np.clip((soft - dist_m) / max(1e-6, soft - radius), 0.0, 1.0)
         cost = 1.0 + p.soft_weight * frac ** 2
         cost[lethal] = np.inf
-        return cost, lethal, dist_m
+        return cost, lethal
 
     # ------------------------------------------------------------------ helpers
     def world_to_cell(self, x, y):
@@ -151,14 +156,20 @@ class Planner:
         return best
 
     # ------------------------------------------------------------------ planning
-    def plan(self, start, goal, extra_obstacles=()):
-        """start/goal (x, y) in map frame -> list of (x, y) waypoints, or None (see last_error)."""
+    def plan(self, start, goal, extra_obstacles=(), radius=None):
+        """start/goal (x, y) in map frame -> list of (x, y) waypoints, or None (see last_error).
+
+        radius: keep-out distance for this plan (default robot_radius). The navigator first tries
+        the robot's full turning radius (wide berth), then falls back to the narrow one.
+        """
         self.last_error = ''
         self.last_note = ''
         if not self.has_map():
             self.last_error = 'no map yet'
             return None
-        cost, lethal, _ = self._base
+        cost, lethal, dist_m = self._base
+        if radius is not None and abs(radius - self.p.robot_radius) > 1e-6:
+            cost, lethal = self._cost_from_dist(dist_m, radius)
         if extra_obstacles:
             cost = self._stamp(cost, extra_obstacles)
 
