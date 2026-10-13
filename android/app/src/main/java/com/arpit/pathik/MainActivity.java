@@ -213,6 +213,19 @@ public class MainActivity extends Activity {
             if (act.ttsReady && text != null) act.tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "pathik");
         }
 
+        /** Share text (e.g. the mission log as CSV) to Drive, WhatsApp, email... */
+        @JavascriptInterface
+        public void share(final String name, final String text) {
+            act.runOnUiThread(() -> {
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("text/plain");
+                i.putExtra(Intent.EXTRA_SUBJECT, name);
+                i.putExtra(Intent.EXTRA_TITLE, name);
+                i.putExtra(Intent.EXTRA_TEXT, text);
+                act.startActivity(Intent.createChooser(i, "Share " + name));
+            });
+        }
+
         @JavascriptInterface
         public String version() {
             try { return act.getPackageManager().getPackageInfo(act.getPackageName(), 0).versionName; }

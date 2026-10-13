@@ -65,11 +65,16 @@
         <span class="t-name" id="t-host">robot</span>
         <span class="t-link" id="t-link">–</span>
       </button>
-      <span id="t-mode" class="chip glass">Idle</span>
+      <div class="t-right">
+        <span id="t-bat" class="chip glass bat" hidden></span>
+        <button id="t-mode" class="chip glass" aria-label="Robot state. Tap: why?">Idle</button>
+      </div>
     </header>
     <div id="m-stats" class="m-stats glass" hidden></div>
     <div id="m-mode" class="m-mode glass" hidden role="status"></div>
     <div id="m-banner" class="m-banner glass" hidden></div>
+    <div id="m-confirm" class="m-confirm glass" hidden role="alert"></div>
+    <div id="m-why" class="m-why glass" hidden role="status"></div>
     <div id="m-hint" class="m-hint">Pick a tool on the left: flag, draw a path, route points…</div>
 
     <!-- tool rail -->
@@ -82,6 +87,8 @@
         <svg viewBox="0 0 24 24"><circle cx="5" cy="18" r="2.2"/><circle cx="12" cy="7" r="2.2"/><circle cx="19" cy="16" r="2.2"/><path d="M6.3 16.2 10.8 9M13.3 8.9l4.6 5.4" stroke-dasharray="2 2"/></svg><span>Route</span></button>
       <button class="tool" data-tool="measure" aria-pressed="false" title="Measure a distance">
         <svg viewBox="0 0 24 24"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z"/><path d="M7 11.5l2 2M10 8.5l2.5 2.5M13 5.5l2 2"/></svg><span>Measure</span></button>
+      <button class="tool" data-tool="room" aria-pressed="false" title="Room: drag a box over a room and say what is in it">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z" stroke-dasharray="3 2"/><path d="M8 15l3-3 2 2 3-4"/></svg><span>Room</span></button>
       <button class="tool" data-tool="locate" aria-pressed="false" title="Set position: where the robot really is">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><path d="M12 9l2.5 5h-5z"/></svg><span>Locate</span></button>
       <button id="m-home" class="tool" title="Go home">
@@ -131,8 +138,19 @@
       <div class="row between"><h2>Saved places</h2>
         <div class="row gap"><button id="g-here" class="btn small">Save here</button><button id="g-home" class="btn small">Set home</button></div>
       </div>
-      <input id="g-search" class="search" placeholder="Search places" autocomplete="off">
+      <input id="g-search" class="search" placeholder="Search places, rooms and things" autocomplete="off">
       <ul id="g-places" class="chips-list"></ul>
+
+      <div class="row between"><h2>Rooms</h2><small class="muted">Map tool “Room” adds one</small></div>
+      <ul id="g-rooms" class="rooms"></ul>
+
+      <div class="row between"><h2>Charging</h2>
+        <div class="row gap"><button id="g-dock" class="btn small">Robot is on the dock</button><button id="g-charge" class="btn small grad">Charge now</button></div>
+      </div>
+      <p id="g-bat" class="lede"></p>
+
+      <div class="row between"><h2>Schedule</h2><button id="g-sched-add" class="btn small">Add</button></div>
+      <ul id="g-sched" class="sched"></ul>
     </div>
 
     <!-- Map: SLAM mapping / exploration -->
@@ -173,11 +191,12 @@
 
     <!-- Lab & diagnostics -->
     <div class="panel" id="p-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
-      <div class="seg four" role="tablist" aria-label="Lab">
+      <div class="seg five" role="tablist" aria-label="Lab">
         <button class="seg-b on" data-lab="health" role="tab" aria-selected="true">Health</button>
         <button class="seg-b" data-lab="wheels" role="tab" aria-selected="false">Wheels</button>
         <button class="seg-b" data-lab="path" role="tab" aria-selected="false">Path</button>
         <button class="seg-b" data-lab="tests" role="tab" aria-selected="false">Tests</button>
+        <button class="seg-b" data-lab="log" role="tab" aria-selected="false">Log</button>
       </div>
 
       <div class="lab" id="lab-health">
@@ -213,6 +232,13 @@
         <p class="lede">How the robot follows a route. Changes apply to the next metre of driving.</p>
         <div id="f-params" class="params"></div>
         <div class="row gap"><button id="f-save" class="btn grad grow">Save</button><button id="f-reset" class="btn">Defaults</button></div>
+      </div>
+
+      <div class="lab" id="lab-log" hidden>
+        <p class="lede">Every finished mission is logged on the robot (maps/missions.jsonl): use these numbers in your report.</p>
+        <dl id="l-stats" class="tiles stats"></dl>
+        <ol id="l-list" class="loglist"></ol>
+        <div class="row gap"><button id="l-refresh" class="btn grow">Refresh</button><button id="l-csv" class="btn grad grow">Export CSV</button></div>
       </div>
 
       <div class="lab" id="lab-tests" hidden>

@@ -31,6 +31,11 @@ Sketch: `firmware/robot_esp32_classic/robot_esp32_classic.ino` (board: **ESP32 D
 
 **Leave empty:** 6, 7, 8, 9, 10, 11 (flash), 1, 3 (TX/RX to the Pi), 0, 2, 12 (boot). Free for later: 36 (battery ADC), 39.
 
+**v2.4 additions** ([battery_dock.md](battery_dock.md)):
+- **INA226** battery monitor on the same I2C bus as the MPU (SDA 21, SCL 22, 3.3 V, address 0x40).
+- **Bumpers** (optional, `USE_BUMPER 1`): all bumper microswitches (NO) in parallel between **GPIO 39** and GND, plus a **10 k pull-up from 39 to 3.3 V** (39 has no internal pull-up). A press stops the motors at once and the navigator replans.
+- **GPIO 36**: battery divider only if there is no INA226 (`USE_BAT_ADC 1`).
+
 ## 2. Motor drivers (BTS7960 ×2)
 
 | BTS7960 pin | Left driver | Right driver |

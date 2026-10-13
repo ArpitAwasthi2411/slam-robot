@@ -14,7 +14,7 @@ import re
 import tempfile
 import time
 
-ALLOWED = ('goto_place', 'goto_poses', 'go_home', 'command', 'explore_start', 'follow_path')
+ALLOWED = ('goto_place', 'goto_poses', 'go_home', 'go_dock', 'goto_room', 'command', 'explore_start', 'follow_path')
 DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 

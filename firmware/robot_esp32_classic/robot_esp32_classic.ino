@@ -25,7 +25,7 @@
  *   HC-SR04   TRIG L/C/R 14/16/17   ECHO L/C/R -> level shifter -> 23/27/15
  *   E-stop sense GPIO 5 -> NO contact -> GND
  *   INA226    SDA 21, SCL 22 (shared with the MPU), VCC 3.3V, addr 0x40 (A0, A1 to GND)
- *             VBUS -> battery +, IN+ / IN- in series with the battery + lead (see docs/hardware/battery_dock.md)
+ *             VBUS -> battery +, IN+ / IN- in series with the battery + lead (see hardware/battery_dock.md)
  *   Battery divider (only if there is no INA226): battery+ -> 100k -> GPIO 36 -> 22k -> GND
  *   Bumpers   GPIO 39 -> all switches (NO) in parallel -> GND, 10k pull-up from 39 to 3.3V
  *             (39 has no internal pull-up)

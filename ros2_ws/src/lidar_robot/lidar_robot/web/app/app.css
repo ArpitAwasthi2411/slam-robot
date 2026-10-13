@@ -158,8 +158,8 @@ input::placeholder, textarea::placeholder { color: var(--dim-2); }
 
 /* tool rail */
 .rail { position: absolute; left: 12px; top: calc(66px + var(--safe-t)); z-index: 5; border-radius: 20px; padding: 6px; display: grid; gap: 2px; }
-.tool { width: 56px; border: 0; background: transparent; border-radius: 14px; padding: 7px 2px 5px; display: grid; justify-items: center; gap: 2px; cursor: pointer; color: var(--dim); }
-.tool svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tool { width: 56px; border: 0; background: transparent; border-radius: 14px; padding: 5px 2px 4px; display: grid; justify-items: center; gap: 2px; cursor: pointer; color: var(--dim); }
+.tool svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .tool span { font-size: 10.5px; font-weight: 650; letter-spacing: .01em; }
 .tool:active { background: var(--surface-3); }
 .tool.on { color: var(--teal); }
@@ -383,3 +383,54 @@ body.path-open .estop { bottom: calc(var(--tabs-h) + var(--safe-b) + 268px); wid
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ---- v2.4: battery, why, wait-for-OK, rooms, schedule, mission log ---- */
+.t-right { display: flex; gap: 6px; align-items: center; min-width: 0; flex: 0 1 auto; justify-content: flex-end; }
+.topbar .pill { flex: 1 1 auto; max-width: none; }
+.t-link { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#t-mode { min-width: 0; max-width: 36vw; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 420px) { .t-link { display: none; } }
+#main { overflow: hidden; }
+button.chip { font-family: var(--ui); color: var(--text); cursor: pointer; }
+.chip.bat { display: inline-flex; align-items: center; gap: 6px; padding: 8px 11px; }
+.chip.bat i { position: relative; width: 20px; height: 11px; border: 1.6px solid currentColor; border-radius: 3px; display: inline-block; }
+.chip.bat i::after { content: ""; position: absolute; right: -4px; top: 2.5px; width: 2px; height: 4px; background: currentColor; border-radius: 0 1px 1px 0; }
+.chip.bat i b { position: absolute; left: 1px; top: 1px; bottom: 1px; background: currentColor; border-radius: 1px; }
+.chip.bat.low { color: var(--orange); border-color: rgba(255,159,46,.5); }
+.chip.bat.critical { color: #fff; background: var(--red); border-color: var(--red); }
+.chip.bat.charging { color: var(--good); border-color: rgba(71,227,164,.45); }
+.chip.wait { color: var(--orange-2); border-color: rgba(255,193,90,.5); }
+.m-confirm { position: absolute; left: 12px; right: 12px; top: calc(62px + var(--safe-t)); z-index: 8; border-radius: var(--r-l);
+  padding: 14px; display: grid; gap: 10px; border-color: rgba(255,193,90,.55); box-shadow: 0 10px 40px rgba(0,0,0,.45); }
+.m-confirm b { font: 700 18px/1.2 var(--display); }
+.m-confirm .btn { min-height: 52px; font-size: 17px; }
+.m-why { position: absolute; left: 12px; right: 12px; top: calc(62px + var(--safe-t)); z-index: 8; border-radius: var(--r-m); padding: 12px 14px; display: grid; gap: 6px; }
+.m-why p { margin: 0; font-size: 15px; }
+.m-why ol { margin: 0; padding: 0; list-style: none; color: var(--dim); font-size: 12.5px; display: grid; gap: 2px; }
+.m-why .row { justify-content: flex-end; }
+.rooms, .sched, .loglist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.rooms li, .sched li { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m); padding: 10px 12px; display: grid; gap: 8px; }
+.rooms .r-top, .sched li { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.rooms .r-top { display: grid; gap: 8px; }
+.rooms .r-name { font-weight: 650; }
+.rooms .r-sub { color: var(--dim); font-size: 12.5px; }
+.things { display: flex; flex-wrap: wrap; gap: 5px; }
+.things span { background: var(--surface-3); border-radius: 999px; padding: 3px 9px; font-size: 12.5px; color: #d9d3cb; }
+.things span.hit { background: rgba(45,226,200,.18); color: var(--teal); }
+.rooms .empty, .sched .empty { color: var(--dim); background: transparent; border: 1px dashed var(--line-2); }
+.sched .s-time { font: 700 20px/1 var(--display); }
+.sched .s-sub { color: var(--dim); font-size: 12.5px; }
+.sched .s-act { display: flex; gap: 8px; align-items: center; }
+.sched .off { opacity: .5; }
+.days { display: flex; gap: 5px; flex-wrap: wrap; }
+.days button { min-width: 40px; min-height: 34px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--dim); font-weight: 650; }
+.days button.on { background: rgba(255,159,46,.18); color: var(--orange-2); border-color: rgba(255,159,46,.6); }
+.action-card label { display: grid; gap: 4px; font-size: 13px; color: var(--dim); font-weight: 600; }
+.action-card select, .action-card textarea { width: 100%; }
+.seg.five { grid-template-columns: repeat(5, 1fr); }
+.seg.five .seg-b { font-size: 13px; padding: 9px 2px; }
+.loglist li { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--teal); border-radius: var(--r-s); padding: 8px 12px; display: grid; gap: 2px; }
+.loglist li.FAILED { border-left-color: var(--red); } .loglist li.CANCELED { border-left-color: var(--dim-2); }
+.loglist .l-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 650; }
+.loglist .l-sub { color: var(--dim); font-size: 12.5px; }
+.tag.ok { background: var(--orange-2); } .tag.dock { background: var(--good); }

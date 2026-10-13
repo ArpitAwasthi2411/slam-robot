@@ -121,3 +121,55 @@ ros2 topic echo /navigator/status --once
 python3 tools/dashboard_sim.py      # simulated CSE floor, same navigator code
 # open http://localhost:8080
 ```
+
+## v2.4: the robot knows its own shape
+
+The planner used to treat the robot as a 27 cm circle around the drive axle. Ours is a 44 × 42 cm
+rectangle with the axle near the **front**, so the back (37 cm behind the axle) swung out on turns
+and clipped walls. Now:
+
+- **Measure and set** `footprint_front`, `footprint_rear`, `footprint_half_width` in
+  `config/robot_params.yaml` (axle centre → front bumper, → back edge, centre line → side).
+  The app draws exactly this rectangle, so check it lines up with the scan dots around the robot.
+- **Planning:** every route is checked with the whole rectangle at every point and at every turn
+  on the spot. If it clips, it tries a wider route (one that clears the full turning circle). If no
+  wider route exists (a narrow door), it keeps the route but marks the tight spots (orange rings in
+  the app) and drives them at 60 % speed.
+- **Driving:** every 50 ms the live 360° scan is checked against the body:
+  - a turn on the spot that would swing the back into something is refused; it turns the other way
+    round if that is clear, otherwise it plans a short **3-point turn** (pull ahead / back out a few
+    cm / turn) that ends facing the route;
+  - on curves, if the body would touch something within 0.6 s it straightens or stops;
+  - near anything (doors) it slows down in proportion to the gap.
+- **Result in the simulator** (`python3 tools/eval_nav.py`, same layout as the sim, 12 missions incl.
+  4 hard starts next to walls):
+
+  | | reached | wall contacts | total time |
+  |---|---|---|---|
+  | old (circle robot) | 10 / 12 | 3 | 986 s |
+  | v2.4 body checks | **12 / 12** | **0** | 582 s |
+
+## v2.4: tasks people actually ask for
+
+- **Wait for OK:** "take this file to the HOD office and wait for a signature, then Lab 2". At that
+  stop the app shows a big **OK, carry on** card (and the robot says so). It carries on by itself
+  after `confirm_timeout_s` (5 min). Saying "ok" / "done" by voice works too.
+- **Rooms:** Room tool → drag a box over a room → name it and list what is in it. Then: "take me to
+  the 3D printer", "where is the oscilloscope?", "go to the room with the soldering station".
+  The robot drives to the room's centre, or to a saved place with the same name (put a place at
+  the door for rooms with furniture in the middle). The app shows which room the robot is in.
+- **Schedule:** Go tab → Schedule → Add: a place, home, charge or any command at a time, every
+  day or chosen days. Uses the Pi's clock (set by NTP when it has internet; after a power cut
+  without internet, set it once with `sudo date -s "2026-10-14 09:30"`).
+- **Why did you stop?** Tap the state chip at the top right (or say "why did you stop?"). The
+  answer comes from the navigator's own state and log: e-stop, waiting for OK, blocked in front,
+  no room to turn, failure reasons, battery.
+- **Mission log:** every finished mission is a line in `~/maps/missions.jsonl` (time, distance driven
+  vs planned, replans, blocked time, bumps, e-stops, closest approach to anything). Lab → Log shows
+  success rate, average time and speed, path efficiency; Export CSV for the report.
+- **AI assistant access:** [mcp.md](mcp.md).
+
+New request types (JSON on `/navigator/request` or `POST /api/nav`): `confirm`, `explain`, `find`,
+`add_room`, `update_room`, `delete_room`, `goto_room`, `set_dock`, `go_dock`, `schedule_add`,
+`schedule_delete`, `schedule_enable`, `schedule_list`, `mission_log`. See the top of
+`navigator_core.py`.
