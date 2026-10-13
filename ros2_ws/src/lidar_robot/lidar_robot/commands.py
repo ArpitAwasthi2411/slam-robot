@@ -16,7 +16,7 @@ import urllib.request
 
 from lidar_robot.places import normalize
 
-INTENTS = ('navigate', 'return_home', 'stop', 'status', 'unknown')
+INTENTS = ('navigate', 'return_home', 'dock', 'stop', 'status', 'explain', 'find', 'confirm', 'unknown')
 GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 
 URGENT = re.compile(r'\b(urgent|urgently|asap|immediately|emergency|right now|quickly|hurry|priority)\b')
@@ -30,6 +30,18 @@ WAIT = re.compile(r'\b(?:wait|stay|pause|hold)\s+(?:there\s+)?(?:for\s+)?(\d+(?:
 NUM_WORDS = {'a': 1, 'an': 1, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7,
              'eight': 8, 'nine': 9, 'ten': 10, 'fifteen': 15, 'twenty': 20, 'thirty': 30, 'half a': 0.5, 'half an': 0.5}
 MAX_WAIT_S = 3600
+EXPLAIN = re.compile(r'\b(why (did|have|are|do) you (stop|stopped|stopping|waiting|wait|stuck|not moving|standing)'
+                     r'|why( did you)? stop|what happened|what went wrong|why (are|r) you stuck|explain yourself'
+                     r'|why aren t you moving|why not moving|what s wrong)\b')
+FIND = re.compile(r'\b(?:where is|where are|where s|where can i find|which room (?:has|contains|have)|'
+                  r'in which room is|find)\s+(?:the |a |an |my |our )?(.+)$')
+ROOM_WITH = re.compile(r'\b(?:room|place|lab|office)\s+(?:with|that has|which has|containing|where)\s+(?:the |a |an )?(.+?)'
+                       r'(?:\s*(?:,|;|\bthen\b|\band\b|\bwait\b)|$)')
+DOCK = re.compile(r'\b(go (and )?charge|charge (yourself|your battery|up)|go to (the )?(dock|charger|charging)|dock yourself|recharge)\b')
+CONFIRM = re.compile(r'^\s*(ok|okay|done|confirm(ed)?|received|got it|you can go|go ahead)\s*$')
+WAIT_OK = re.compile(r'\b(wait (for|until) (an? )?(ok|okay|confirmation|someone|me|them|him|her|signature)'
+                     r'|until (someone|they|i|he|she) (press|presses|tap|taps|say|says|confirm|confirms)'
+                     r'|get (it )?(signed|confirmed)|wait for (a )?reply)\b')
 SPLIT = re.compile(r'\s*(?:,|;|\bthen\b|\band then\b|\bafter that\b|\bfollowed by\b|\band\b)\s*')
 
 
@@ -63,21 +75,55 @@ class CommandParser:
     def _parse_rules(self, text):
         t = normalize(text)
         prio = 3 if URGENT.search(t) else (0 if LOW.search(t) else 1)
-        if STOP.search(t):
+        if CONFIRM.search(t):
+            return self._result('confirm', [], 1, 'Thank you.', 'rules', [])
+        if EXPLAIN.search(t):
+            return self._result('explain', [], 1, '', 'rules', [])
+        if STOP.search(t) and not WAIT_OK.search(t):
             return self._result('stop', [], 3, 'Stopping.', 'rules', [])
+        if DOCK.search(t):
+            return self._result('dock', [], prio, 'Going to charge.', 'rules', [])
+        fm = FIND.search(t)
+        if fm and not NAV_VERB.search(t[:fm.start()]) and not STATUS.search(t):
+            res = self._result('find', [], 1, '', 'rules', [])
+            res['query'] = fm.group(1).strip()
+            return res
         if STATUS.search(t) and not NAV_VERB.search(t):
             return self._result('status', [], 1, '', 'rules', [])
-        found = self.places.find_in_text(text)
+        found = [(self._pos_in(t, f), f) for f in self.places.find_in_text(text)]
         notes = []
-        if not found and NAV_VERB.search(t):
-            # "go to principl offce" -> fuzzy match each chunk after the verb
-            tail = NAV_VERB.split(t, maxsplit=1)[-1]
+        for rm in ROOM_WITH.finditer(t):                 # "the room with the 3D printer"
+            hits = self.places.find_thing(rm.group(1))
+            if hits:
+                tgt = self.places.room_target(hits[0][1])
+                if tgt['name'] not in [f['name'] for _, f in found]:
+                    found.append((rm.start(), tgt))
+        if NAV_VERB.search(t):
+            tail_at = NAV_VERB.search(t).end()
+            tail = t[tail_at:]
             for chunk in [c for c in SPLIT.split(tail) if c and c.strip()]:
+                at = t.find(chunk, tail_at)
+                if any(at <= ps < at + len(chunk) for ps, _ in found) or self.places.find_in_text(chunk):
+                    continue
+                if ROOM_WITH.search(chunk) or WAIT.search(chunk) or WAIT_OK.search(chunk) or HOME.search(chunk):
+                    continue
                 hits = self.places.search(chunk, limit=1, min_score=0.6)
-                if hits:
-                    found.append(hits[0][1])
+                if hits:                                  # "go to principl offce" (typo)
+                    found.append((at, hits[0][1]))
+                    continue
+                things = self.places.find_thing(chunk, min_score=0.75)
+                if things:                                # "take me to the printer" (a thing, not a place)
+                    found.append((at, self.places.room_target(things[0][1])))
+                    notes.append(f'"{chunk}" is in {things[0][1]["name"]}')
                 elif len(chunk.split()) <= 5:
                     notes.append(f'unknown place: "{chunk}"')
+        found.sort(key=lambda pf: pf[0])
+        seen, uniq = set(), []
+        for _, f in found:
+            if f['name'] not in seen:
+                seen.add(f['name'])
+                uniq.append(f)
+        found = uniq
         if found:
             names = [p['name'] for p in found]
             res = self._result('navigate', names, prio, 'Going to ' + ' then '.join(names) + '.', 'rules', notes)
@@ -93,14 +139,21 @@ class CommandParser:
     # ---------------------------------------------------------------- llm
     def _parse_llm(self, text):
         catalog = [{'name': p['name'], 'aliases': p.get('aliases', [])} for p in self.places.places]
+        catalog += [{'name': r['name'], 'aliases': r.get('aliases', []), 'room_contains': r.get('contents', [])}
+                    for r in self.places.rooms if not self.places.get(r['name'])]
         system = (
             'You control an indoor campus robot. Convert the user command into JSON with keys: '
-            'intent (one of navigate, return_home, stop, status, unknown), '
+            'intent (one of navigate, return_home, dock (go and charge), stop, status, '
+            'explain (user asks why the robot stopped / what went wrong), '
+            'find (user asks where something is), confirm (user says ok/done), unknown), '
+            'query (for find: the thing asked about), '
             'targets (ordered list of place names, ONLY copied exactly from the provided list), '
             'priority (0 low, 1 normal, 2 high, 3 urgent), '
             'reply (one short friendly sentence to say back), '
             'waits (list of seconds to wait at each target, same order as targets, 0 if none), '
-            'then_home (true if the user wants the robot to come back / return afterwards). '
+            'then_home (true if the user wants the robot to come back / return afterwards), '
+            'confirms (list of true/false per target: true if the robot must wait there until someone presses OK). '
+            'A target can be a room; if the user names a thing, pick the room whose room_contains has it. '
             'Never invent places. If a requested place is not in the list, leave it out and say so in reply. '
             'Known places: ' + json.dumps(catalog))
         body = {'model': self.model, 'temperature': 0, 'max_tokens': 200,
@@ -114,8 +167,14 @@ class CommandParser:
         if intent not in INTENTS:
             intent = 'unknown'
         notes, names = [], []
+        if intent in ('explain', 'confirm', 'dock'):
+            return self._result(intent, [], 1, str(d.get('reply', ''))[:200], 'llm', [])
+        if intent == 'find':
+            res = self._result('find', [], 1, '', 'llm', [])
+            res['query'] = str(d.get('query') or '')[:80]
+            return res
         for raw in d.get('targets', []) or []:
-            p = self.places.get(str(raw))
+            p = self.places.target(str(raw))
             if p is None:
                 hits = self.places.search(str(raw), limit=1, min_score=0.85)
                 p = hits[0][1] if hits else None
@@ -132,14 +191,16 @@ class CommandParser:
         reply = str(d.get('reply', ''))[:200]
         res = self._result(intent, names, prio, reply, 'llm', notes)
         if intent == 'navigate':
-            from_text = self._steps_from_text(text, [self.places.get(n) for n in names])
+            from_text = self._steps_from_text(text, [self.places.target(n) for n in names])
             waits = d.get('waits') if isinstance(d.get('waits'), list) else []
+            confirms = d.get('confirms') if isinstance(d.get('confirms'), list) else []
             for i, st in enumerate(from_text['steps']):
                 try:
                     w = float(waits[i]) if i < len(waits) else 0.0
                 except (TypeError, ValueError):
                     w = 0.0
                 st['wait_s'] = max(st['wait_s'], min(MAX_WAIT_S, max(0.0, w)))
+                st['confirm'] = bool(st.get('confirm')) or (i < len(confirms) and confirms[i] is True)
             res['steps'] = from_text['steps']
             res['then_home'] = bool(d.get('then_home')) or from_text['then_home']
         return res
@@ -156,7 +217,7 @@ class CommandParser:
                 if m and (best is None or m.start() < best):
                     best = m.start()
             pos.append(best)
-        steps = [{'place': p['name'], 'wait_s': 0.0} for p in places]
+        steps = [{'place': p['name'], 'wait_s': 0.0, 'confirm': False} for p in places]
         for m in WAIT.finditer(t):
             n = m.group(1)
             val = NUM_WORDS.get(n, None) if not n[0].isdigit() else float(n)
@@ -166,15 +227,29 @@ class CommandParser:
             i = before[-1] if before else 0
             if steps:
                 steps[i]['wait_s'] = float(min(MAX_WAIT_S, secs))
+        for m in WAIT_OK.finditer(t):
+            before = [i for i, ps in enumerate(pos) if ps is not None and ps < m.start()]
+            if steps:
+                steps[before[-1] if before else 0]['confirm'] = True
         first = min([ps for ps in pos if ps is not None], default=0)
         home = [m for m in HOME.finditer(t) if m.start() > first]
         return {'steps': steps, 'then_home': bool(home and steps)}
 
     @staticmethod
+    def _pos_in(t, p):
+        best = len(t)
+        for label in [p['name']] + list(p.get('aliases', [])):
+            n = normalize(label)
+            m = re.search(r'\b' + re.escape(n) + r'\b', t) if n else None
+            if m:
+                best = min(best, m.start())
+        return best
+
+    @staticmethod
     def _result(intent, targets, priority, reply, source, notes):
         return {'intent': intent, 'targets': targets, 'priority': priority, 'reply': reply,
                 'source': source, 'notes': notes,
-                'steps': [{'place': n, 'wait_s': 0.0} for n in targets], 'then_home': False}
+                'steps': [{'place': n, 'wait_s': 0.0, 'confirm': False} for n in targets], 'then_home': False}
 
 
 def _http_post_json(url, body, headers, timeout):

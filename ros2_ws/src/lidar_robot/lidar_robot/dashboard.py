@@ -257,6 +257,7 @@ class DashboardNode(Node):
             'limits': {'max_v': self.max_v, 'max_w': self.max_w},
             'nav_mode': self.nav_mode,
             'sensors': {'us': rs.get('us'), 'imu_ok': rs.get('imu_ok'), 'yaw_source': rs.get('yaw_source'),
+                        'bumper': rs.get('bumper'), 'battery_raw': rs.get('battery'),
                         'us_mounts': self._us_mounts()},
             'nav': self.nav_status if time.monotonic() - self.nav_status_t < 2.0 else None,
             'tune': rs.get('tune'), 'fw': rs.get('fw'), 'telemetry': rs.get('telemetry'),

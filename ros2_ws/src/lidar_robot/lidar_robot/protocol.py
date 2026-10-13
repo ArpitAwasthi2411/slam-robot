@@ -5,6 +5,8 @@ ESP32 -> Pi:  ODM,<dl>,<dr>,<dt_ms>,<mode>[,<dyaw_urad>]   (v1: 4 fields, v2.2+I
               US,<left_mm>,<center_mm>,<right_mm>       (0 = no echo)
               INFO,<text>          (INFO,TUNE,<kp>,<ki>,<pwm_min>,<max_mms>,<accel> since v2.3)
               SPD,<tgtL>,<measL>,<pwmL>,<tgtR>,<measR>,<pwmR>   (v2.3, after T,1)
+              BAT,<mV>,<mA>,<src>   (v2.4; mA > 0 discharging, < 0 charging; src 1 INA226, 2 divider)
+              BMP,<0|1>             (v2.4; bumper released / pressed)
 Pi -> ESP32:  V,<left_mm_s>,<right_mm_s>
               K,<kp>,<ki>,<pwm_min>,<max_mms>,<accel>  W (save)  X (defaults)  T,<0|1>  ?
               P,<left_pwm>,<right_pwm>
@@ -57,7 +59,19 @@ class SpdPacket:
     pr: int
 
 
-Packet = Union[OdomPacket, InfoPacket, ImuPacket, UsPacket, SpdPacket]
+@dataclass
+class BatPacket:
+    volts: float
+    amps: Optional[float]     # None when the source can't measure current (divider)
+    src: str                  # 'ina226' | 'adc'
+
+
+@dataclass
+class BumpPacket:
+    pressed: bool
+
+
+Packet = Union[OdomPacket, InfoPacket, ImuPacket, UsPacket, SpdPacket, BatPacket, BumpPacket]
 
 
 def parse_line(line: str) -> Optional[Packet]:
@@ -104,6 +118,20 @@ def parse_line(line: str) -> Optional[Packet]:
             return SpdPacket(*[int(p) for p in parts[1:]])
         except ValueError:
             return None
+    if line.startswith('BAT,'):
+        parts = line.split(',')
+        if len(parts) != 4:
+            return None
+        try:
+            mv, ma, src = int(parts[1]), int(parts[2]), int(parts[3])
+        except ValueError:
+            return None
+        if not 1000 <= mv <= 60000 or src not in (1, 2):
+            return None
+        return BatPacket(mv / 1000.0, ma / 1000.0 if src == 1 else None, 'ina226' if src == 1 else 'adc')
+    if line.startswith('BMP,'):
+        v = line[4:]
+        return BumpPacket(v == '1') if v in ('0', '1') else None
     if line.startswith('INFO,'):
         return InfoPacket(line[5:])
     if line == 'ESP32_ROBOT_READY':          # v1 firmware banner
