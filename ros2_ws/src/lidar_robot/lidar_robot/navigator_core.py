@@ -448,7 +448,7 @@ class NavigatorCore:
                 return {'ok': True, 'answer': f'{p[0][1]["name"]} is a saved place on the map.', 'rooms': []}
             return {'ok': True, 'answer': f'I don\'t know where "{q}" is. Add it to a room\'s contents list.',
                     'rooms': []}
-        names = [h[1]['name'] for h in hits if h[0] >= hits[0][0] - 0.1]
+        names = [h[1]['name'] for h in hits if h[0] >= hits[0][0] - 0.02]
         ans = f'"{hits[0][2]}" is in {" or ".join(names)}.'
         if here and here['name'] in names:
             ans += ' That is the room I am in now.'

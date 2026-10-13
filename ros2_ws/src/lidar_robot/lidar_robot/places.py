@@ -242,8 +242,10 @@ class PlaceStore:
                 nt = set(tokens(thing))
                 if not n:
                     continue
-                if q == n or f' {n} ' in f' {q} ':
+                if q == n:
                     s = 1.0
+                elif f' {n} ' in f' {q} ':
+                    s = 0.95
                 elif f' {q} ' in f' {n} ':
                     s = 0.9
                 else:

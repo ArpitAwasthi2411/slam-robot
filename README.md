@@ -111,6 +111,11 @@ No robot? `python3 tools/dashboard_sim.py` runs the app against a simulated robo
 - [x] Frontier exploration (Map by itself) with map auto-save, tested in simulation
 - [x] Remote access over mobile data (Tailscale), app keeps working on slow links
 - [x] Encoder odometry verified on hardware (directions, ticks per rev, 50 Hz into Cartographer)
+- [x] v2.4: real body shape in planning and driving (rectangle, axle at the front), 3-point turns,
+      0 wall contacts in `tools/eval_nav.py` (old: 3); battery (INA226) + auto-charge on a dock
+      ([hardware/battery_dock.md](hardware/battery_dock.md)); rooms with contents; schedules;
+      "wait for OK" stops; "why did you stop?"; mission log; MCP server ([docs/mcp.md](docs/mcp.md))
+- [ ] Measure the real footprint, fit the INA226, build the dock, flash firmware v2.4
 - [ ] Wheel separation and speed-loop tuning with the Tuning Lab (calibration: [docs/calibration.md](docs/calibration.md))
 - [ ] Navigator verified on the real robot and floor
 - [ ] LLM error recovery + campus app — see [docs/roadmap.md](docs/roadmap.md)
@@ -119,6 +124,7 @@ No robot? `python3 tools/dashboard_sim.py` runs the app against a simulated robo
 
 ```bash
 cd ros2_ws/src/lidar_robot && python3 -m pytest test/     # no ROS needed
+python3 tools/eval_nav.py                                  # navigation benchmark in the simulator
 ```
 
 ## License

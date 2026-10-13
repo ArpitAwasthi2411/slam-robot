@@ -222,15 +222,23 @@ function onState(st) {
   if (st.estop) { mode = 'Stopped'; cls = 'estop'; }
   else if (link.esp_mode === 'RC') { mode = 'Remote control'; cls = 'rc'; }
   else if (st.test_running) { mode = 'Running test'; cls = 'auto'; }
+  else if (navs.state === 'CONFIRM') { mode = 'Waiting for OK'; cls = 'wait'; }
+  else if (navs.state === 'DOCKING') { mode = 'Docking'; cls = 'auto'; }
+  else if (navs.state === 'UNDOCKING') { mode = 'Leaving dock'; cls = 'auto'; }
+  else if (navs.state === 'CHARGING') { mode = navs.battery && navs.battery.charging ? 'Charging' : 'On the dock'; cls = ''; }
   else if (navs.state === 'SCANNING') { mode = 'Scanning'; cls = 'auto'; }
   else if (navs.explore && navs.explore.active) { mode = 'Mapping'; cls = 'auto'; }
   else if (navs.missions && navs.missions.active && navs.missions.active.repeat === -1) { mode = `Patrol, round ${navs.missions.active.round}`; cls = 'auto'; }
+  else if (navs.state === 'DRIVING' && navs.blocked) { mode = 'Blocked · why?'; cls = 'wait'; }
   else if (navs.state === 'DRIVING') { mode = navs.goal ? `To ${navs.goal.label}` : 'Driving'; cls = 'auto'; }
   else if (navs.state === 'PLANNING' || (navs.state === 'WAITING' && navs.missions && navs.missions.active)) { mode = 'Planning'; cls = 'auto'; }
   else if (navs.state === 'DWELL') { mode = 'At a stop'; cls = 'auto'; }
   else if (link.cmd_source === 'teleop') { mode = 'Driving'; cls = 'auto'; }
   else if (!st.bridge_alive) { mode = 'No motor link'; }
+  if (mode === 'Idle' && navs.last_failure && navs.state === 'IDLE' && /failed/.test(navs.message || '')) { mode = 'Failed · why?'; cls = 'wait'; }
   chip.textContent = mode; chip.className = 'chip glass ' + cls;
+  renderBattery(navs.battery);
+  renderConfirm(navs.confirm);
   $('#t-link').textContent = `${netType(BASE)}${fin(S.rtt) ? ` · ${Math.round(S.rtt)} ms` : ''}`;
 
   $('#estopped').hidden = !st.estop;
@@ -255,6 +263,45 @@ function onState(st) {
   if (S.tab === 'lab') { if (S.lab === 'health') renderStatus(st); labOnState(st); }
   mapDirty = true;
 }
+function renderBattery(b) {
+  const el = $('#t-bat');
+  if (!b || b.level === 'unknown' || !fin(b.pct)) { el.hidden = true; return; }
+  el.hidden = false;
+  el.className = 'chip glass bat ' + (b.charging ? 'charging' : b.level);
+  el.innerHTML = `<i><b style="width:${clamp(b.pct, 4, 100) * 0.16}px"></b></i>${b.charging ? '⚡' : ''}${b.pct}%`;
+  el.title = `${fmt(b.v, 2)} V${fin(b.a) ? `, ${fmt(b.a, 2)} A` : ''}`;
+}
+let confirmShown = null;
+function renderConfirm(c) {
+  const box = $('#m-confirm');
+  if (!c) { box.hidden = true; confirmShown = null; return; }
+  if (confirmShown !== c.label) {
+    confirmShown = c.label; haptic(60);
+    box.innerHTML = `<b>Pathik is at ${esc(c.label)}</b><span class="muted" id="m-confirm-t"></span>
+      <button class="btn grad wide" id="m-confirm-ok">OK, carry on</button>`;
+    $('#m-confirm-ok').onclick = async () => {
+      haptic(25);
+      try { await nav({ type: 'confirm' }); box.hidden = true; toast('Thanks! Carrying on.'); } catch (e) { toast(e.message, true); }
+    };
+  }
+  $('#m-confirm-t').textContent = `Waiting for someone to press OK (continues by itself in ${secs(c.left_s)}).`;
+  box.hidden = false;
+}
+let whyT = 0;
+async function explainNow(speak) {
+  try {
+    const r = await nav({ type: 'explain' });
+    const box = $('#m-why');
+    box.innerHTML = `<p>${esc(r.answer)}</p>${r.details && r.details.length ? `<ol>${r.details.slice(0, 4).map(d => `<li>${esc(d)}</li>`).join('')}</ol>` : ''}
+      <div class="row"><button class="btn ghost small" id="m-why-x">Close</button></div>`;
+    box.hidden = false;
+    $('#m-why-x').onclick = () => { box.hidden = true; };
+    clearTimeout(whyT); whyT = setTimeout(() => { box.hidden = true; }, 15000);
+    if (speak) say(r.answer);
+    return r.answer;
+  } catch (e) { toast(e.message, true); return ''; }
+}
+$('#t-mode').onclick = () => { haptic(10); explainNow(true); };
 function onLinkLost() {
   if (S.fails === 3) toast('Lost contact with the robot. Retrying…', true);
   if (S.fails >= 3) {
@@ -369,6 +416,46 @@ function drawMap() {
       cx.beginPath(); cx.arc(x, y, 13 * DPR, 0, 7); cx.stroke(); cx.restore();
     }
   }
+  // rooms (room-level semantics): soft tinted areas with their name
+  const rooms = (st.places && st.places.rooms) || [];
+  cx.textAlign = 'center';
+  for (const r of rooms) {
+    const P = r.polygon || []; if (P.length < 3) continue;
+    const here = navs.room === r.name;
+    cx.beginPath(); P.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); }); cx.closePath();
+    cx.fillStyle = here ? 'rgba(45,226,200,.07)' : 'rgba(255,193,90,.045)'; cx.fill();
+    cx.save(); cx.setLineDash([4 * DPR, 5 * DPR]); cx.lineWidth = 1.2 * DPR;
+    cx.strokeStyle = here ? 'rgba(45,226,200,.45)' : 'rgba(255,193,90,.28)'; cx.stroke(); cx.restore();
+    if (k > 14 * DPR) {
+      // label in the room's top-left corner, so it never sits on a place pin
+      const minx = Math.min(...P.map(p => p[0])), maxy = Math.max(...P.map(p => p[1]));
+      const [x, y] = W2S(minx, maxy);
+      cx.textAlign = 'left';
+      cx.font = `700 ${11 * DPR}px Bricolage, sans-serif`; cx.fillStyle = here ? 'rgba(45,226,200,.8)' : 'rgba(255,193,90,.6)';
+      cx.fillText(r.name.toUpperCase(), x + 7 * DPR, y + 16 * DPR);
+      if (k > 30 * DPR && r.contents && r.contents.length) {
+        cx.font = `500 ${10.5 * DPR}px Instrument, sans-serif`; cx.fillStyle = 'rgba(242,237,230,.42)';
+        const t = r.contents.slice(0, 3).join(' · ') + (r.contents.length > 3 ? ' …' : '');
+        cx.fillText(t, x + 7 * DPR, y + 30 * DPR);
+      }
+      cx.textAlign = 'center';
+    }
+  }
+  // charging dock: a bracket the robot backs into
+  const dock = st.places && st.places.dock;
+  if (dock) {
+    const dc = Math.cos(dock.yaw), ds = Math.sin(dock.yaw), bx = -0.40;
+    const D = (u, v) => W2S(dock.x + dc * u - ds * v, dock.y + ds * u + dc * v);
+    cx.save(); cx.strokeStyle = '#47e3a4'; cx.lineWidth = 3 * DPR; cx.lineCap = 'round'; cx.shadowColor = '#47e3a4'; cx.shadowBlur = 10 * DPR;
+    cx.beginPath(); [[bx + 0.12, 0.28], [bx, 0.28], [bx, -0.28], [bx + 0.12, -0.28]].forEach((p, i) => { const [x, y] = D(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
+    cx.stroke(); cx.restore();
+    const [lx, ly] = D(bx - 0.12, 0); cx.font = `700 ${11 * DPR}px Instrument, sans-serif`; cx.fillStyle = '#47e3a4'; cx.fillText('⚡', lx, ly + 4 * DPR);
+  }
+  // spots where the route barely fits the body (it slows down there)
+  for (const t of navs.tight || []) {
+    const [x, y] = W2S(t[0], t[1]);
+    cx.strokeStyle = 'rgba(255,159,46,.85)'; cx.lineWidth = 2 * DPR; cx.beginPath(); cx.arc(x, y, 6 * DPR, 0, 7); cx.stroke();
+  }
   // places
   const pl = (st.places && st.places.places) || [];
   cx.font = `600 ${12 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center';
@@ -418,7 +505,8 @@ function drawMap() {
     });
   }
   // robot: drive axle at base_link, chassis behind it
-  const body = [[0.07, 0.21], [0.07, -0.21], [-0.37, -0.21], [-0.37, 0.21]].map(p => R(p[0], p[1]));
+  const [fF, fR, fW] = navs.footprint || [0.07, 0.37, 0.21];
+  const body = [[fF, fW], [fF, -fW], [-fR, -fW], [-fR, fW]].map(p => R(p[0], p[1]));
   cx.beginPath(); body.forEach((p, i) => i ? cx.lineTo(p[0], p[1]) : cx.moveTo(p[0], p[1])); cx.closePath();
   cx.save(); cx.shadowColor = '#e8407c'; cx.shadowBlur = 16 * DPR;
   cx.fillStyle = 'rgba(232,64,124,.92)'; cx.fill(); cx.restore();
@@ -515,6 +603,8 @@ function renderMode() {
       <button class="btn ghost" data-m="close" aria-label="Close">✕</button>`;
   } else if (T.tool === 'draw' && !T.draw) {
     html = `<span class="grow"><b>Draw a path.</b> Drag your finger the way the robot should drive.</span><button class="btn ghost" data-m="close">Done</button>`;
+  } else if (T.tool === 'room') {
+    html = `<span class="grow"><b>Room.</b> Drag a box over a room, then say what is in it (“3D printer, oscilloscope”).</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'locate') {
     html = `<span class="grow"><b>Set position.</b> Press where the robot really is, drag the way it faces.</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'measure') {
@@ -577,8 +667,25 @@ $('#ps-go').onclick = async () => {
   } catch (e) { toast(e.message, true); }
 };
 
+function roomDialog(title, room) {
+  return formBox(title, `
+    <label>Name<input name="name" required maxlength="60" placeholder="e.g. Lab 2" value="${esc(room ? room.name : '')}"></label>
+    <label>What is in it? (comma separated)<textarea name="contents" rows="3" placeholder="3D printer, oscilloscope, soldering station">${esc(room ? (room.contents || []).join(', ') : '')}</textarea></label>
+    <label>Other names (optional)<input name="aliases" maxlength="120" placeholder="electronics lab" value="${esc(room ? (room.aliases || []).join(', ') : '')}"></label>`,
+    'Save room', room ? 'Delete room' : null);
+}
 async function toolRelease(d) {
   if (T.tool === 'draw') { await finishDrawing(d.pts || []); return; }
+  if (T.tool === 'room') {
+    const [x0, y0] = d.a, [x1, y1] = d.b;
+    if (Math.abs(x1 - x0) < 0.7 || Math.abs(y1 - y0) < 0.7) { toast('Drag a bigger box over the room', true); return; }
+    const f = await roomDialog('New room');
+    if (!f || f.action !== 'ok') { mapDirty = true; return; }
+    const polygon = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(p => [+p[0].toFixed(2), +p[1].toFixed(2)]);
+    try { await nav({ type: 'add_room', name: f.name, polygon, contents: f.contents, aliases: f.aliases }); toast(`Room ${f.name} saved`); haptic(20); }
+    catch (e) { toast(e.message, true); }
+    return;
+  }
   if (T.tool === 'locate') {
     const pose = S.st && S.st.pose, yaw = headingOf(d) ?? (pose ? pose.yaw : 0), [x, y] = d.a;
     if (!await confirmBox('Robot is here?', `Set the robot's position to ${fmt(x, 1)}, ${fmt(y, 1)} m facing ${deg(yaw)}. The LiDAR then re-matches the map from there.`, 'Set position')) return;
@@ -667,6 +774,15 @@ function drawTools() {
     cx.fillStyle = '#f2ede6'; cx.fillText(label, tx, ty);
     return;
   }
+  if (T.tool === 'room') {
+    if (d.px < 3) return;
+    const [bx, by] = W2S(d.b[0], d.b[1]);
+    cx.save(); cx.strokeStyle = '#ffc15a'; cx.fillStyle = 'rgba(255,193,90,.10)'; cx.lineWidth = 2 * DPR; cx.setLineDash([6 * DPR, 4 * DPR]);
+    cx.beginPath(); cx.rect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)); cx.fill(); cx.stroke(); cx.restore();
+    cx.font = `700 ${12 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center'; cx.fillStyle = '#ffc15a';
+    cx.fillText(`${fmt(Math.abs(d.b[0] - d.a[0]), 1)} × ${fmt(Math.abs(d.b[1] - d.a[1]), 1)} m`, (ax + bx) / 2, (ay + by) / 2);
+    return;
+  }
   const color = T.tool === 'goal' ? '#2de2c8' : T.tool === 'locate' ? '#e8407c' : '#ff9f2e';
   cx.strokeStyle = color; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(ax, ay, 12 * DPR, 0, 7); cx.stroke();
   if (d.px > DRAG_PX) drawArrow(d.a[0], d.a[1], headingOf(d), Math.max(Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), 0.3), color, 3.5);
@@ -729,6 +845,31 @@ function confirmBox(title, text, yes) {
       <button class="btn ghost wide" data-v="0">Cancel</button></div>`;
     document.body.appendChild(wrap);
     $$('button', wrap).forEach(b => b.onclick = () => { wrap.remove(); resolve(b.dataset.v === '1'); });
+  });
+}
+
+// a small form in a sheet: resolves to {action: 'ok' | 'alt', ...fields} or null
+function formBox(title, inner, okText, altText) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'action';
+    wrap.innerHTML = `<form class="action-card glass" role="dialog" aria-modal="true"><h3>${esc(title)}</h3>${inner}
+      <button class="btn grad wide" type="submit">${esc(okText)}</button>
+      ${altText ? `<button class="btn wide" type="button" data-alt>${esc(altText)}</button>` : ''}
+      <button class="btn ghost wide" type="button" data-cancel>Cancel</button></form>`;
+    document.body.appendChild(wrap);
+    const form = $('form', wrap);
+    const read = action => {
+      const o = { action }; new FormData(form).forEach((v, k) => { o[k] = typeof v === 'string' ? v.trim() : v; });
+      o.days = $$('.days button.on', form).map(b => +b.dataset.d); return o;
+    };
+    const done = v => { wrap.remove(); resolve(v); };
+    form.onsubmit = e => { e.preventDefault(); done(read('ok')); };
+    $('[data-cancel]', wrap).onclick = () => done(null);
+    if (altText) $('[data-alt]', wrap).onclick = () => done(read('alt'));
+    $$('.days button', wrap).forEach(b => b.onclick = () => { b.classList.toggle('on'); });
+    setTimeout(() => { const i = $('input,textarea', form); if (i) i.focus(); }, 60);
+    wrap.__form = form;
   });
 }
 
@@ -854,6 +995,7 @@ function renderMapStats(st) {
 }
 
 function renderGo(st, force) {
+  renderRooms(st, force); renderSched(st, force); renderCharging(st);
   const navs = st.nav || {}, pose = st.pose;
   // mission card
   const m = navs.missions && navs.missions.active, card = $('#g-mission');
@@ -905,6 +1047,108 @@ function renderGo(st, force) {
     } catch (e) { toast(e.message, true); }
   });
 }
+// ---- rooms: "this room contains that"
+let lastRoomsKey = '';
+function renderRooms(st, force) {
+  const rooms = (st.places && st.places.rooms) || [], navs = st.nav || {};
+  const key = JSON.stringify([rooms, placeFilter, navs.room]);
+  if (!force && key === lastRoomsKey) return;
+  lastRoomsKey = key;
+  const q = placeFilter;
+  const hit = t => q && t.toLowerCase().includes(q);
+  const shown = rooms.filter(r => !q || r.name.toLowerCase().includes(q) || (r.contents || []).some(hit) || (r.aliases || []).some(hit));
+  $('#g-rooms').innerHTML = shown.length ? shown.map((r, i) => `
+    <li><div class="r-top"><span><span class="r-name">${esc(r.name)}</span>
+      <span class="r-sub">${navs.room === r.name ? ' · robot is here' : ''}</span></span>
+      <span class="row gap"><button class="btn small" data-r="${i}" data-a="edit">Edit</button><button class="btn small grad" data-r="${i}" data-a="go">Go</button></span></div>
+      ${(r.contents || []).length ? `<div class="things">${r.contents.map(t => `<span class="${hit(t) ? 'hit' : ''}">${esc(t)}</span>`).join('')}</div>`
+        : '<span class="r-sub">Nothing listed yet. Edit to add what is in this room.</span>'}</li>`).join('')
+    : `<li class="empty">${rooms.length ? 'No room has that.' : 'No rooms yet. Map tab or Drive tab → Room tool, drag a box over a room, then list what is in it. Then say “take me to the 3D printer”.'}</li>`;
+  $$('#g-rooms button').forEach(b => b.onclick = async () => {
+    const r = shown[+b.dataset.r];
+    if (b.dataset.a === 'go') {
+      try { await nav({ type: 'goto_room', name: r.name }); toast(`Going to ${r.name}`); haptic(20); setFollow(true); } catch (e) { toast(e.message, true); }
+      return;
+    }
+    const f = await roomDialog('Edit room', r);
+    if (!f) return;
+    try {
+      if (f.action === 'alt') {
+        if (!await confirmBox(`Delete ${r.name}?`, 'The room outline and its list go. Places stay.', 'Delete')) return;
+        await nav({ type: 'delete_room', name: r.name }); toast('Room deleted');
+      } else { await nav({ type: 'update_room', name: r.name, new_name: f.name !== r.name ? f.name : undefined, contents: f.contents, aliases: f.aliases }); toast('Room updated'); }
+    } catch (e) { toast(e.message, true); }
+  });
+}
+$('#g-charge').onclick = async () => {
+  haptic(15);
+  try { await nav({ type: 'go_dock', replace: true }); toast('Going to charge'); setFollow(true); } catch (e) { toast(e.message, true); }
+};
+$('#g-dock').onclick = async () => {
+  if (!await confirmBox('Is the robot on the dock now?', 'Push it onto the dock so the contacts touch (the charger LED changes). This spot becomes the dock: the robot backs onto it by itself when the battery is low.', 'Save dock here')) return;
+  try { await nav({ type: 'set_dock', here: true }); toast('Dock saved'); } catch (e) { toast(e.message, true); }
+};
+function renderCharging(st) {
+  const b = (st.nav && st.nav.battery) || {}, dock = st.places && st.places.dock;
+  let t = '';
+  if (b.level === 'unknown' || !fin(b.pct)) t = 'No battery reading. Fit the INA226 (v2.4 firmware) to see the charge and let the robot go and charge by itself.';
+  else t = `Battery ${b.pct}% (${fmt(b.v, 2)} V${fin(b.a) ? `, ${b.a < 0 ? 'charging at' : 'using'} ${fmt(Math.abs(b.a), 2)} A` : ''}). `
+    + (b.charging ? 'Charging.' : b.level === 'low' ? 'Low: it will go and charge after this task.' : b.level === 'critical' ? 'Critical: charging now, new tasks refused.' : 'Goes to charge by itself below 25%.');
+  if (!dock) t += ' Dock not set yet.';
+  $('#g-bat').textContent = t;
+}
+// ---- schedule: "patrol at 10:00 on weekdays"
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+let lastSchedKey = '';
+function schedAction(a) {
+  if (!a) return '';
+  if (a.type === 'goto_place') return `go to ${a.name}`;
+  if (a.type === 'go_home') return 'go home';
+  if (a.type === 'go_dock') return 'charge';
+  if (a.type === 'command') return `“${a.text}”`;
+  if (a.type === 'explore_start') return 'map by itself';
+  return a.type;
+}
+function renderSched(st, force) {
+  const items = (st.nav && st.nav.schedules) || [];
+  const key = JSON.stringify(items);
+  if (!force && key === lastSchedKey) return;
+  lastSchedKey = key;
+  $('#g-sched').innerHTML = items.length ? items.map(s => `
+    <li class="${s.enabled ? '' : 'off'}"><span><span class="s-time">${esc(s.at)}</span>
+      <span class="s-sub"> ${esc(s.days_text)} · ${esc(schedAction(s.action))}</span><br><span class="s-sub">${esc(s.name)}${s.last ? ` · last ${esc(s.last.slice(5))}` : ''}</span></span>
+      <span class="s-act"><label class="switch"><input type="checkbox" data-s="${s.id}" ${s.enabled ? 'checked' : ''} aria-label="On"></label>
+      <button class="btn small ghost" data-del="${s.id}" aria-label="Delete">✕</button></span></li>`).join('')
+    : '<li class="empty">Nothing scheduled. “Add” runs a trip or patrol at a set time every day or on chosen days (robot clock).</li>';
+  $$('#g-sched input[data-s]').forEach(i => i.onchange = () => nav({ type: 'schedule_enable', id: +i.dataset.s, on: i.checked }).catch(e => toast(e.message, true)));
+  $$('#g-sched [data-del]').forEach(b => b.onclick = async () => {
+    if (!await confirmBox('Delete this schedule?', '', 'Delete')) return;
+    nav({ type: 'schedule_delete', id: +b.dataset.del }).catch(e => toast(e.message, true));
+  });
+}
+$('#g-sched-add').onclick = async () => {
+  const pl = ((S.st && S.st.places && S.st.places.places) || []).map(p => p.name);
+  const f = await formBox('New schedule', `
+    <label>Name<input name="name" maxlength="60" placeholder="Morning patrol"></label>
+    <label>Time (robot clock)<input name="at" type="time" required value="10:00"></label>
+    <div class="days">${DAYS.map((d, i) => `<button type="button" data-d="${i}" class="${i < 5 ? 'on' : ''}">${d}</button>`).join('')}</div>
+    <label>What to do<select name="what">
+      ${pl.map(n => `<option value="place:${esc(n)}">Go to ${esc(n)}</option>`).join('')}
+      <option value="home">Go home</option><option value="dock">Charge on the dock</option><option value="cmd">A command (type it below)</option>
+    </select></label>
+    <label>Command (if chosen)<input name="text" maxlength="200" placeholder="go to Lab 3, wait 2 minutes, then HOD office, then come back"></label>`, 'Save schedule');
+  if (!f) return;
+  let action;
+  if (f.what.startsWith('place:')) action = { type: 'goto_place', name: f.what.slice(6) };
+  else if (f.what === 'home') action = { type: 'go_home' };
+  else if (f.what === 'dock') action = { type: 'go_dock' };
+  else { if (!f.text) { toast('Type the command', true); return; } action = { type: 'command', text: f.text }; }
+  try {
+    await nav({ type: 'schedule_add', name: f.name, at: f.at, days: f.days.length === 7 ? [] : f.days, action });
+    toast(`Scheduled for ${f.at}`); haptic(20);
+  } catch (e) { toast(e.message, true); }
+};
+
 // ---- semantic commands: understand -> show the plan as a timeline -> send
 function say(text) {
   if (!text) return;
@@ -920,10 +1164,11 @@ async function planCommand(text, fromVoice) {
     const it = r.interpretation || {}, p = r.plan || { steps: [] };
     const src = it.source === 'llm' ? 'Understood by the language model' : 'Understood offline';
     out.innerHTML = `<span class="src">${src}.</span> ${esc(it.reply || '')} ${it.notes && it.notes.length ? `<span class="muted">${esc(it.notes.join(' '))}</span>` : ''}`;
-    if (it.intent === 'stop' || it.intent === 'status') {          // act at once: never delay a stop
+    if (['stop', 'status', 'explain', 'find', 'confirm'].includes(it.intent)) {   // act at once: never delay a stop
       const done = await nav({ type: 'command', text });
-      if (done.status) out.innerHTML += ` <b>${esc(done.status)}</b>`;
-      say(it.intent === 'stop' ? 'Stopping.' : done.status);
+      const ans = done.status || done.answer || (done.interpretation && done.interpretation.reply) || '';
+      if (ans) out.innerHTML = `<span class="src">${src}.</span> <b>${esc(ans)}</b>`;
+      say(it.intent === 'stop' ? 'Stopping.' : ans);
       return;
     }
     if (!p.steps.length) { if (fromVoice) say(it.reply || 'Sorry, I did not get a place.'); return; }
@@ -932,12 +1177,14 @@ async function planCommand(text, fromVoice) {
       tags.push('<span class="tl-arrow">›</span>');
       tags.push(st.kind === 'home'
         ? `<span class="step"><span class="tag home">Return</span><small>home</small></span>`
+        : st.kind === 'dock' ? `<span class="step"><span class="tag dock">Charge</span><small>dock</small></span>`
         : `<span class="step"><span class="tag go">Go</span><small>${esc(st.label)}</small></span>`);
+      if (st.confirm) tags.push(`<span class="tl-arrow">›</span><span class="step"><span class="tag ok">OK?</span><small>wait for OK</small></span>`);
       if (st.wait_s > 0) tags.push(`<span class="tl-arrow">›</span><span class="step"><span class="tag wait">Wait</span><small>${esc(waitTxt(st.wait_s))}</small></span>`);
     });
-    const missing = p.steps.some(st => st.missing);
+    const missing = p.steps.find(st => st.missing);
     plan.innerHTML = `<h3>Plan ${p.priority >= 3 ? '· urgent' : ''}</h3><div class="timeline">${tags.join('')}</div>
-      ${missing ? '<p class="note">Home is not set, so it will not come back. Set home first.</p>' : ''}
+      ${missing ? `<p class="note">${missing.kind === 'dock' ? 'The dock is not set yet (Go → Charging → Robot is on the dock).' : 'Home is not set, so it will not come back. Set home first.'}</p>` : ''}
       <div class="row gap"><button class="btn ghost" data-p="edit">Edit</button><button class="btn grad grow" data-p="send">Send to robot</button></div>`;
     plan.hidden = false;
     $('[data-p=edit]', plan).onclick = () => { plan.hidden = true; $('#g-cmd-in').focus(); };
@@ -1015,6 +1262,11 @@ function renderStatus(st) {
     ['Map', st.map ? `${fmt(st.map.width * st.map.resolution, 1)} × ${fmt(st.map.height * st.map.resolution, 1)} m` : 'none yet', cls(!!st.map)],
     ['Ultrasonics', se.us ? se.us.map(v => fin(v) ? `${Math.round(v * 100)} cm` : 'clear').join(', ') : 'not fitted', ''],
     ['IMU', se.imu_ok ? 'working' : 'not fitted', ''],
+    ['Battery', n.battery && fin(n.battery.pct) ? `${n.battery.pct}% · ${fmt(n.battery.v, 2)} V${fin(n.battery.a) ? ` · ${fmt(n.battery.a, 2)} A` : ''}` : 'no sensor',
+      n.battery && fin(n.battery.pct) ? cls(n.battery.level === 'ok' || n.battery.charging, n.battery.level === 'low') : ''],
+    ['Bumper', se.bumper === true ? 'PRESSED' : se.bumper === false ? 'clear' : 'not fitted', se.bumper ? 'bad' : ''],
+    ['Body', n.footprint ? `${Math.round((n.footprint[0] + n.footprint[1]) * 100)} × ${Math.round(n.footprint[2] * 200)} cm, axle ${Math.round(n.footprint[0] * 100)} cm from front` : '–', ''],
+    ['Room', n.room || '–', ''],
   ];
   $('#s-list').innerHTML = items.map(([k, v, c]) => `<div class="tile"><dt>${esc(k)}</dt><dd class="${c}">${esc(v)}</dd></div>`).join('');
   const ev = n.events || [];
@@ -1039,7 +1291,8 @@ $$('[data-lab]').forEach(b => b.onclick = () => { haptic(8); lab_set(b.dataset.l
 function lab_set(which) {
   S.lab = which;
   $$('[data-lab]').forEach(x => { const on = x.dataset.lab === which; x.classList.toggle('on', on); x.setAttribute('aria-selected', on); });
-  ['health', 'wheels', 'path', 'tests'].forEach(n => { $('#lab-' + n).hidden = n !== which; });
+  ['health', 'wheels', 'path', 'tests', 'log'].forEach(n => { $('#lab-' + n).hidden = n !== which; });
+  if (which === 'log') loadLog();
   if (which === 'health' && S.st) renderStatus(S.st);
   if (which === 'path') loadFollower();
   if (which !== 'wheels') telemetry(false); else if ($('#w-live').checked) telemetry(true);
@@ -1317,6 +1570,42 @@ function showTestMetrics(r) {
   box.hidden = false;
 }
 function drawCharts() { drawWheelChart(); drawTestChart(); }
+
+// ------------------------------------------------------------------ mission log (evaluation)
+let logRows = [];
+async function loadLog() {
+  try {
+    const r = await nav({ type: 'mission_log', n: 100 });
+    logRows = r.missions || [];
+    const s = r.stats || {};
+    const pc = v => fin(v) ? `${Math.round(v * 100)}%` : '–';
+    $('#l-stats').innerHTML = [
+      ['Missions', `${s.missions || 0}`], ['Success', pc(s.success_rate)],
+      ['Avg time', secs(s.avg_duration_s)], ['Avg speed', fin(s.avg_speed_mps) ? `${fmt(s.avg_speed_mps, 2)} m/s` : '–'],
+      ['Path efficiency', pc(s.path_efficiency)], ['Replans / mission', fin(s.avg_replans) ? fmt(s.avg_replans, 1) : '–'],
+      ['Distance', `${fmt(s.total_distance_m, 0)} m`], ['Bumps · e-stops', `${s.bumps || 0} · ${s.estops || 0}`],
+    ].map(([k, v]) => `<div class="tile"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
+    $('#l-list').innerHTML = logRows.length ? logRows.slice(0, 40).map(m => `
+      <li class="${esc(m.result)}"><span class="l-top"><span>${esc(m.text || m.stops.join(' → '))}</span><span>${esc(m.result.toLowerCase())}</span></span>
+      <span class="l-sub">${clock(m.started)} · ${secs(m.duration_s)} · ${fmt(m.distance_m, 1)} m driven / ${fmt(m.planned_m, 1)} m planned · ${m.replans} replans${m.bumps ? ` · ${m.bumps} bumps` : ''}${m.reason && m.result !== 'DONE' ? ` · ${esc(m.reason)}` : ''}</span></li>`).join('')
+      : '<li class="empty muted">No finished missions yet.</li>';
+  } catch (e) { toast(e.message, true); }
+}
+$('#l-refresh').onclick = loadLog;
+$('#l-csv').onclick = async () => {
+  if (!logRows.length) { toast('No missions logged yet', true); return; }
+  const cols = ['id', 'started', 'text', 'source', 'result', 'reason', 'duration_s', 'distance_m', 'planned_m', 'straight_m', 'replans', 'blocked_s', 'bumps', 'estops', 'skipped', 'min_gap_m'];
+  const q = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const csvText = [cols.join(',')].concat(logRows.map(r => cols.map(c => q(c === 'started' ? new Date(r.started * 1000).toISOString() : r[c])).join(','))).join('\n');
+  try {
+    if (native && native.share) { native.share('pathik_missions.csv', csvText); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csvText], { type: 'text/csv' })); a.download = 'pathik_missions.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    if (navigator.clipboard) navigator.clipboard.writeText(csvText).catch(() => {});
+    toast('CSV saved (also copied)');
+  } catch (e) { toast(e.message, true); }
+};
 
 // ------------------------------------------------------------------ boot
 $('#c-scan').onclick = scan;

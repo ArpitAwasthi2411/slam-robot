@@ -103,6 +103,9 @@ class CommandParser:
             tail = t[tail_at:]
             for chunk in [c for c in SPLIT.split(tail) if c and c.strip()]:
                 at = t.find(chunk, tail_at)
+                chunk = re.sub(r'^(?:(?:me|us|this|it|these)\s+)?(?:(?:to|into|in|at|towards?)\s+)?(?:(?:the|a|an|my|our)\s+)?', '', chunk.strip())
+                if not chunk:
+                    continue
                 if any(at <= ps < at + len(chunk) for ps, _ in found) or self.places.find_in_text(chunk):
                     continue
                 if ROOM_WITH.search(chunk) or WAIT.search(chunk) or WAIT_OK.search(chunk) or HOME.search(chunk):
