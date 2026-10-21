@@ -102,8 +102,8 @@ HC-SR04 runs on **5 V** and its ECHO output is **5 V**, which can damage a 3.3 V
 No shifter? Use a divider per echo: ECHO ─1 kΩ─┬─ GPIO, and that GPIO node ─2 kΩ─ GND.
 
 **Mounting** (the defaults the software assumes; change the launch args if yours differ):
-- Front edge of the chassis, low: **5–8 cm above the floor** (`us_z:=0.06`), 22 cm ahead of the axle
-  centre (`us_x:=0.22`).
+- Front edge of the chassis, low: **5–8 cm above the floor** (`us_z:=0.06`), on the front bumper, which on our robot is
+  ~7 cm ahead of the drive-axle centre (`us_x:=0.07`, the default; measure yours).
 - Centre sensor pointing straight ahead. Left and right sensors 12 cm to each side (`us_y:=0.12`),
   **turned 30° outward** (`us_side_deg:=30`).
 - Tilt them up 2–3° if they "see" the floor (random short readings on a smooth floor).

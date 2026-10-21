@@ -155,7 +155,7 @@ def generate_launch_description():
         ('lidar_port', 'auto'),
         ('esp32_port', 'auto'),
         ('laser_x', '-0.13'), ('laser_y', '0.0'), ('laser_z', '0.10'), ('laser_yaw', '0.0'),
-        ('us_x', '0.22'), ('us_y', '0.12'), ('us_side_deg', '30'), ('us_z', '0.06'),
+        ('us_x', '0.07'), ('us_y', '0.12'), ('us_side_deg', '30'), ('us_z', '0.06'),
         ('imu_x', '0.0'), ('imu_y', '0.0'), ('imu_z', '0.05'),
     ]
     return LaunchDescription(
