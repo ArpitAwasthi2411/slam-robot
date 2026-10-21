@@ -434,3 +434,6 @@ button.chip { font-family: var(--ui); color: var(--text); cursor: pointer; }
 .loglist .l-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 650; }
 .loglist .l-sub { color: var(--dim); font-size: 12.5px; }
 .tag.ok { background: var(--orange-2); } .tag.dock { background: var(--good); }
+
+.c-demo { margin-top: 4px; border: 1px dashed var(--line-2); color: var(--dim); }
+.c-demo b { color: var(--teal); margin-left: 4px; }

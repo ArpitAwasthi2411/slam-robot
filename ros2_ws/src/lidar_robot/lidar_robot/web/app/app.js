@@ -31,7 +31,12 @@ function clock(epoch) { const d = new Date(epoch * 1000); return d.toTimeString(
 
 // ------------------------------------------------------------------ API
 let BASE = '';
+const DEMO = 'demo:';
 async function req(path, { method = 'GET', body, timeout = 4000 } = {}) {
+  if (BASE === DEMO) {                       // built-in simulated robot (demo.js): no network at all
+    await sleep(15);
+    return window.PathikDemo.handle(path, method, body === undefined ? undefined : JSON.parse(JSON.stringify(body)));
+  }
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeout);
   try {
@@ -113,6 +118,7 @@ async function scan() {
   if (!found.size) btn.textContent = 'Find again';
 }
 function netType(base) {
+  if (base === DEMO) return 'Demo';
   const h = (base || '').replace(/^https?:\/\//, '').replace(/:\d+$/, '');
   if (h === '10.42.0.1') return 'Robot Wi‑Fi';
   if (h.startsWith('169.254.')) return 'Cable';
@@ -157,10 +163,12 @@ const S = {
 async function connect(robot) {
   BASE = robot.base;
   S.robot = robot;
-  const saved = store.get('robots', []).filter(r => r.base !== robot.base);
-  store.set('robots', [{ base: robot.base, robot: robot.robot }, ...saved].slice(0, 5));
-  store.set('last', robot.base);
-  $('#t-host').textContent = robot.host && robot.host !== 'simulator' ? robot.host : (robot.robot || 'robot');
+  if (robot.base !== DEMO) {                 // the demo is never saved as a robot
+    const saved = store.get('robots', []).filter(r => r.base !== robot.base);
+    store.set('robots', [{ base: robot.base, robot: robot.robot }, ...saved].slice(0, 5));
+    store.set('last', robot.base);
+  } else toast('Demo robot: a simulated Pathik on a sample floor. Try Go → “take me to the 3D printer”.');
+  $('#t-host').textContent = robot.base === DEMO ? 'Pathik demo' : robot.host && robot.host !== 'simulator' ? robot.host : (robot.robot || 'robot');
   $('#connect').hidden = true; $('#main').hidden = false;
   S.gen++; S.fails = 0; S.mapVer = -1; S.mapImg = null; S.st = null;
   const g = S.gen;
@@ -173,6 +181,7 @@ async function connect(robot) {
 }
 function disconnect() {
   S.gen++;
+  if (window.PathikDemo) window.PathikDemo.running = false;
   telemetry(false);
   renderFound(store.get('robots', []));
   $('#c-progress').textContent = '';
@@ -1609,6 +1618,7 @@ $('#l-csv').onclick = async () => {
 
 // ------------------------------------------------------------------ boot
 $('#c-scan').onclick = scan;
+$('#c-demo').onclick = () => { haptic(15); connect(window.PathikDemo.info); };
 $('#c-manual').onsubmit = async e => {
   e.preventDefault();
   const base = normalizeAddr($('#c-addr').value);
