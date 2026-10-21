@@ -141,7 +141,13 @@ class CommandParser:
 
     # ---------------------------------------------------------------- llm
     def _parse_llm(self, text):
-        catalog = [{'name': p['name'], 'aliases': p.get('aliases', [])} for p in self.places.places]
+        catalog = []
+        for p in self.places.places:
+            entry = {'name': p['name'], 'aliases': p.get('aliases', [])}
+            room = self.places.get_room(p['name'])       # a room with the same name: pass on its contents
+            if room and room.get('contents'):
+                entry['room_contains'] = room['contents']
+            catalog.append(entry)
         catalog += [{'name': r['name'], 'aliases': r.get('aliases', []), 'room_contains': r.get('contents', [])}
                     for r in self.places.rooms if not self.places.get(r['name'])]
         system = (

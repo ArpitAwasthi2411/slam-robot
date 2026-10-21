@@ -289,3 +289,16 @@ def test_bat_and_bump_lines():
     b = BatteryMonitor()
     b.update(5.4, None, 'adc')                     # floating ADC pin: ignored
     assert b.current_level() == 'unknown'
+
+
+def test_llm_prompt_includes_contents_of_rooms_named_like_places(tmp_path):
+    store = PlaceStore(str(tmp_path / 'p.json'))
+    store.add('Lab 2', 1, 1, 0)
+    store.add_room('Lab 2', [[0, 0], [3, 0], [3, 3], [0, 3]], '3D printer, oscilloscope')
+    sent = {}
+
+    def fake_post(url, body, headers, timeout):
+        sent['system'] = body['messages'][0]['content']
+        return {'choices': [{'message': {'content': '{"intent": "navigate", "targets": ["Lab 2"]}'}}]}
+    c = CommandParser(store, groq_api_key='x', http_post=fake_post).parse('take me to the 3D printer')
+    assert '3D printer' in sent['system'] and c['targets'] == ['Lab 2'] and c['source'] == 'llm'
