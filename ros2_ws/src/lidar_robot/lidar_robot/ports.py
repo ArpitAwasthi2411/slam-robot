@@ -16,7 +16,10 @@ ALWAYS_EXCLUDE = ['/dev/rplidar']
 def pick_esp32_port(exclude=(), glob_fn=glob.glob, realpath=os.path.realpath):
     """Returns (port, fallback_used). fallback_used=True means a /dev/ttyUSB* guess."""
     banned = set()
-    for e in list(exclude) + ALWAYS_EXCLUDE:
+    # /dev/rplidar is only a fallback hint: an old/wrong udev rule can point it at the ESP32,
+    # so when the LiDAR port is known (exclude), trust that instead.
+    hints = [] if any((e or '').strip() for e in exclude) else ALWAYS_EXCLUDE
+    for e in list(exclude) + hints:
         e = (e or '').strip()
         if e:
             banned.add(e)
@@ -29,7 +32,7 @@ def pick_esp32_port(exclude=(), glob_fn=glob.glob, realpath=os.path.realpath):
     return None, False
 
 
-def detect_ports(ports=None, open_fn=None, listen_s=3.0, wait_devices_s=15.0, clock=None, sleep=None):
+def detect_ports(ports=None, open_fn=None, listen_s=6.0, wait_devices_s=15.0, clock=None, sleep=None):
     """Find the ESP32 and the LiDAR by what they send, whatever USB socket they're in.
 
     The ESP32 firmware streams 'ODM,' lines; the RPLiDAR stays silent until asked to scan.

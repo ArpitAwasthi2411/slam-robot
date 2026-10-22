@@ -93,6 +93,9 @@ class Esp32Bridge(Node):
         self.last_imu = 0.0
         self.last_us = 0.0
         self.us = [None, None, None]
+        self.bad_ports = {}                 # auto mode: ports that never sent ODM -> skipped for 60 s
+        self.opened_at = 0.0
+        self.odm_since_open = False
         self.battery = None                 # {"v", "a", "src"} from BAT lines (v2.4 firmware)
         self.last_bat = 0.0
         self.bumper = False
@@ -145,7 +148,11 @@ class Esp32Bridge(Node):
     def _resolve_port(self):
         if self.port_param != 'auto':
             return self.port_param
-        port, fallback = pick_esp32_port(self.exclude_ports)
+        bad = [p for p, t in self.bad_ports.items() if time.monotonic() - t < 60.0]
+        port, fallback = pick_esp32_port(list(self.exclude_ports) + bad)
+        if port is None and bad:                       # every candidate failed once: start over
+            self.bad_ports.clear()
+            port, fallback = pick_esp32_port(self.exclude_ports)
         if fallback and not self.warned_fallback:
             self.get_logger().warn(
                 f'Guessing ESP32 = {port} (classic ESP32 / USB-UART board), skipping LiDAR port(s) '
@@ -172,6 +179,8 @@ class Esp32Bridge(Node):
         with self.lock:
             self.ser = s
             self.port = port
+            self.opened_at = time.monotonic()
+            self.odm_since_open = False
         self.get_logger().info(f'Connected to ESP32 on {port} @ {self.baud}')
         # The boot banner was printed before we opened the port; ask the firmware to
         # identify itself so the log shows which version is flashed (v1 ignores this).
@@ -265,6 +274,7 @@ class Esp32Bridge(Node):
 
     def _handle_odom(self, pkt: OdomPacket):
         now_t = time.monotonic()
+        self.odm_since_open = True
         with self.lock:
             gyro = pkt.dyaw if (self.use_imu_yaw and pkt.dyaw is not None) else None
             self.yaw_source = 'gyro' if gyro is not None else 'wheels'
@@ -435,6 +445,13 @@ class Esp32Bridge(Node):
             self.rx_count = 0
             connected = self.ser is not None
             age = time.monotonic() - self.last_rx if self.last_rx else float('inf')
+        # auto port: opened something that never sends ODM (e.g. the LiDAR's port) -> try another one
+        if (connected and self.port_param == 'auto' and not self.odm_since_open
+                and time.monotonic() - self.opened_at > 6.0):
+            self.get_logger().warn(f'No ESP32 data on {self.port} after 6 s: trying another port')
+            self.bad_ports[self.port] = time.monotonic()
+            self._close()
+            return
         if connected and age > 2.0:
             self.get_logger().warn(
                 f'Port {self.port} is open but no ODM data for {age:.0f}s. Check: '
