@@ -128,3 +128,26 @@ Full build guide: [battery_dock.md](battery_dock.md).
 3. E-stop → test (wheels off the ground).
 4. MPU-6050 → `?` shows `imu=ok`, turn left by hand → `IMU,` first value positive.
 5. Ultrasonics → `US,l,c,r` lines, hand at 30 cm reads ~300.
+
+## 12. Motor board / app drops for a few seconds, then comes back
+
+There are **two different drops**; the app shows which:
+
+| App shows | What dropped | Usual cause |
+|---|---|---|
+| "Link to the robot lost… reconnecting" (whole app offline) | **phone ↔ Pi Wi-Fi** | Wi-Fi power saving on the Pi, distance, metal chassis near the Pi's antenna, Pi overloaded |
+| Status → **Link drops**: "USB" | Pi ↔ ESP32 **USB link** | motor noise (EMI) on the USB cable, Pi USB power over budget |
+| Status → **Link drops**: "ESP32 reboot (BROWNOUT / POWERON …)" | the **ESP32 restarted** | supply dip when motors start/reverse |
+| Status → **Link drops**: "data gap" | data paused, port stayed open | Pi overloaded, USB stall |
+
+**Find it:** `bash tools/link_doctor.sh` (check), then `bash tools/link_doctor.sh --watch` while driving 5–10 min.
+**Software fixes:** `bash tools/link_doctor.sh --fix` (Wi-Fi power saving off, stop ModemManager/brltty).
+
+**Hardware fixes, cheapest first:**
+1. **100 nF across each motor's two terminals** (solder on the motor), standard brushed-motor noise fix.
+2. **USB cable short and away from motor/battery wires**; cross them at 90°, don't run them side by side.
+3. **1000 µF across 5 V/GND** at the ESP32 and at the motor driver logic supply (stripe = −).
+4. **Pi USB power budget is 1.2 A for all four ports.** LiDAR (motor ~0.5 A) + ESP32 already use most of it:
+   power the **speaker from the 5 V buck**, not a Pi USB port.
+5. Encoders on **3.3 V** (if on 5 V their A/B signals are 5 V into the ESP32: out of spec).
+6. Pi itself: `vcgencmd get_throttled` must be `0x0`. Anything else = the Pi's 5 V dips (thicker/shorter wire from the buck, buck set to 5.1 V).

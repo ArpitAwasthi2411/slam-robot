@@ -1254,6 +1254,15 @@ $('#g-home').onclick = async () => {
 };
 
 // ------------------------------------------------------------------ Status
+// What kind of motor-board drops happened since the robot started (esp32_bridge counts them)
+function linkDrops(d) {
+  if (!d) return '–';
+  const n = d.usb + d.resets + d.gaps;
+  if (!n) return 'none';
+  const parts = [d.usb && `${d.usb} USB`, d.resets && `${d.resets} ESP32 reboot${d.resets > 1 ? 's' : ''}${d.reset_reason ? ` (${d.reset_reason})` : ''}`,
+    d.gaps && `${d.gaps} data gap${d.gaps > 1 ? 's' : ''}`].filter(Boolean).join(', ');
+  return `${parts} · last ${d.last_age < 60 ? d.last_age + ' s' : Math.round(d.last_age / 60) + ' min'} ago`;
+}
 function renderStatus(st) {
   const L = st.link || {}, p = st.pose, n = st.nav || {}, se = st.sensors || {};
   const cls = (good, warn) => good ? 'ok' : warn ? 'warn' : 'bad';
@@ -1261,6 +1270,7 @@ function renderStatus(st) {
     ['Network', `${netType(BASE)} · ${BASE.replace('http://', '')}`, ''],
     ['Link delay', fin(S.rtt) ? `${Math.round(S.rtt)} ms` : '–', cls(S.rtt < 250, S.rtt < 700)],
     ['Motor board', st.bridge_alive && L.connected ? `${fmt(L.rx_hz, 0)} Hz on ${L.port || '?'}` : 'not connected', cls(st.bridge_alive && L.rx_hz > 30, st.bridge_alive)],
+    ['Link drops', linkDrops(L.drops), L.drops ? cls(!(L.drops.usb + L.drops.resets + L.drops.gaps), L.drops.last_age > 300) : ''],
     ['Firmware', st.fw ? `v${st.fw}` : 'unknown', cls(st.fw && st.fw >= '2.3', st.fw)],
     ['LiDAR', st.scan ? `${fmt(st.scan.hz, 1)} scans/s` : '–', cls(st.scan && st.scan.hz > 5, st.scan && st.scan.hz > 0)],
     ['Position', p ? `${fmt(p.x)}, ${fmt(p.y)} m, ${fmt(p.yaw * 57.2958, 0)}°` : 'unknown', cls(!!p)],

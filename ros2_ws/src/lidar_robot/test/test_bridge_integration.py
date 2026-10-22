@@ -296,3 +296,31 @@ def test_v22_gyro_heading_and_sensor_topics():
     finally:
         node.running = False
         esp.unplug()
+
+
+def test_link_drops_are_classified():
+    """ESP32 reboot (with reason), a silent data gap and a USB loss each show up in status 'drops'."""
+    import json
+    esp = FakeEsp32()
+    node, timers = make_bridge(esp.path)
+    try:
+        pump(timers, 2.5)                                   # past the 2 s 'own banner' window
+        os.write(esp.master, b'INFO,READY,robot_esp32 v2.4 classic reset=BROWNOUT\n')
+        pump(timers, 0.4)
+        esp.running = False                                 # stop streaming: a 1.5 s gap ...
+        time.sleep(1.5)
+        for _ in range(30):                                 # ... then data again (no new banner)
+            os.write(esp.master, b'ODM,0,0,20,0\n')
+            pump(timers, 0.02)
+        pump(timers, 0.5)
+        st = json.loads(node.pubs['robot/status'].msgs[-1].data)
+        d = st['drops']
+        assert d['resets'] == 1 and d['reset_reason'] == 'BROWNOUT', d
+        assert d['gaps'] >= 1, d
+        assert any('BROWNOUT' in m and 'cap' in m for _, m in node.logs), node.logs   # hint is logged
+        esp.unplug()
+        pump(timers, 0.6)
+        st = json.loads(node.pubs['robot/status'].msgs[-1].data)
+        assert st['drops']['usb'] >= 1, st['drops']
+    finally:
+        node.destroy_node()

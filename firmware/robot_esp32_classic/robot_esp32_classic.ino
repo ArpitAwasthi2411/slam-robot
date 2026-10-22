@@ -66,6 +66,7 @@
 #define FW_VERSION "2.4"
 #include <Wire.h>
 #include <Preferences.h>     // tuning values survive reboot (ESP32 flash)
+#include <esp_system.h>      // esp_reset_reason(): why the ESP32 restarted (sent in the READY line)
 
 // ============================ PINS (classic ESP32) ============================
 #define BOARD_NAME   "ESP32"
@@ -675,6 +676,7 @@ void handleLine(char *line) {
       LINK.printf("INFO,robot_esp32 v%s %s core%d mm_per_tick=%.5f max_mms=%.0f pwm_min=%.0f kp=%.3f ki=%.3f accel=%.0f\n",
                   FW_VERSION, BOARD_NAME, ESP_ARDUINO_VERSION_MAJOR, MM_PER_TICK, g_max_mms, g_pwm_min, g_kp, g_ki, g_accel);
       printTune();
+      LINK.printf("INFO,uptime_s=%lu\n", millis() / 1000UL);   // the bridge spots a silent reboot from this
       LINK.printf("INFO,sensors imu=%s(who=0x%02X bias=%.1f) ultrasonic=%s estop_button=%s(%s)\n",
                   USE_IMU ? (imu_ok ? "ok" : "FAIL") : "off", imu_whoami, gyro_bias_z,
                   USE_ULTRASONIC ? "on" : "off", USE_ESTOP_BUTTON ? "on" : "off",
@@ -699,6 +701,24 @@ void pollSerial() {
     } else {
       rx_len = 0;  // overflow: drop the line
     }
+  }
+}
+
+// Why did we (re)start? BROWNOUT = supply dipped below ~2.4 V (motors pulling the 5 V/3.3 V down),
+// POWERON = cold start or USB power lost, EXT = EN/RESET pin (USB-serial DTR/RTS or the button),
+// PANIC/INT_WDT/TASK_WDT = firmware crash or hang.
+const char *resetReasonName() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   return "POWERON";
+    case ESP_RST_EXT:       return "EXT";
+    case ESP_RST_SW:        return "SW";
+    case ESP_RST_PANIC:     return "PANIC";
+    case ESP_RST_INT_WDT:   return "INT_WDT";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT";
+    case ESP_RST_WDT:       return "WDT";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    default:                return "UNKNOWN";
   }
 }
 
@@ -736,7 +756,7 @@ void setup() {
   batInit();
   loadTune();
   last_control_ms = millis();
-  LINK.printf("INFO,READY,robot_esp32 v%s %s\n", FW_VERSION, BOARD_NAME);
+  LINK.printf("INFO,READY,robot_esp32 v%s %s reset=%s\n", FW_VERSION, BOARD_NAME, resetReasonName());
   printTune();
 }
 
