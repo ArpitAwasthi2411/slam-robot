@@ -34,8 +34,8 @@ dashboard:
     port: 8080
     global_frame: map
     fallback_frame: odom
-    max_linear: 0.30
-    max_angular: 1.2
+    max_linear: 0.25             # joystick top speed (m/s)
+    max_angular: 0.6             # joystick top turn rate (rad/s): faster turns smear the SLAM map
     scan_decimation: 3
 
 navigator:
@@ -47,12 +47,12 @@ navigator:
     soft_radius: 0.60            # prefer this much clearance where possible (corridor centre)
     allow_unknown: false         # plan only through mapped free space
     max_linear: 0.22
-    max_angular: 0.6             # rad/s
+    max_angular: 0.45            # rad/s: gentle turns keep the map steady (LiDAR scans at ~7 Hz)
     # path following feel (smooth vs. tight):
     lookahead: 0.50              # m: bigger = smoother/straighter, smaller = follows curves tighter
     k_angular: 1.0               # turning gain: lower if it weaves, higher if it's lazy
-    linear_accel: 0.3            # m/s^2
-    angular_accel: 1.2           # rad/s^2: lower = gentler turn starts
+    linear_accel: 0.2            # m/s^2: smooth starts and stops
+    angular_accel: 0.7           # rad/s^2: lower = gentler turn starts
     rotate_in_place_above: 1.2   # rad (~70 deg): turn on the spot above this heading error
     rotate_exit_below: 0.30      # rad (~17 deg): ...until it's below this, then drive
     stop_distance: 0.38
