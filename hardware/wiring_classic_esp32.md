@@ -1,4 +1,4 @@
-# Complete wiring — classic ESP32 (ESP32-WROOM-32 DevKit), firmware v2.2
+# Complete wiring: classic ESP32 (ESP32-WROOM-32 DevKit), firmware v2.4
 
 Sketch: `firmware/robot_esp32_classic/robot_esp32_classic.ino` (board: **ESP32 Dev Module**).
 
@@ -98,7 +98,30 @@ CH1 signal → 34, CH2 signal → 35, receiver + → 5 V, receiver − → GND.
 - 5 V for the driver logic, e-stop EN line, HC-SR04 and receiver: from the 5 V buck.
 - **All grounds common:** battery −, buck GND, ESP32 GND, both drivers, receiver, encoders, sensors.
 
-## 9. Order of work
+## 9. Raspberry Pi 4 connections
+
+| Pi port | Goes to | Notes |
+|---|---|---|
+| USB socket **1.3** | ESP32 (USB data cable) | keep it in this socket: the robot finds it as `/dev/ttyUSB1` |
+| USB socket **1.2** | RPLiDAR A1 (its USB adapter) | `/dev/ttyUSB0` |
+| USB (any free) | USB microphone, USB speaker (when bought) | |
+| **CAMERA** connector | Camera Module 3 Wide (15-pin ribbon, contacts towards the HDMI ports) | Pi off when plugging |
+| 3.5 mm jack | small speaker / earphones (works today) | robot voice with espeak-ng |
+| Ethernet | laptop (169.254.1.2) | backup way in |
+| USB-C power | 5 V 3 A from the buck converter | |
+
+## 10. Battery monitor + charging dock (v2.4, when the parts arrive)
+
+```
+ 3S pack + ──[BMS]──●── INA226 IN+ ─[shunt R010]─ IN− ──●── main switch ── fuse ── robot
+                    └── INA226 VBUS                      └── charge input: + strip ← Schottky ← 3 A fuse
+ 3S pack − ───────────────────────────────────────────────── robot GND ── − strip
+ INA226: VCC 3.3 V, GND, SDA 21, SCL 22 (shared with the MPU), A0/A1 → GND
+```
+Dock side: charger + → microswitch (NO) → top contact; charger − → bottom contact.
+Full build guide: [battery_dock.md](battery_dock.md).
+
+## 11. Order of work
 
 1. Unplug everything except USB → flash the sketch → Serial Monitor 115200 → `?` shows `INFO,...`.
 2. Connect motors, drivers, encoders, RC (already done) → test.
