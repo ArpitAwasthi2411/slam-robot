@@ -78,7 +78,7 @@ class DashboardNode(Node):
         self.req_ids = itertools.count(1)
 
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              reliability=ReliabilityPolicy.RELIABLE)

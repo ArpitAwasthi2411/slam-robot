@@ -56,7 +56,7 @@ class GoalControllerNode(Node):
         self.ctrl = GoalController(params)
 
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
         self.us = UltrasonicListener(self, self.tf_buffer, self.base_frame)
         self.front = float('inf')
         self.scan_stamp = None
