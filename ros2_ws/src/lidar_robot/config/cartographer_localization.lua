@@ -31,7 +31,7 @@ options = {
 
   lookup_transform_timeout_sec = 0.2,
   submap_publish_period_sec = 0.3,
-  pose_publish_period_sec = 5e-3,
+  pose_publish_period_sec = 0.02,      -- 50 Hz is plenty (200 Hz overloaded the Pi's Python TF listeners)
   trajectory_publish_period_sec = 30e-3,
 
   rangefinder_sampling_ratio = 1.0,

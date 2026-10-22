@@ -139,7 +139,7 @@ class NavigatorNode(Node):
         threading.Thread(target=self._map_worker, daemon=True).start()
 
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
         self.us = UltrasonicListener(self, self.tf_buffer, self.base_frame)   # low obstacles (v2.2)
         self.front = float('inf')
         self.scan_stamp = None

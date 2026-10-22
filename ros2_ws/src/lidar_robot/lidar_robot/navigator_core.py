@@ -572,14 +572,15 @@ class NavigatorCore:
                 if self._pose_lost_for > self.pose_lost_fail_s:
                     self._fail('POSE_LOST', f'no robot position for {self.pose_lost_fail_s:.0f} s '
                                             '(is SLAM running? is the ESP32 sending odometry?)')
-                elif self._pose_lost_for > 1.0 and self.state != WAITING:
+                elif self._pose_lost_for > 3.0 and self.state != WAITING:
                     self._log('robot position lost: waiting for it to come back', 'warn')
                     self.follower.clear()
                     self._set(WAITING, 'position lost for a moment, waiting (check the battery and the ESP32 link)')
             return 0.0, 0.0
-        if self._pose_lost_for > 1.0 and self.queue.active:
+        if self._pose_lost_for > 3.0 and self.queue.active:
             self._log(f'position back after {self._pose_lost_for:.1f} s: continuing')
             self._set(PLANNING, 'position back, replanning')
+        # a short gap (< 3 s, e.g. the Pi was busy) just pauses: keep the current route, no re-plan
         self._pose_lost_for = 0.0
 
         d = self.places.dock
