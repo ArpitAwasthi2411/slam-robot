@@ -234,7 +234,8 @@ class DashboardNode(Node):
 
     # ------------------------------------------------------------ backend API
     def get_state(self):
-        alive = time.monotonic() - self.robot_status_t < 1.5
+        # status comes at 2 Hz; 3 s so a busy Pi (Cartographer) doesn't flash 'not talking'
+        alive = time.monotonic() - self.robot_status_t < 3.0
         rs = self.robot_status if alive else {}
         with self.lock:
             m = self.map_msg
@@ -244,7 +245,7 @@ class DashboardNode(Node):
         return {
             'time': time.time(),
             'link': {k: rs.get(k) for k in ('connected', 'port', 'rx_hz', 'rx_age', 'esp_mode',
-                                            'esp_info', 'cmd_source', 'bad_lines')},
+                                            'esp_info', 'cmd_source', 'bad_lines', 'drops')},
             'bridge_alive': alive,
             'estop': self.estop,
             'pose': self._pose(),

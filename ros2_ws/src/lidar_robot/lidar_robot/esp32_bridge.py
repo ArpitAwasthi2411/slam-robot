@@ -20,6 +20,7 @@ With an IMU, odometry heading comes from the gyro (use_imu_yaw) and distance fro
 """
 import json
 import math
+import os
 import threading
 import time
 
@@ -43,6 +44,15 @@ from lidar_robot.protocol import (parse_line, OdomPacket, InfoPacket, ImuPacket,
                                   format_velocity, format_stop, format_estop)
 from lidar_robot.tuning import clamp_values, WHEEL_RANGES
 
+
+RESET_HINTS = {
+    'BROWNOUT': 'Supply dipped: motors pulling the ESP32 power down -> 1000 uF cap on its 5 V, separate supply.',
+    'POWERON': 'Power was lost completely: USB cable/port or the Pi\'s USB power.',
+    'EXT': 'RESET/EN pin pulsed: USB-serial DTR/RTS glitch or noise on EN.',
+    'PANIC': 'Firmware crashed: send the log to Claude.',
+    'INT_WDT': 'Firmware hung in an interrupt: likely noise on encoder/RC/echo pins flooding interrupts.',
+    'TASK_WDT': 'Firmware hung: send the log to Claude.',
+}
 
 
 class Esp32Bridge(Node):
@@ -111,6 +121,10 @@ class Esp32Bridge(Node):
         self.fw = ''
         self.telemetry_on = False         # what the app asked for (re-sent after an ESP32 reset)
         self.spd_batch = []
+        # link diagnostics (shown in the app's Status and in the log): what kind of drop happened
+        self.drops = {'usb': 0, 'resets': 0, 'gaps': 0}
+        self.last_event = None              # (monotonic time, text)
+        self.last_reset_reason = None
 
         self.odom_pub = self.create_publisher(Odometry, 'odom', 20)
         self.imu_pub = self.create_publisher(Imu, 'imu', 20)
@@ -189,6 +203,13 @@ class Esp32Bridge(Node):
             self._write(format_telemetry(True))
         return True
 
+    def _event(self, kind, text):
+        with self.lock:
+            if kind:
+                self.drops[kind] += 1
+            self.last_event = (time.monotonic(), text)
+        self.get_logger().warn(f'LINK EVENT: {text}')
+
     def _close(self):
         with self.lock:
             s, self.ser = self.ser, None
@@ -217,64 +238,97 @@ class Esp32Bridge(Node):
                     time.sleep(2.0)
                     continue
             try:
-                raw = self.ser.readline()
-            except (serial.SerialException, OSError) as e:
-                self.get_logger().error(f'Serial read failed ({e}); reconnecting')
+                ser = self.ser
+                if ser is None:
+                    continue
+                raw = ser.readline()
+            except (serial.SerialException, OSError, TypeError, AttributeError) as e:
+                if not self.running:
+                    return
+                # TypeError/AttributeError: port closed under us by another thread (pyserial fd=None)
+                gone = self.port and not os.path.exists(self.port)
+                self._event('usb', f'USB serial lost on {self.port} '
+                                   f'({"device disappeared: USB disconnect/re-enumeration" if gone else e}); reconnecting')
                 self._close()
                 time.sleep(1.0)
                 continue
             if not raw:
                 continue
-            pkt = parse_line(raw.decode('ascii', errors='ignore'))
-            if pkt is None:
-                self.bad_lines += 1
-                continue
-            if isinstance(pkt, SpdPacket):
-                with self.lock:
-                    self.spd_batch.append([pkt.tl, pkt.ml, pkt.pl, pkt.tr, pkt.mr, pkt.pr])
-                continue
-            if isinstance(pkt, BatPacket):
-                with self.lock:
-                    self.battery = {'v': round(pkt.volts, 3), 'a': None if pkt.amps is None else round(pkt.amps, 3),
-                                    'src': pkt.src}
-                    self.last_bat = time.monotonic()
-                continue
-            if isinstance(pkt, BumpPacket):
-                with self.lock:
-                    self.bumper = pkt.pressed
-                    if pkt.pressed:
-                        self.bumps += 1
-                if pkt.pressed:
-                    self.get_logger().warn('bumper pressed: motors stopped by the ESP32')
-                continue
-            if isinstance(pkt, InfoPacket):
-                tune = parse_tune(pkt.text)
-                if tune:
-                    self.tune = tune
-                    continue
-                if 'robot_esp32 v' in pkt.text:
-                    self.fw = pkt.text.split('robot_esp32 v', 1)[1].split()[0]
-                if pkt.text.startswith('READY') and self.telemetry_on:
-                    self._write(format_telemetry(True))      # ESP32 rebooted: turn the stream back on
-                self.esp_info = pkt.text
-                self.get_logger().info(f'ESP32: {pkt.text}')
-                continue
             try:
-                if isinstance(pkt, ImuPacket):
-                    self._handle_imu(pkt)
-                    continue
-                if isinstance(pkt, UsPacket):
-                    self._handle_us(pkt)
-                    continue
-            except Exception:
-                if self.running:
-                    raise
-                continue
-            self._handle_odom(pkt)
+                self._handle_line(raw)
+            except Exception as e:                       # never let one bad line kill this thread
+                if not self.running:
+                    return
+                self.get_logger().error(f'ESP32 line handling failed: {e!r}', throttle_duration_sec=5.0)
+
+    def _handle_line(self, raw):
+        pkt = parse_line(raw.decode('ascii', errors='ignore'))
+        if pkt is None:
+            self.bad_lines += 1
+            return
+        if isinstance(pkt, SpdPacket):
+            with self.lock:
+                self.spd_batch.append([pkt.tl, pkt.ml, pkt.pl, pkt.tr, pkt.mr, pkt.pr])
+            return
+        if isinstance(pkt, BatPacket):
+            with self.lock:
+                self.battery = {'v': round(pkt.volts, 3), 'a': None if pkt.amps is None else round(pkt.amps, 3),
+                                'src': pkt.src}
+                self.last_bat = time.monotonic()
+            return
+        if isinstance(pkt, BumpPacket):
+            with self.lock:
+                self.bumper = pkt.pressed
+                if pkt.pressed:
+                    self.bumps += 1
+            if pkt.pressed:
+                self.get_logger().warn('bumper pressed: motors stopped by the ESP32')
+            return
+        if isinstance(pkt, InfoPacket):
+            tune = parse_tune(pkt.text)
+            if tune:
+                self.tune = tune
+                return
+            if pkt.text.startswith('uptime_s='):
+                up = int(pkt.text.split('=', 1)[1] or 0)
+                recent = self.last_event and time.monotonic() - self.last_event[0] < 15.0
+                if self.drops['usb'] and recent:
+                    self._event(None, f'after the USB reconnect the ESP32 has been up {up} s: '
+                                      + ('it lost power too (USB/5 V power dip)' if up < 10
+                                         else 'it kept running, only the USB link dropped (noise/EMI on USB)'))
+                return
+            if 'robot_esp32 v' in pkt.text:
+                self.fw = pkt.text.split('robot_esp32 v', 1)[1].split()[0]
+            if pkt.text.startswith('READY'):
+                reason = pkt.text.split('reset=', 1)[1].split()[0] if 'reset=' in pkt.text else '?'
+                self.last_reset_reason = reason
+                if time.monotonic() - self.opened_at > 2.0:   # not just the banner at our own open
+                    self._event('resets', f'ESP32 rebooted while running (reset reason: {reason}). '
+                                          + RESET_HINTS.get(reason, ''))
+                if self.telemetry_on:
+                    self._write(format_telemetry(True))      # ESP32 rebooted: turn the stream back on
+            self.esp_info = pkt.text
+            self.get_logger().info(f'ESP32: {pkt.text}')
+            return
+        try:
+            if isinstance(pkt, ImuPacket):
+                self._handle_imu(pkt)
+                return
+            if isinstance(pkt, UsPacket):
+                self._handle_us(pkt)
+                return
+        except Exception:
+            if self.running:
+                raise
+            return
+        self._handle_odom(pkt)
 
     def _handle_odom(self, pkt: OdomPacket):
         now_t = time.monotonic()
         self.odm_since_open = True
+        if self.last_rx and now_t - self.last_rx > 1.0 and now_t - self.opened_at > 2.0:
+            self._event('gaps', f'no data from the ESP32 for {now_t - self.last_rx:.1f} s, port stayed open '
+                                '(ESP32 busy/reset without banner, USB stall, or this Pi overloaded)')
         with self.lock:
             gyro = pkt.dyaw if (self.use_imu_yaw and pkt.dyaw is not None) else None
             self.yaw_source = 'gyro' if gyro is not None else 'wheels'
@@ -490,6 +544,10 @@ class Esp32Bridge(Node):
                 'battery': (dict(self.battery, fresh=True)
                             if self.battery and time.monotonic() - self.last_bat < 5.0 else None),
                 'bumper': self.bumper, 'bumps': self.bumps,
+                'drops': dict(self.drops,
+                              last=self.last_event[1] if self.last_event else None,
+                              last_age=round(time.monotonic() - self.last_event[0]) if self.last_event else None,
+                              reset_reason=self.last_reset_reason),
             }
         self.status_pub.publish(String(data=json.dumps(st)))
 
