@@ -429,14 +429,92 @@ function state() {
   };
 }
 
+// ---------------------------------------------------------------- accounts (same rules as lidar_robot/auth.py)
+const ROLES = ['staff', 'operator', 'admin'];
+const USERS = {
+  admin: { name: 'Asha Verma', role: 'admin', status: 'active', pw: 'admin123', created: 1729000000 },
+  operator: { name: 'Robot team', role: 'operator', status: 'active', pw: 'operator123', created: 1729100000 },
+  staff: { name: 'Prof. Sharma', role: 'staff', status: 'active', pw: 'staff123', created: 1729200000 },
+  'dr.mehta': { name: 'Dr. Mehta', role: 'staff', status: 'pending', pw: 'mehta123', created: 1729300000 },
+};
+const STAFF_NAV = new Set(['goto_place', 'goto_room', 'command', 'preview', 'cancel', 'resume', 'go_home', 'go_dock',
+  'confirm', 'explain', 'find', 'search', 'schedule_list', 'mission_log']);
+function needRole(p, body) {
+  if (['/api/ping', '/api/auth/login', '/api/auth/signup'].includes(p)) return null;
+  if (p.startsWith('/api/users')) return 'admin';
+  if (['/api/state', '/api/map', '/api/auth/me', '/api/auth/logout', '/api/auth/password'].includes(p)) return 'staff';
+  if (p === '/api/estop') return (body || {}).on === false ? 'operator' : 'staff';
+  if (p === '/api/nav') return STAFF_NAV.has((body || {}).type) ? 'staff' : 'operator';
+  return 'operator';
+}
+const pub = (n, u) => ({ username: n, name: u.name, role: u.role, status: u.status, created: u.created, last_login: u.last_login || null });
+const deny = (msg, code) => { const e = new Error(msg); e.code = code; throw e; };
+function authApi(p, body, me) {
+  body = body || {};
+  if (p === '/api/auth/login') {
+    const n = String(body.username || '').trim().toLowerCase(), u = USERS[n];
+    if (!u || u.pw !== body.password) deny('Wrong username or password', 401);
+    if (u.status === 'pending') deny('Your account is waiting for an admin to approve it', 403);
+    if (u.status === 'disabled') deny('This account has been disabled. Ask an admin.', 403);
+    u.last_login = Date.now() / 1000;
+    return { token: 'demo-' + n, user: pub(n, u) };
+  }
+  if (p === '/api/auth/signup') {
+    const n = String(body.username || '').trim().toLowerCase();
+    if (!/^[a-z0-9._-]{3,32}$/.test(n)) deny('Username: 3-32 characters, letters, digits, dot, dash or underscore', 400);
+    if ((body.password || '').length < 6) deny('Password must be at least 6 characters', 400);
+    if (USERS[n]) deny('That username is taken', 409);
+    USERS[n] = { name: body.name || n, role: 'staff', status: 'pending', pw: body.password, created: Date.now() / 1000 };
+    return { token: null, user: pub(n, USERS[n]), message: 'Account created. An admin has to approve it before you can log in. (Demo: log in as admin to approve it.)' };
+  }
+  if (p === '/api/auth/me') return { user: me, pending: me.role === 'admin' ? Object.values(USERS).filter(u => u.status === 'pending').length : 0 };
+  if (p === '/api/auth/logout') return { ok: true };
+  if (p === '/api/auth/password') {
+    if (USERS[me.username].pw !== body.old) deny('Current password is wrong', 401);
+    if ((body.new || '').length < 6) deny('Password must be at least 6 characters', 400);
+    USERS[me.username].pw = body.new; return { ok: true, message: 'Password changed.' };
+  }
+  if (p === '/api/users') {
+    const order = { pending: 0, active: 1, disabled: 2 };
+    return { users: Object.entries(USERS).map(([n, u]) => pub(n, u)).sort((a, b) => order[a.status] - order[b.status] || ROLES.indexOf(b.role) - ROLES.indexOf(a.role) || a.username.localeCompare(b.username)) };
+  }
+  const u = USERS[body.username];
+  if (!u) deny('No such user', 404);
+  const admins = Object.entries(USERS).filter(([, x]) => x.role === 'admin' && x.status === 'active').map(([n]) => n);
+  const lastAdmin = u.role === 'admin' && u.status === 'active' && admins.length === 1;
+  if (p === '/api/users/update') {
+    if (lastAdmin && ((body.role && body.role !== 'admin') || body.status === 'disabled')) deny('This is the only admin: make someone else admin first', 409);
+    if (body.role) u.role = body.role;
+    if (body.status) u.status = body.status;
+    return { ok: true, user: pub(body.username, u) };
+  }
+  if (p === '/api/users/reset') { if ((body.password || '').length < 6) deny('Password must be at least 6 characters', 400); u.pw = body.password; return { ok: true }; }
+  if (p === '/api/users/delete') {
+    if (body.username === me.username) deny('You cannot remove your own account', 400);
+    if (lastAdmin) deny('This is the only admin: make someone else admin first', 409);
+    delete USERS[body.username]; return { ok: true };
+  }
+  deny('not found', 404);
+}
+
 // ---------------------------------------------------------------- the app's HTTP API, in-process
 window.PathikDemo = {
   running: false,
-  info: { base: 'demo:', robot: 'Pathik demo (simulated)', host: 'demo', api: 2, fw: '2.4-demo', ms: 0 },
-  handle(path, method, body) {
+  info: { base: 'demo:', robot: 'Pathik demo (simulated)', host: 'demo', api: 2, fw: '2.4-demo', ms: 0, auth: true, setup_needed: false },
+  accounts: [['admin', 'admin123', 'Admin'], ['operator', 'operator123', 'Operator'], ['staff', 'staff123', 'Staff']],
+  handle(path, method, body, token) {
     this.running = true;
     const p = path.split('?')[0];
-    if (p === '/api/ping') return { ok: true, robot: this.info.robot, api: 2, fw: '2.4-demo', host: 'demo', nav_mode: 'planner', wheel_ranges: WHEEL_R };
+    if (p === '/api/ping') return { ok: true, robot: this.info.robot, api: 2, fw: '2.4-demo', host: 'demo', nav_mode: 'planner', wheel_ranges: WHEEL_R, auth: true, setup_needed: false };
+    const need = needRole(p, body);
+    const n = (token || '').startsWith('demo-') ? token.slice(5) : '', u = USERS[n];
+    const me = u && u.status === 'active' ? pub(n, u) : null;
+    if (need) {
+      if (!me) deny('Please log in again', 401);
+      if (ROLES.indexOf(me.role) < ROLES.indexOf(need)) deny(`Your role (${me.role}) cannot do this. Ask an ${need}.`, 403);
+    }
+    if (p.startsWith('/api/auth/') || p.startsWith('/api/users')) return authApi(p, body, me);
+    if (p === '/api/nav' && body) body.by = n;
     if (p === '/api/state') return state();
     if (p === '/api/map') return path.includes('since=1') ? { unchanged: true } : { version: 1, width: W, height: H, resolution: RES, origin: [OX, OY, 0], data: mapData() };
     if (p === '/api/telemetry') return { seq: 0, samples: [] };

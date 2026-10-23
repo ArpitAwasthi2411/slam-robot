@@ -181,6 +181,7 @@ class NavigatorCore:
         if not isinstance(req, dict):
             return {'ok': False, 'error': 'request must be a JSON object'}
         t = req.get('type')
+        self._req_by = str(req.get('by') or '')[:32]     # app login of whoever sent it (mission log)
         pose = pose or self._pose
         try:
             if t == 'goto_place':
@@ -421,6 +422,7 @@ class NavigatorCore:
             if not (math.isfinite(st.x) and math.isfinite(st.y)) or (st.yaw is not None and not math.isfinite(st.yaw)):
                 raise ValueError('goal coordinates must be finite numbers')
         m = Mission(stops, max(0, min(3, int(priority))), source, text)
+        m.by = getattr(self, '_req_by', '') if source not in ('schedule', 'explore', 'battery') else ''
         preempt = self.queue.add(m)
         if preempt:
             self.queue.preempt()

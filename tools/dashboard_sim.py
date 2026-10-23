@@ -20,6 +20,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'ros2_ws', 'src', 'lidar_robot'))
 
+from lidar_robot.auth import UserStore                           # noqa: E402
 from lidar_robot.commands import CommandParser                    # noqa: E402
 from lidar_robot.dashboard_server import DashboardServer          # noqa: E402
 from lidar_robot.explorer import MapAutoSaver                    # noqa: E402
@@ -414,10 +415,23 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=8080)
     ap.add_argument('--explore', action='store_true', help='start with an unknown map')
+    ap.add_argument('--users', default=os.path.join(HERE, '..', 'maps', 'sim_users.json'),
+                    help='user accounts file (first sign-up becomes admin)')
+    ap.add_argument('--demo-users', action='store_true',
+                    help='create admin/admin123, operator/operator123, staff/staff123 if missing')
+    ap.add_argument('--no-login', action='store_true', help='no accounts at all (old behaviour)')
     args = ap.parse_args()
-    srv = DashboardServer(SimBackend(explore=args.explore), host='0.0.0.0', port=args.port)
+    users = None if args.no_login else UserStore(args.users)
+    if users is not None and args.demo_users:
+        for name, role in (('admin', 'admin'), ('operator', 'operator'), ('staff', 'staff')):
+            if name not in users.users:
+                users.signup(name, name + '123', name.capitalize())
+                users.admin_update('admin', name, role=role, status='active')
+    srv = DashboardServer(SimBackend(explore=args.explore), host='0.0.0.0', port=args.port, users=users)
     srv.start()
     print(f'Simulated robot dashboard: http://localhost:{args.port}   (Ctrl+C to quit)')
+    if users is not None and users.setup_needed():
+        print('No accounts yet: the first sign-up in the app becomes the admin.')
     try:
         while True:
             time.sleep(1)

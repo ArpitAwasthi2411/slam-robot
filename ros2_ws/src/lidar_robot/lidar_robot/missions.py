@@ -38,6 +38,7 @@ class Mission:
     message: str = ''
     repeat: int = 0                 # extra rounds after this one; -1 = patrol until canceled
     round: int = 1
+    by: str = ''                    # who asked for it (app login), for the log
     skip_unreachable: bool = False  # routes: skip a point that can't be reached instead of failing
     skips: int = 0                  # consecutive skipped points (all skipped in a row = fail)
 
@@ -46,7 +47,7 @@ class Mission:
         return self.stops[self.next_stop] if self.next_stop < len(self.stops) else None
 
     def summary(self):
-        return {'id': self.id, 'priority': self.priority, 'source': self.source, 'text': self.text,
+        return {'id': self.id, 'priority': self.priority, 'source': self.source, 'text': self.text, 'by': self.by,
                 'state': self.state, 'message': self.message,
                 'stops': [s.label for s in self.stops], 'next_stop': self.next_stop,
                 'confirm': [i for i, s in enumerate(self.stops) if s.confirm],

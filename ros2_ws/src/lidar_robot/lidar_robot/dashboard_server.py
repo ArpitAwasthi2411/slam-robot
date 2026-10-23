@@ -16,6 +16,16 @@ The server knows nothing about ROS. It talks to a `backend` object:
     backend.test_start(dict) / test_stop() / test_status(since) -> dict
 The mobile app (web/app/) is served at / ; the classic dashboard at /classic.
 Every response carries CORS headers so the APK (file:// origin) can call the API.
+
+Login (auth.py): pass `users=UserStore(...)` and every /api/ call needs
+`Authorization: Bearer <token>` with a role that allows it (auth.required_role).
+users=None = no login at all (only for unit tests and the classic offline setups).
+  POST /api/auth/signup {username, password, name}   first account = admin, later ones wait for approval
+  POST /api/auth/login  {username, password}          -> {token, user}
+  GET  /api/auth/me                                    -> {user, pending}
+  POST /api/auth/logout | /api/auth/password {old, new}
+  GET  /api/users        POST /api/users/update {username, role?, status?}
+  POST /api/users/reset {username, password}         POST /api/users/delete {username}
 The ROS node (dashboard.py) and the offline simulator (tools/dashboard_sim.py)
 both implement this interface.
 """
@@ -26,6 +36,8 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
+
+from lidar_robot.auth import AuthError, at_least, required_role
 
 MAX_BODY = 4096
 
@@ -56,7 +68,7 @@ STATIC_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascr
                 '.ico': 'image/x-icon', '.woff2': 'font/woff2'}
 
 
-def make_handler(backend, index_path, app_dir=None):
+def make_handler(backend, index_path, app_dir=None, users=None):
     class Handler(BaseHTTPRequestHandler):
         server_version = 'RobotDashboard/1.0'
 
@@ -95,8 +107,8 @@ def make_handler(backend, index_path, app_dir=None):
             self.send_response(204)
             self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-            self.send_header('Access-Control-Max-Age', '600')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.send_header('Access-Control-Max-Age', '7200')
             self.send_header('Content-Length', '0')
             self.end_headers()
 
@@ -111,6 +123,57 @@ def make_handler(backend, index_path, app_dir=None):
             with open(full, 'rb') as f:
                 return self._send(200, f.read(), ctype)
 
+        # ------------------------------------------------------------ login
+        def _token(self):
+            h = self.headers.get('Authorization') or ''
+            return h[7:].strip() if h.lower().startswith('bearer ') else ''
+
+        def _guard(self, method, path, body=None):
+            """Sets self.user; returns True if the request may go on (else the error is already sent)."""
+            self.user = None
+            if users is None or not path.startswith('/api/'):
+                return True
+            need = required_role(method, path, body)
+            self.user = users.verify(self._token())
+            if need is None:
+                return True
+            if self.user is None:
+                self._send(401, {'error': 'Please log in again', 'login': True})
+                return False
+            if not at_least(self.user['role'], need):
+                self._send(403, {'error': f'Your role ({self.user["role"]}) cannot do this. Ask an {need}.',
+                                 'need': need})
+                return False
+            return True
+
+        def _auth_post(self, path, body):
+            addr = self.client_address[0] if self.client_address else ''
+            if path == '/api/auth/login':
+                return users.login(body.get('username'), body.get('password'), addr)
+            if path == '/api/auth/signup':
+                r = users.signup(body.get('username'), body.get('password'), body.get('name', ''))
+                r['message'] = ('Welcome! You are the first user, so you are the admin.' if r['token'] else
+                                'Account created. An admin has to approve it before you can log in.')
+                return r
+            if path == '/api/auth/logout':
+                users.logout(self._token())
+                return {'ok': True}
+            if path == '/api/auth/password':
+                users.change_password(self.user['username'], body.get('old'), body.get('new'))
+                return {'ok': True, 'message': 'Password changed. Log in again on your other devices.'}
+            if path == '/api/users/update':
+                return {'ok': True, 'user': users.admin_update(self.user['username'], str(body.get('username', '')),
+                                                                body.get('role'), body.get('status'))}
+            if path == '/api/users/reset':
+                users.admin_reset_password(str(body.get('username', '')), body.get('password'))
+                return {'ok': True}
+            if path == '/api/users/delete':
+                if body.get('username') == self.user['username']:
+                    raise AuthError('You cannot remove your own account')
+                users.admin_delete(self.user['username'], str(body.get('username', '')))
+                return {'ok': True}
+            return None
+
         def _optional(self, name, *args):
             fn = getattr(backend, name, None)
             if fn is None:
@@ -121,6 +184,13 @@ def make_handler(backend, index_path, app_dir=None):
             url = urlparse(self.path)
             q = parse_qs(url.query)
             try:
+                if not self._guard('GET', url.path):
+                    return
+                if users is not None and url.path == '/api/auth/me':
+                    return self._send(200, {'user': self.user,
+                                            'pending': users.pending_count() if self.user['role'] == 'admin' else 0})
+                if users is not None and url.path == '/api/users':
+                    return self._send(200, {'users': users.list_users()})
                 if url.path in ('/', '/index.html'):
                     if app_dir:                          # the app's relative URLs need the /app/ base
                         self.send_response(302)
@@ -142,7 +212,11 @@ def make_handler(backend, index_path, app_dir=None):
                 if url.path.startswith('/app/'):
                     return self._static(url.path[len('/app/'):] or 'index.html')
                 if url.path == '/api/ping':
-                    return self._optional('ping')
+                    fn = getattr(backend, 'ping', None)
+                    if fn is None:
+                        return self._send(404, {'error': 'ping not supported by this backend'})
+                    return self._send(200, dict(fn(), auth=users is not None,
+                                                setup_needed=bool(users and users.setup_needed())))
                 if url.path == '/api/telemetry':
                     return self._optional('get_telemetry', int(q.get('since', ['0'])[0]))
                 if url.path == '/api/test':
@@ -161,6 +235,15 @@ def make_handler(backend, index_path, app_dir=None):
             url = urlparse(self.path)
             try:
                 body = self._json_body()
+                if not isinstance(body, dict):
+                    raise ValueError('body must be a JSON object')
+                if not self._guard('POST', url.path, body):
+                    return
+                if users is not None and url.path.startswith(('/api/auth/', '/api/users/')):
+                    r = self._auth_post(url.path, body)
+                    return self._send(200, r) if r is not None else self._send(404, {'error': 'not found'})
+                if self.user and url.path == '/api/nav':
+                    body['by'] = self.user['username']
                 if url.path == '/api/cmd':
                     backend.command(float(body.get('v', 0.0)), float(body.get('w', 0.0)))
                 elif url.path == '/api/estop':
@@ -184,6 +267,8 @@ def make_handler(backend, index_path, app_dir=None):
                 else:
                     return self._send(404, {'error': 'not found'})
                 return self._send(200, {'ok': True})
+            except AuthError as e:
+                return self._send(e.code, {'error': str(e)})
             except (ValueError, KeyError, TypeError) as e:
                 return self._send(400, {'error': str(e)})
             except Exception as e:
@@ -193,9 +278,9 @@ def make_handler(backend, index_path, app_dir=None):
 
 
 class DashboardServer:
-    def __init__(self, backend, host='0.0.0.0', port=8080):
+    def __init__(self, backend, host='0.0.0.0', port=8080, users=None):
         self.httpd = ThreadingHTTPServer((host, port),
-                                         make_handler(backend, _find_index_html(), _find_app_dir()))
+                                         make_handler(backend, _find_index_html(), _find_app_dir(), users))
         self.httpd.daemon_threads = True
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
 

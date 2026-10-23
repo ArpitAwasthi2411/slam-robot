@@ -26,6 +26,7 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, Empty, String
 from tf2_ros import Buffer, TransformListener, TransformException
 
+from lidar_robot.auth import UserStore
 from lidar_robot.dashboard_server import DashboardServer
 from lidar_robot.explorer import MapAutoSaver
 from lidar_robot.kinematics import yaw_from_quaternion, quaternion_from_yaw, wrap_angle
@@ -45,6 +46,8 @@ class DashboardNode(Node):
         self.declare_parameter('max_linear', 0.30)
         self.declare_parameter('max_angular', 1.2)
         self.declare_parameter('map_dir', os.path.expanduser('~/maps'))
+        self.declare_parameter('require_login', True)            # app users + roles (auth.py)
+        self.declare_parameter('users_file', os.path.expanduser('~/maps/users.json'))
         self.declare_parameter('scan_decimation', 3)
         self.declare_parameter('nav_mode', 'planner')
         self.declare_parameter('slam_mode', 'mapping')           # bringup passes the real one
@@ -124,9 +127,14 @@ class DashboardNode(Node):
             pass
 
         port = int(gp('port'))
-        self.server = DashboardServer(self, port=port)
+        users = UserStore(gp('users_file')) if gp('require_login') else None
+        self.server = DashboardServer(self, port=port, users=users)
         self.server.start()
         self.get_logger().info(f'Dashboard on http://0.0.0.0:{port}  (open http://<pi-ip>:{port})')
+        if users is None:
+            self.get_logger().warn('require_login is false: ANYONE on the network can drive the robot')
+        elif users.setup_needed():
+            self.get_logger().warn('No admin account yet: the first person to sign up in the app becomes admin')
 
     # ------------------------------------------------------------ ROS callbacks
     def _on_map(self, msg):
