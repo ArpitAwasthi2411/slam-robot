@@ -19,7 +19,7 @@ class Clock:
         return self.t
 
 
-def setup(tmp_path, **kw):
+def make_setup(tmp_path, **kw):
     s = PlaceStore(str(tmp_path / 'p.json'))
     s.add('HOD office', 6.5, 4.5, yaw=math.pi / 2, aliases=['hod'])
     s.add('Lab 3', 6.0, 1.0)
@@ -49,7 +49,7 @@ def run(nav, clk, pose, seconds, front=lambda p: float('inf'), dt=0.05):
 
 
 def test_command_multi_stop_then_home(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     r = nav.handle({'type': 'command', 'text': 'take this to hod and then lab 3'}, (1.0, 1.0, 0.0))
     assert r['ok'] and r['interpretation']['targets'] == ['HOD office', 'Lab 3']
     x, y, yaw = run(nav, clk, (1.0, 1.0, 0.0), 200)
@@ -63,7 +63,7 @@ def test_command_multi_stop_then_home(tmp_path):
 
 
 def test_preview_shows_path_without_moving(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     nav.step((1.0, 1.0, 0.0), float('inf'), 0.05)
     r = nav.handle({'type': 'preview', 'name': 'hod'}, (1.0, 1.0, 0.0))
     assert r['ok'] and r['length'] > 5 and len(r['path']) > 5 and r['eta_s'] > 0
@@ -71,7 +71,7 @@ def test_preview_shows_path_without_moving(tmp_path):
 
 
 def test_unreachable_goal_fails_with_reason(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     nav.handle({'type': 'goto_pose', 'x': 2.0, 'y': 1.5, 'label': 'inside table'})
     run(nav, clk, (1.0, 1.0, 0.0), 10)
     h = nav.queue.history[0]
@@ -79,7 +79,7 @@ def test_unreachable_goal_fails_with_reason(tmp_path):
 
 
 def test_persistent_obstacle_gives_up_after_replans(tmp_path):
-    nav, clk = setup(tmp_path, max_replans=2)
+    nav, clk = make_setup(tmp_path, max_replans=2)
     nav.handle({'type': 'goto_place', 'name': 'Lab 3'})
     # something always 0.2 m in front of the robot
     run(nav, clk, (1.0, 1.0, 0.0), 60, front=lambda p: 0.2)
@@ -88,7 +88,7 @@ def test_persistent_obstacle_gives_up_after_replans(tmp_path):
 
 
 def test_urgent_preempts_and_estop_pauses(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     nav.handle({'type': 'goto_place', 'name': 'Lab 3', 'priority': 1})
     x, y, yaw = run(nav, clk, (1.0, 1.0, 0.0), 3)
     r = nav.handle({'type': 'command', 'text': 'urgent go to the store'}, (x, y, yaw))
@@ -107,7 +107,7 @@ def test_urgent_preempts_and_estop_pauses(tmp_path):
 
 
 def test_places_editing_via_api(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     nav.step((2.0, 3.0, 0.5), 9, 0.05)
     assert nav.handle({'type': 'add_place', 'name': 'Water cooler', 'here': True})['ok']
     p = nav.places.get('water cooler')
@@ -119,7 +119,7 @@ def test_places_editing_via_api(tmp_path):
 
 
 def test_hold_is_only_cleared_by_resume_and_bad_input_rejected(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     nav.set_estop(True)
     nav.set_estop(False)
     assert nav.handle({'type': 'goto_place', 'name': 'Lab 3'})['ok']          # queued...
@@ -132,7 +132,7 @@ def test_hold_is_only_cleared_by_resume_and_bad_input_rejected(tmp_path):
 
 
 def test_localization_needs_confirmation(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     nav.localized = False
     nav.handle({'type': 'goto_place', 'name': 'Store'})
     assert nav.step((1.0, 1.0, 0.0), 9, 0.05) == (0.0, 0.0) and 'Position OK' in nav.message
