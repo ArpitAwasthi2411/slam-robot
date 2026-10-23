@@ -92,6 +92,8 @@ browser at `http://<robot>:8080`.
 **Map by itself:** the robot explores and maps rooms on its own, slowly, for clean maps, then returns
 and saves the map: [docs/exploration.md](docs/exploration.md).
 **Robot in another lab:** phone-on-robot hotspot + Tailscale: [docs/remote_access.md](docs/remote_access.md).
+**Campus deployment:** logins with roles (admin / operator / staff), Docker image built and tested by CI,
+one-command updates with automatic rollback: [docs/deployment.md](docs/deployment.md).
 
 No robot? `python3 tools/dashboard_sim.py` runs the app against a simulated robot
 (`--explore` starts with an empty map to try Map by itself).
