@@ -1,0 +1,111 @@
+# CI/CD for the robot software:
+#   1. test     unit tests (fast, plain Python) on every push and pull request
+#   2. image    build the Docker image for the Pi (arm64) and laptops (amd64), run the tests INSIDE it,
+#               then push it to GitHub's registry: ghcr.io/arpitawasthi2411/slam-robot
+#               tags: latest (main), sha-<commit>, v1.2.3 (git tags) -> the Pi pulls one of these
+# Pull requests only test and build (nothing is pushed), so main always holds a working image.
+name: Robot image
+
+on:
+  push:
+    branches: [main]
+    paths: ['ros2_ws/**', 'Dockerfile', '.dockerignore', 'deploy/docker/**', '.github/workflows/robot-image.yml']
+    tags: ['v*']
+  pull_request:
+    paths: ['ros2_ws/**', 'Dockerfile', '.dockerignore', 'deploy/docker/**', '.github/workflows/robot-image.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: robot-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/slam-robot
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'           # the Python version of Ubuntu 22.04 / ROS 2 Humble
+      - run: pip install pytest pyserial numpy
+      - name: Unit tests
+        working-directory: ros2_ws/src/lidar_robot
+        run: python -m pytest -q
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write                       # push to ghcr.io with the built-in token
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version label
+        id: v
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT";
+          else echo "version=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: docker/setup-qemu-action@v3     # lets the x86 runner build the Pi's arm64 image
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Tests inside the real image (amd64, ROS installed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: test
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: "Smoke test - the image starts and the package is installed"
+        run: |
+          docker buildx build --load --platform linux/amd64 -t pathik:smoke --cache-from type=gha .
+          docker run --rm pathik:smoke ros2 pkg prefix lidar_robot
+          docker run --rm pathik:smoke ros2 pkg prefix sllidar_ros2
+          docker run --rm pathik:smoke python3 -c "import lidar_robot.auth, lidar_robot.navigator_core; print('imports ok')"
+          docker run --rm pathik:smoke users list
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=ref,event=tag
+
+      - name: Build for the Pi and laptops, push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/arm64,linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ steps.v.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### Robot image pushed"
+            echo "\`${IMAGE}:${{ steps.v.outputs.version }}\` (also \`latest\` on main)"
+            echo ""
+            echo "On the Pi: \`bash ~/pathik/pathik.sh update\`"
+          } >> "$GITHUB_STEP_SUMMARY"

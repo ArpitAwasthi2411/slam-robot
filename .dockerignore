@@ -1,0 +1,7 @@
+# Only what the image needs goes to the Docker build (faster builds, no secrets in images)
+**
+!ros2_ws/src/lidar_robot/**
+!deploy/docker/**
+ros2_ws/src/lidar_robot/**/__pycache__
+ros2_ws/src/lidar_robot/**/*.pyc
+ros2_ws/src/lidar_robot/.pytest_cache
