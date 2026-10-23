@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
-from test_navigator_core import setup, run  # noqa: E402
+from test_navigator_core import make_setup, run  # noqa: E402
 from test_planner_follower import planner  # noqa: E402
 from lidar_robot import drawn_path  # noqa: E402
 from lidar_robot.planner import path_length  # noqa: E402
@@ -54,7 +54,7 @@ def test_route_from_pose_joins_robot_to_the_path():
 
 
 def test_robot_follows_drawn_path_and_reports_errors(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     pts = zigzag(1.0, 3.0, 3.5, 3.0) + zigzag(3.5, 3.0, 6.0, 3.0)[1:] + [(6.5, 4.5)]
     r = nav.handle({'type': 'check_path', 'points': pts}, (1.0, 1.0, 0.0))
     assert r['ok'] and r['blocked'] == [] and 5 < r['length'] < 8
@@ -68,7 +68,7 @@ def test_robot_follows_drawn_path_and_reports_errors(tmp_path):
 
 
 def test_drawn_path_loop(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     loop = [(1.0, 0.6), (3.3, 0.6), (3.3, 4.5), (1.0, 4.5), (1.0, 0.6)]
     r = nav.handle({'type': 'follow_path', 'points': loop, 'repeat': 1}, (1.0, 0.6, 0.0))
     assert r['ok'], r
