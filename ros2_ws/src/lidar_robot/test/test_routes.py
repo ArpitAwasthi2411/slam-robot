@@ -5,11 +5,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
-from test_navigator_core import setup, run  # noqa: E402
+from test_navigator_core import make_setup, run  # noqa: E402
 
 
 def test_goal_with_heading_replaces_current_goal(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     nav.handle({'type': 'goto_pose', 'x': 6.0, 'y': 1.0}, (1.0, 1.0, 0.0))
     run(nav, clk, (1.0, 1.0, 0.0), 2)
     r = nav.handle({'type': 'goto_pose', 'x': 2.0, 'y': 4.5, 'yaw': math.pi / 2, 'replace': True}, (1.0, 1.0, 0.0))
@@ -21,7 +21,7 @@ def test_goal_with_heading_replaces_current_goal(tmp_path):
 
 
 def test_route_through_points_in_order(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     pts = [{'x': 2.0, 'y': 4.5}, {'x': 6.0, 'y': 1.0, 'yaw': 0.0}]
     r = nav.handle({'type': 'goto_poses', 'waypoints': pts}, (1.0, 1.0, 0.0))
     assert r['ok'] and r['mission']['stops'] == ['point 1', 'point 2']
@@ -33,7 +33,7 @@ def test_route_through_points_in_order(tmp_path):
 
 
 def test_route_repeats_then_stops(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     pts = [{'x': 2.0, 'y': 1.0}, {'x': 1.0, 'y': 3.0}]
     nav.handle({'type': 'goto_poses', 'waypoints': pts, 'repeat': 1}, (1.0, 1.0, 0.0))
     run(nav, clk, (1.0, 1.0, 0.0), 300)
@@ -43,7 +43,7 @@ def test_route_repeats_then_stops(tmp_path):
 
 
 def test_patrol_runs_until_canceled(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     pts = [{'x': 2.0, 'y': 1.0}, {'x': 1.0, 'y': 3.0}]
     nav.handle({'type': 'goto_poses', 'waypoints': pts, 'repeat': -1}, (1.0, 1.0, 0.0))
     pose = (1.0, 1.0, 0.0)
@@ -55,14 +55,14 @@ def test_patrol_runs_until_canceled(tmp_path):
 
 
 def test_route_input_checks(tmp_path):
-    nav, _ = setup(tmp_path)
+    nav, _ = make_setup(tmp_path)
     assert not nav.handle({'type': 'goto_poses', 'waypoints': []})['ok']
     assert not nav.handle({'type': 'goto_poses', 'waypoints': [{'x': 1, 'y': 1}], 'repeat': 500})['ok']
     assert not nav.handle({'type': 'goto_poses', 'waypoints': [{'x': 'nan', 'y': 1}]})['ok']
 
 
 def test_route_skips_unreachable_point(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     pts = [{'x': 20.0, 'y': 1.5}, {'x': 2.0, 'y': 4.5}]         # first point is off the map
     nav.handle({'type': 'goto_poses', 'waypoints': pts}, (1.0, 1.0, 0.0))
     x, y, _ = run(nav, clk, (1.0, 1.0, 0.0), 200)
@@ -72,7 +72,7 @@ def test_route_skips_unreachable_point(tmp_path):
 
 
 def test_short_position_loss_pauses_then_continues(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     nav.handle({'type': 'goto_pose', 'x': 6.0, 'y': 1.0}, (1.0, 1.0, 0.0))
     pose = run(nav, clk, (1.0, 1.0, 0.0), 3)
     for _ in range(int(5 / 0.05)):                     # 5 s without a position (ESP32 reset, SLAM hiccup)
@@ -85,7 +85,7 @@ def test_short_position_loss_pauses_then_continues(tmp_path):
 
 
 def test_long_position_loss_fails_the_mission(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     nav.handle({'type': 'goto_pose', 'x': 6.0, 'y': 1.0}, (1.0, 1.0, 0.0))
     run(nav, clk, (1.0, 1.0, 0.0), 2)
     for _ in range(int(31 / 0.05)):
@@ -95,7 +95,7 @@ def test_long_position_loss_fails_the_mission(tmp_path):
 
 
 def test_voice_style_command_plan_then_run(tmp_path):
-    nav, clk = setup(tmp_path)
+    nav, clk = make_setup(tmp_path)
     r = nav.handle({'type': 'command', 'text': 'take this to lab 3, wait 1 minute, then come back', 'dry_run': True},
                    (1.0, 1.0, 0.0))
     assert r['ok'] and nav.queue.active is None and not nav.queue.queue          # preview only
