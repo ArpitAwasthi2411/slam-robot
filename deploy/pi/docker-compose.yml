@@ -1,0 +1,46 @@
+# Pathik on the Raspberry Pi, as a container.
+#
+# Lives in ~/pathik on the Pi together with robot.env (copy robot.env.example).
+#   docker compose pull && docker compose up -d     update to the newest image and (re)start
+#   docker compose logs -f                          live logs (Ctrl+C to stop watching)
+#   bash ~/pathik/pathik.sh status|update|rollback  the same, with rollback (scripts/pathik.sh)
+#
+# Why each setting is here:
+#   network_mode host   ROS 2 (DDS) discovery and the app on port 8080 work exactly as without Docker
+#   /dev + cgroup rules USB serial ports (ESP32, LiDAR) may disappear and come back with a new number
+#                       (USB reconnect): a fixed `devices:` list would lose them, this way they reappear
+#   maps volume         maps, places, rooms, user accounts, tuning and the mission log survive updates
+#   logging limits      the SD card doesn't fill up with logs
+name: pathik
+services:
+  robot:
+    image: ghcr.io/arpitawasthi2411/slam-robot:${PATHIK_TAG:-latest}
+    container_name: pathik
+    restart: unless-stopped                 # starts at boot, restarts after a crash
+    network_mode: host
+    ipc: host
+    pid: host
+    env_file:
+      - ./robot.env
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    volumes:
+      - ${PATHIK_MAPS:-/home/arpit/maps}:/root/maps
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+    device_cgroup_rules:
+      - 'c 188:* rmw'                       # /dev/ttyUSB*  (CP210x / CH340: ESP32, RPLiDAR)
+      - 'c 166:* rmw'                       # /dev/ttyACM*  (ESP32-S3 native USB)
+      - 'c 116:* rmw'                       # /dev/snd/*    (speaker for the robot's voice)
+      - 'c 81:* rmw'                        # /dev/video*   (camera, later)
+      - 'c 226:* rmw'                       # /dev/dri/*
+    group_add:
+      - dialout
+      - audio
+    stop_signal: SIGINT                     # lets ROS stop the motors cleanly
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
