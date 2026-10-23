@@ -4,7 +4,7 @@
 # ghcr.io/arpitawasthi2411/slam-robot. On the Pi: deploy/pi/docker-compose.yml (see docs/deployment.md).
 #
 #   docker build -t pathik .                       # local build
-#   docker build --target test -t pathik:test .    # the same image + the unit tests run inside it
+#   docker run --rm pathik bash -c 'cd /opt/pathik_ws/src/lidar_robot && python3 -m pytest -q'   # tests inside it
 #
 # Layers are ordered from "rarely changes" to "changes every commit", so a code change only
 # rebuilds the last few layers (seconds), not ROS or the LiDAR driver.
@@ -40,10 +40,6 @@ COPY ros2_ws/src/lidar_robot /opt/pathik_ws/src/lidar_robot
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh && . install/setup.sh \
     && colcon build --packages-select lidar_robot \
     && rm -rf build log
-
-# ---------------------------------------------------------------- test: unit tests inside the real image
-FROM build AS test
-RUN cd /opt/pathik_ws/src/lidar_robot && python3 -m pytest -q -p no:cacheprovider
 
 # ---------------------------------------------------------------- runtime (default target)
 FROM build AS runtime
