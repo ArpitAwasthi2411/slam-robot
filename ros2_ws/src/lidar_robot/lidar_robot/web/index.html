@@ -271,6 +271,21 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 const ACTIVE_NAV = ['PLANNING', 'DRIVING', 'DWELL', 'WAITING'];
 
 // ---------------------------------------------------------------- api
+// Login: the classic page shares the Pathik app's session (same robot address). Log in at /app/ first.
+(() => {
+  const f = window.fetch.bind(window);
+  window.fetch = async (url, opt = {}) => {
+    let tok = '';
+    try { tok = (JSON.parse(localStorage.getItem('pathik.session') || '{}').token) || ''; } catch (e) {}
+    opt.headers = Object.assign({}, opt.headers || {}, tok ? { Authorization: 'Bearer ' + tok } : {});
+    const r = await f(url, opt);
+    if (r.status === 401 && !window.__loginAsked) {
+      window.__loginAsked = true;
+      if (confirm('Please log in first. Open the Pathik app login?')) location.href = '/app/';
+    }
+    return r;
+  };
+})();
 async function post(path, body, quiet) {
   try {
     const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });

@@ -29,25 +29,73 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 function secs(s) { if (!fin(s)) return '–'; return s < 60 ? `${Math.round(s)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`; }
 function clock(epoch) { const d = new Date(epoch * 1000); return d.toTimeString().slice(0, 5); }
 
+// ------------------------------------------------------------------ theme (light / dark / follow the phone)
+const PAL = {};
+function readPalette() {
+  const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
+  Object.assign(PAL, {
+    bg: v('--map-bg'), free: v('--map-free'), wall: v('--map-wall'), mid: v('--map-mid'), grid: v('--map-grid'),
+    labelBg: v('--map-label-bg'), label: v('--map-label'), sub: v('--map-sub'),
+    teal: v('--teal'), orange: v('--orange'), magenta: v('--magenta'), good: v('--good'), dim2: v('--dim-2'),
+    joyBg: v('--joy-bg'), knob: v('--joy-knob'), chartGrid: v('--chart-grid'),
+  });
+}
+const rgbOf = hex => { const h = hex.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
+const A = (hex, a) => { const [r, g, b] = rgbOf(hex); return `rgba(${r},${g},${b},${a})`; };
+const themeMQ = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
+function applyTheme(pref) {
+  pref = pref || store.get('theme', 'system');
+  store.set('theme', pref);
+  const dark = pref === 'dark' || (pref === 'system' && !(themeMQ && themeMQ.matches));
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  const meta = document.querySelector('meta[name=theme-color]');
+  if (meta) meta.setAttribute('content', dark ? '#0d0d10' : '#f4f1eb');
+  try { if (native && native.setDarkBars) native.setDarkBars(dark); } catch (e) { /* older APK */ }
+  readPalette();
+  $$('[data-theme-pick]').forEach(b => { const on = b.dataset.themePick === pref; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+  if (S.lastMap) buildMap(S.lastMap);
+  if (typeof drawJoy === 'function') drawJoy();
+  mapDirty = true;
+  if (typeof drawCharts === 'function') drawCharts();
+}
+if (themeMQ && themeMQ.addEventListener) themeMQ.addEventListener('change', () => { if (store.get('theme', 'system') === 'system') applyTheme('system'); });
+
 // ------------------------------------------------------------------ API
 let BASE = '';
 const DEMO = 'demo:';
+// login session per robot: {token, user}. 'session' mirrors the current one (the classic page reads it).
+const sessions = {
+  get(base) { return (store.get('sessions', {}) || {})[base] || null; },
+  set(base, v) {
+    const all = store.get('sessions', {}) || {};
+    if (v) all[base] = v; else delete all[base];
+    store.set('sessions', all);
+    store.set('session', v ? { base, ...v } : null);
+  },
+};
+let TOKEN = '';
+function httpError(msg, code) { const e = new Error(msg); e.code = code; return e; }
 async function req(path, { method = 'GET', body, timeout = 4000 } = {}) {
   if (BASE === DEMO) {                       // built-in simulated robot (demo.js): no network at all
     await sleep(15);
-    return window.PathikDemo.handle(path, method, body === undefined ? undefined : JSON.parse(JSON.stringify(body)));
+    try {
+      return window.PathikDemo.handle(path, method, body === undefined ? undefined : JSON.parse(JSON.stringify(body)), TOKEN);
+    } catch (e) { if (e.code === 401 && TOKEN) onLoggedOut('Please log in again.'); throw e; }
   }
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeout);
   try {
-    // text/plain avoids a CORS preflight; the robot parses the body as JSON regardless
+    // text/plain avoids a CORS preflight for the body; the token header needs one (cached 2 h by the robot)
+    const headers = {};
+    if (body !== undefined) headers['Content-Type'] = 'text/plain';
+    if (TOKEN) headers.Authorization = 'Bearer ' + TOKEN;
     const r = await fetch(BASE + path, {
       method, signal: ctl.signal, cache: 'no-store',
-      body: body === undefined ? undefined : JSON.stringify(body),
-      headers: body === undefined ? undefined : { 'Content-Type': 'text/plain' },
+      body: body === undefined ? undefined : JSON.stringify(body), headers,
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `robot answered ${r.status}`);
+    if (r.status === 401 && j.login && TOKEN) onLoggedOut('Your session ended. Please log in again.');
+    if (!r.ok) throw httpError(j.error || `robot answered ${r.status}`, r.status);
     return j;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('robot did not answer in time');
@@ -157,8 +205,11 @@ function normalizeAddr(s) {
 const S = {
   st: null, gen: 0, fails: 0, lastOk: 0, robot: null,
   map: null, mapVer: -1, mapImg: null,
-  tab: 'drive', lab: 'health',
+  tab: 'drive', lab: 'health', user: null, lastMap: null,
 };
+const ROLE_RANK = { staff: 0, operator: 1, admin: 2 };
+const can = need => !!S.user && (ROLE_RANK[S.user.role] ?? -1) >= ROLE_RANK[need];
+const initials = n => String(n || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || '?';
 
 async function connect(robot) {
   BASE = robot.base;
@@ -167,9 +218,32 @@ async function connect(robot) {
     const saved = store.get('robots', []).filter(r => r.base !== robot.base);
     store.set('robots', [{ base: robot.base, robot: robot.robot }, ...saved].slice(0, 5));
     store.set('last', robot.base);
-  } else toast('Demo robot: a simulated Pathik on a sample floor. Try Go → “take me to the 3D printer”.');
+  }
   $('#t-host').textContent = robot.base === DEMO ? 'Pathik demo' : robot.host && robot.host !== 'simulator' ? robot.host : (robot.robot || 'robot');
-  $('#connect').hidden = true; $('#main').hidden = false;
+  if (!robot.auth) {                         // older robot software: no accounts, everyone can do everything
+    TOKEN = ''; return enterMain({ username: '', name: 'Operator', role: 'admin', legacy: true });
+  }
+  const saved = sessions.get(robot.base);
+  if (saved && saved.token) {
+    TOKEN = saved.token;
+    try { const me = await get('/api/auth/me', { timeout: 3000 }); sessions.set(robot.base, { token: TOKEN, user: me.user }); return enterMain(me.user, me.pending); }
+    catch (e) { if (e.code !== 401) { /* robot busy/unreachable: still try with the saved session */ return enterMain(saved.user); } }
+  }
+  TOKEN = '';
+  showAuth(robot.setup_needed ? 'setup' : 'login');
+}
+function enterMain(user, pending = 0) {
+  S.user = user;
+  document.body.classList.remove('role-staff', 'role-operator', 'role-admin');
+  document.body.classList.add('role-' + user.role);
+  const staff = user.role === 'staff';
+  $('#tab-go-t').textContent = staff ? 'Home' : 'Go';
+  document.querySelector('.tabs').style.setProperty('--ntabs', staff ? 3 : 5);
+  S.tab = staff ? 'go' : (S.tab && S.tab !== 'me' ? S.tab : 'drive');
+  renderMe(pending);
+  $('#connect').hidden = true; $('#auth').hidden = true; $('#main').hidden = false;
+  if (BASE === DEMO) toast(`Demo robot as ${user.role}. ${staff ? 'Try Home → “take me to the 3D printer”.' : 'Try Go → “take me to the 3D printer”.'}`);
+  else if (!user.legacy) toast(`Welcome, ${user.name || user.username}`);
   S.gen++; S.fails = 0; S.mapVer = -1; S.mapImg = null; S.st = null;
   const g = S.gen;
   pollState(g); pollMap(g);
@@ -185,9 +259,66 @@ function disconnect() {
   telemetry(false);
   renderFound(store.get('robots', []));
   $('#c-progress').textContent = '';
-  $('#main').hidden = true; $('#connect').hidden = false;
+  $('#main').hidden = true; $('#auth').hidden = true; $('#connect').hidden = false;
   if (native && native.keepAwake) native.keepAwake(false);
 }
+function onLoggedOut(msg) {
+  if (!S.user && !TOKEN) return;
+  sessions.set(BASE, null); TOKEN = ''; S.user = null; S.gen++;
+  telemetry(false);
+  showAuth('login', msg);
+}
+
+// ------------------------------------------------------------------ login / request access / first admin
+const auth = { mode: 'login' };
+function showAuth(mode, msg) {
+  auth.mode = mode;
+  const r = S.robot || {};
+  $('#au-robot').textContent = BASE === DEMO ? 'Pathik demo' : (r.robot || r.host || 'robot');
+  $('#au-net').textContent = netType(BASE);
+  const T = {
+    login: ['Welcome back', 'Log in to use Pathik.', 'Log in', 'New here?', 'Request access'],
+    signup: ['Request access', 'Pick a username and password. An admin approves you, then you can log in.', 'Send request', 'Have an account?', 'Log in'],
+    setup: ['Set up this robot', 'Create the first account. It becomes the admin.', 'Create admin account', '', ''],
+  }[mode === 'pending' ? 'login' : mode];
+  $('#au-title').textContent = T[0]; $('#au-sub').textContent = T[1]; $('#au-go').textContent = T[2];
+  $('#au-switch-t').textContent = T[3]; $('#au-switch-b').textContent = T[4];
+  $('#au-switch').hidden = mode === 'setup' || mode === 'pending';
+  $('#au-setup').hidden = mode !== 'setup';
+  $('#au-name-l').hidden = mode === 'login';
+  $('#au-pass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('#au-form').hidden = mode === 'pending'; $('#au-pending').hidden = mode !== 'pending';
+  $('#au-msg').textContent = msg || ''; $('#au-msg').className = 'a-msg' + (msg ? ' err' : '');
+  const demo = BASE === DEMO;
+  $('#au-demo').hidden = !demo || mode !== 'login';
+  if (demo) {
+    $('#au-demo-row').innerHTML = window.PathikDemo.accounts.map(([u, p, label]) =>
+      `<button type="button" data-u="${u}" data-p="${p}"><b>${label}</b><span>${u} / ${p}</span></button>`).join('');
+    $$('#au-demo-row button').forEach(b => b.onclick = () => { $('#au-user').value = b.dataset.u; $('#au-pass').value = b.dataset.p; doAuth(); });
+  }
+  $('#connect').hidden = true; $('#main').hidden = true; $('#auth').hidden = false;
+  setTimeout(() => { const f = mode === 'login' ? $('#au-user') : $('#au-name'); if (f && !f.value) f.focus(); }, 80);
+}
+async function doAuth() {
+  const msg = $('#au-msg'), btn = $('#au-go');
+  const username = $('#au-user').value.trim().toLowerCase(), password = $('#au-pass').value, name = $('#au-name').value.trim();
+  if (!username || !password) { msg.textContent = 'Enter a username and password.'; msg.className = 'a-msg err'; return; }
+  btn.disabled = true; msg.className = 'a-msg'; msg.textContent = auth.mode === 'login' ? 'Logging in…' : 'Creating the account…';
+  try {
+    const r = await post(auth.mode === 'login' ? '/api/auth/login' : '/api/auth/signup', { username, password, name }, { timeout: 8000 });
+    if (r.token) {
+      TOKEN = r.token; sessions.set(BASE, { token: r.token, user: r.user });
+      $('#au-pass').value = ''; haptic(25);
+      enterMain(r.user);
+    } else { showAuth('pending'); }
+  } catch (e) { msg.textContent = e.message; msg.className = 'a-msg err'; haptic(40); }
+  btn.disabled = false;
+}
+$('#au-form').onsubmit = e => { e.preventDefault(); doAuth(); };
+$('#au-switch-b').onclick = () => showAuth(auth.mode === 'login' ? 'signup' : 'login');
+$('#au-pending-ok').onclick = () => showAuth('login');
+$('#au-back').onclick = disconnect;
+$('#au-show').onclick = () => { const i = $('#au-pass'), sh = i.type === 'password'; i.type = sh ? 'text' : 'password'; $('#au-show').textContent = sh ? 'Hide' : 'Show'; };
 
 async function pollState(g) {
   while (g === S.gen) {
@@ -266,6 +397,7 @@ function onState(st) {
   const od = st.odom || {};
   $('#d-v').textContent = fmt(od.v); $('#d-w').textContent = fmt(od.w);
 
+  renderWhere(st);
   renderExplore(st);
   renderMapStats(st);
   if (S.tab === 'go') renderGo(st);
@@ -324,10 +456,12 @@ function onLinkLost() {
 
 // ------------------------------------------------------------------ tabs & sheet
 function setTab(tab) {
+  if (!can('operator') && (tab === 'drive' || tab === 'lab')) tab = 'go';
   S.tab = tab;
   $$('.tab').forEach(t => { const on = t.dataset.tab === tab; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
-  ['go', 'map', 'lab'].forEach(n => { $('#p-' + n).hidden = n !== tab; });
-  ['drive', 'go', 'map', 'lab'].forEach(n => document.body.classList.toggle('tab-' + n, n === tab));
+  ['go', 'map', 'lab', 'me'].forEach(n => { $('#p-' + n).hidden = n !== tab; });
+  ['drive', 'go', 'map', 'lab', 'me'].forEach(n => document.body.classList.toggle('tab-' + n, n === tab));
+  if (tab === 'me') { renderMe(); if (can('admin')) loadPeople(); }
   const sheet = $('#sheet');
   sheet.scrollTop = 0;
   if (tab !== 'drive' && T.tool === 'draw') setTool('draw');
@@ -356,7 +490,8 @@ function buildMap(m) {
   const raw = atob(m.data), w = m.width, h = m.height;
   const off = document.createElement('canvas'); off.width = w; off.height = h;
   const g = off.getContext('2d'), img = g.createImageData(w, h), d = img.data;
-  const FREE = [0x1f, 0x1f, 0x26], WALL = [0xf1, 0xe7, 0xd3], MID = [0x4a, 0x47, 0x52];
+  S.lastMap = m;
+  const FREE = rgbOf(PAL.free), WALL = rgbOf(PAL.wall), MID = rgbOf(PAL.mid);
   for (let y = 0; y < h; y++) {
     const row = (h - 1 - y) * w;            // map row 0 is the bottom (smallest y)
     for (let x = 0; x < w; x++) {
@@ -383,7 +518,7 @@ function drawMap() {
     view.x = pose.x; view.y = pose.y - covered / view.scale;
   }
   cx.setTransform(1, 0, 0, 1, 0, 0);
-  cx.fillStyle = '#0d0d10'; cx.fillRect(0, 0, W, H);
+  cx.fillStyle = PAL.bg; cx.fillRect(0, 0, W, H);
   if (S.mapImg) {
     const m = S.map, [sx, sy] = W2S(m.origin[0], m.origin[1] + m.height * m.resolution);
     cx.imageSmoothingEnabled = false;
@@ -391,7 +526,7 @@ function drawMap() {
   }
   // 1 m grid (scale reference)
   if (k > 18 * DPR) {
-    cx.strokeStyle = 'rgba(255,255,255,0.035)'; cx.lineWidth = 1;
+    cx.strokeStyle = PAL.grid; cx.lineWidth = 1;
     const [x0, y1] = S2W(0, 0), [x1, y0] = S2W(W / DPR, H / DPR);
     cx.beginPath();
     for (let gx = Math.floor(x0); gx <= x1; gx++) { const [px] = W2S(gx, 0); cx.moveTo(px, 0); cx.lineTo(px, H); }
@@ -409,19 +544,19 @@ function drawMap() {
     pts.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
     cx.stroke(); cx.restore();
   };
-  if (navs.preview && navs.preview.path && navs.state !== 'DRIVING') line(navs.preview.path, 'rgba(45,226,200,.8)', [7, 6], 3);
-  if (navs.path && navs.path.length) line(pose ? [[pose.x, pose.y], ...navs.path] : navs.path, '#2de2c8', [], 4, true);
+  if (navs.preview && navs.preview.path && navs.state !== 'DRIVING') line(navs.preview.path, A(PAL.teal, 0.8), [7, 6], 3);
+  if (navs.path && navs.path.length) line(pose ? [[pose.x, pose.y], ...navs.path] : navs.path, PAL.teal, [], 4, true);
   // exploration: open map edges (frontiers) and the area it is heading to
   const ex = navs.explore;
   if (ex && ex.active) {
     for (const f of ex.frontiers || []) {
       const [x, y] = W2S(f[0], f[1]), r = Math.min(14, 3 + Math.sqrt(f[2]) * 0.9) * DPR;
-      cx.fillStyle = 'rgba(229,72,127,.22)'; cx.beginPath(); cx.arc(x, y, r, 0, 7); cx.fill();
-      cx.fillStyle = '#e8407c'; cx.beginPath(); cx.arc(x, y, 2.4 * DPR, 0, 7); cx.fill();
+      cx.fillStyle = A(PAL.magenta, 0.22); cx.beginPath(); cx.arc(x, y, r, 0, 7); cx.fill();
+      cx.fillStyle = PAL.magenta; cx.beginPath(); cx.arc(x, y, 2.4 * DPR, 0, 7); cx.fill();
     }
     if (ex.target) {
       const [x, y] = W2S(ex.target[0], ex.target[1]);
-      cx.save(); cx.strokeStyle = '#e8407c'; cx.lineWidth = 2.5 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
+      cx.save(); cx.strokeStyle = PAL.magenta; cx.lineWidth = 2.5 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
       cx.beginPath(); cx.arc(x, y, 13 * DPR, 0, 7); cx.stroke(); cx.restore();
     }
   }
@@ -432,18 +567,18 @@ function drawMap() {
     const P = r.polygon || []; if (P.length < 3) continue;
     const here = navs.room === r.name;
     cx.beginPath(); P.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); }); cx.closePath();
-    cx.fillStyle = here ? 'rgba(45,226,200,.07)' : 'rgba(255,193,90,.045)'; cx.fill();
+    cx.fillStyle = here ? A(PAL.teal, 0.08) : A(PAL.orange, 0.05); cx.fill();
     cx.save(); cx.setLineDash([4 * DPR, 5 * DPR]); cx.lineWidth = 1.2 * DPR;
-    cx.strokeStyle = here ? 'rgba(45,226,200,.45)' : 'rgba(255,193,90,.28)'; cx.stroke(); cx.restore();
+    cx.strokeStyle = here ? A(PAL.teal, 0.5) : A(PAL.orange, 0.35); cx.stroke(); cx.restore();
     if (k > 14 * DPR) {
       // label in the room's top-left corner, so it never sits on a place pin
       const minx = Math.min(...P.map(p => p[0])), maxy = Math.max(...P.map(p => p[1]));
       const [x, y] = W2S(minx, maxy);
       cx.textAlign = 'left';
-      cx.font = `700 ${11 * DPR}px Bricolage, sans-serif`; cx.fillStyle = here ? 'rgba(45,226,200,.8)' : 'rgba(255,193,90,.6)';
+      cx.font = `700 ${11 * DPR}px Bricolage, sans-serif`; cx.fillStyle = here ? A(PAL.teal, 0.85) : A(PAL.orange, 0.75);
       cx.fillText(r.name.toUpperCase(), x + 7 * DPR, y + 16 * DPR);
       if (k > 30 * DPR && r.contents && r.contents.length) {
-        cx.font = `500 ${10.5 * DPR}px Instrument, sans-serif`; cx.fillStyle = 'rgba(242,237,230,.42)';
+        cx.font = `500 ${10.5 * DPR}px Instrument, sans-serif`; cx.fillStyle = PAL.sub;
         const t = r.contents.slice(0, 3).join(' · ') + (r.contents.length > 3 ? ' …' : '');
         cx.fillText(t, x + 7 * DPR, y + 30 * DPR);
       }
@@ -455,15 +590,15 @@ function drawMap() {
   if (dock) {
     const dc = Math.cos(dock.yaw), ds = Math.sin(dock.yaw), bx = -0.40;
     const D = (u, v) => W2S(dock.x + dc * u - ds * v, dock.y + ds * u + dc * v);
-    cx.save(); cx.strokeStyle = '#47e3a4'; cx.lineWidth = 3 * DPR; cx.lineCap = 'round'; cx.shadowColor = '#47e3a4'; cx.shadowBlur = 10 * DPR;
+    cx.save(); cx.strokeStyle = PAL.good; cx.lineWidth = 3 * DPR; cx.lineCap = 'round'; cx.shadowColor = PAL.good; cx.shadowBlur = 10 * DPR;
     cx.beginPath(); [[bx + 0.12, 0.28], [bx, 0.28], [bx, -0.28], [bx + 0.12, -0.28]].forEach((p, i) => { const [x, y] = D(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
     cx.stroke(); cx.restore();
-    const [lx, ly] = D(bx - 0.12, 0); cx.font = `700 ${11 * DPR}px Instrument, sans-serif`; cx.fillStyle = '#47e3a4'; cx.fillText('⚡', lx, ly + 4 * DPR);
+    const [lx, ly] = D(bx - 0.12, 0); cx.font = `700 ${11 * DPR}px Instrument, sans-serif`; cx.fillStyle = PAL.good; cx.fillText('⚡', lx, ly + 4 * DPR);
   }
   // spots where the route barely fits the body (it slows down there)
   for (const t of navs.tight || []) {
     const [x, y] = W2S(t[0], t[1]);
-    cx.strokeStyle = 'rgba(255,159,46,.85)'; cx.lineWidth = 2 * DPR; cx.beginPath(); cx.arc(x, y, 6 * DPR, 0, 7); cx.stroke();
+    cx.strokeStyle = A(PAL.orange, 0.85); cx.lineWidth = 2 * DPR; cx.beginPath(); cx.arc(x, y, 6 * DPR, 0, 7); cx.stroke();
   }
   // places
   const pl = (st.places && st.places.places) || [];
@@ -471,33 +606,33 @@ function drawMap() {
   const diamond = (x, y, r, fill) => { cx.beginPath(); cx.moveTo(x, y - r); cx.lineTo(x + r, y); cx.lineTo(x, y + r); cx.lineTo(x - r, y); cx.closePath(); cx.fillStyle = fill; cx.fill(); };
   for (const p of pl) {
     const [x, y] = W2S(p.x, p.y);
-    diamond(x, y, 7 * DPR, '#2de2c8'); diamond(x, y, 3 * DPR, '#0d0d10');
+    diamond(x, y, 7 * DPR, PAL.teal); diamond(x, y, 3 * DPR, PAL.bg);
     if (k > 22 * DPR) {
       const w = cx.measureText(p.name).width + 12 * DPR;
-      cx.fillStyle = 'rgba(20,20,25,.8)'; cx.fillRect(x - w / 2, y - 26 * DPR, w, 17 * DPR);
-      cx.fillStyle = '#f2ede6'; cx.fillText(p.name, x, y - 13 * DPR);
+      cx.fillStyle = PAL.labelBg; cx.fillRect(x - w / 2, y - 26 * DPR, w, 17 * DPR);
+      cx.fillStyle = PAL.label; cx.fillText(p.name, x, y - 13 * DPR);
     }
   }
   const home = st.places && st.places.home;
-  if (home) { const [x, y] = W2S(home.x, home.y); diamond(x, y, 8 * DPR, '#ff9f2e'); diamond(x, y, 3.5 * DPR, '#0d0d10'); }
+  if (home) { const [x, y] = W2S(home.x, home.y); diamond(x, y, 8 * DPR, PAL.orange); diamond(x, y, 3.5 * DPR, PAL.bg); }
   if (navs.goal) {
     const [x, y] = W2S(navs.goal.x, navs.goal.y);
-    cx.save(); cx.strokeStyle = '#2de2c8'; cx.shadowColor = '#2de2c8'; cx.shadowBlur = 12 * DPR;
+    cx.save(); cx.strokeStyle = PAL.teal; cx.shadowColor = PAL.teal; cx.shadowBlur = 12 * DPR;
     cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(x, y, 11 * DPR, 0, 7); cx.stroke(); cx.restore();
   }
   if (S.pick) {
     const [x, y] = W2S(S.pick[0], S.pick[1]);
-    cx.strokeStyle = '#ff9f2e'; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(x, y, 10 * DPR, 0, 7); cx.stroke();
+    cx.strokeStyle = PAL.orange; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(x, y, 10 * DPR, 0, 7); cx.stroke();
   }
   // goal heading arrow (where the robot will face)
-  if (navs.goal && fin(navs.goal.yaw)) drawArrow(navs.goal.x, navs.goal.y, navs.goal.yaw, Math.max(0.35, 24 / view.scale), '#2de2c8', 3);
+  if (navs.goal && fin(navs.goal.yaw)) drawArrow(navs.goal.x, navs.goal.y, navs.goal.yaw, Math.max(0.35, 24 / view.scale), PAL.teal, 3);
   drawTools();
   if (!pose) return;
   const c = Math.cos(pose.yaw), s = Math.sin(pose.yaw);
   const R = (bx, by) => W2S(pose.x + c * bx - s * by, pose.y + s * bx + c * by);
   // LiDAR returns
   const pts = (st.scan && st.scan.points) || [];
-  cx.fillStyle = '#ff9f2e';
+  cx.fillStyle = PAL.orange;
   const ps = Math.max(2, 2.2 * DPR);
   for (const p of pts) { const [x, y] = R(p[0], p[1]); cx.fillRect(x - ps / 2, y - ps / 2, ps, ps); }
   // ultrasonic cones
@@ -517,12 +652,12 @@ function drawMap() {
   const [fF, fR, fW] = navs.footprint || [0.07, 0.37, 0.21];
   const body = [[fF, fW], [fF, -fW], [-fR, -fW], [-fR, fW]].map(p => R(p[0], p[1]));
   cx.beginPath(); body.forEach((p, i) => i ? cx.lineTo(p[0], p[1]) : cx.moveTo(p[0], p[1])); cx.closePath();
-  cx.save(); cx.shadowColor = '#e8407c'; cx.shadowBlur = 16 * DPR;
-  cx.fillStyle = 'rgba(232,64,124,.92)'; cx.fill(); cx.restore();
-  cx.lineWidth = 2 * DPR; cx.strokeStyle = '#f2ede6'; cx.stroke();
+  cx.save(); cx.shadowColor = PAL.magenta; cx.shadowBlur = 16 * DPR;
+  cx.fillStyle = A(PAL.magenta, 0.92); cx.fill(); cx.restore();
+  cx.lineWidth = 2 * DPR; cx.strokeStyle = '#ffffff'; cx.stroke();
   const arrow = [[0.17, 0], [0.0, 0.1], [0.03, 0], [0.0, -0.1]].map(p => R(p[0], p[1]));
   cx.beginPath(); arrow.forEach((p, i) => i ? cx.lineTo(p[0], p[1]) : cx.moveTo(p[0], p[1])); cx.closePath();
-  cx.fillStyle = '#f2ede6'; cx.fill();
+  cx.fillStyle = '#ffffff'; cx.fill();
 }
 (function frame() { if (mapDirty && !$('#main').hidden) { mapDirty = false; drawMap(); } requestAnimationFrame(frame); })();
 
@@ -539,7 +674,7 @@ cv.addEventListener('pointerdown', e => {
     T.drag = { sx: e.offsetX, sy: e.offsetY, a: S2W(e.offsetX, e.offsetY), b: S2W(e.offsetX, e.offsetY), px: 0,
       pts: [S2W(e.offsetX, e.offsetY)], lx: e.offsetX, ly: e.offsetY };
     mapDirty = true;
-  } else if (ptrs.size === 1) {
+  } else if (ptrs.size === 1 && can('operator')) {
     const sx = e.offsetX, sy = e.offsetY;
     press = { sx, sy, t: setTimeout(() => { press = null; openAction(S2W(sx, sy)); }, 520) };
   } else { if (press) { clearTimeout(press.t); press = null; } T.drag = null; }
@@ -738,9 +873,9 @@ function drawTools() {
     cx.stroke(); cx.restore();
     cx.font = `700 ${12 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center'; cx.textBaseline = 'middle';
     T.route.forEach((p, i) => {
-      if (p.yaw != null) drawArrow(p.x, p.y, p.yaw, Math.max(0.35, 26 / view.scale), '#ff9f2e', 2.5);
+      if (p.yaw != null) drawArrow(p.x, p.y, p.yaw, Math.max(0.35, 26 / view.scale), PAL.orange, 2.5);
       const [x, y] = W2S(p.x, p.y);
-      cx.fillStyle = '#ff9f2e'; cx.beginPath(); cx.arc(x, y, 11 * DPR, 0, 7); cx.fill();
+      cx.fillStyle = PAL.orange; cx.beginPath(); cx.arc(x, y, 11 * DPR, 0, 7); cx.fill();
       cx.fillStyle = '#2a1a10'; cx.fillText(String(i + 1), x, y + 0.5 * DPR);
     });
     cx.textBaseline = 'alphabetic';
@@ -752,9 +887,9 @@ function drawTools() {
     cx.lineCap = cx.lineJoin = 'round'; if (dash) cx.setLineDash(dash.map(v => v * DPR));
     cx.beginPath(); pts.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); }); cx.stroke(); cx.restore();
   };
-  if (T.tool === 'draw' && T.drag && T.drag.pts) glowLine(T.drag.pts, '#2de2c8', 4);
+  if (T.tool === 'draw' && T.drag && T.drag.pts) glowLine(T.drag.pts, PAL.teal, 4);
   if (T.draw && T.draw.path) {
-    glowLine(T.draw.path, '#2de2c8', 5);
+    glowLine(T.draw.path, PAL.teal, 5);
     if (T.draw.blocked.length) {
       let acc = 0; const P = T.draw.path, red = [];
       for (let i = 1; i < P.length; i++) {
@@ -764,7 +899,7 @@ function drawTools() {
       red.forEach(seg => glowLine(seg, '#ef3b2d', 6));
     }
     const P = T.draw.path, [ex, ey] = W2S(P[P.length - 1][0], P[P.length - 1][1]);
-    cx.fillStyle = '#e8407c'; cx.beginPath(); cx.arc(ex, ey, 7 * DPR, 0, 7); cx.fill();
+    cx.fillStyle = PAL.magenta; cx.beginPath(); cx.arc(ex, ey, 7 * DPR, 0, 7); cx.fill();
   }
   // the drag in progress
   const d = T.drag;
@@ -773,26 +908,26 @@ function drawTools() {
   if (T.tool === 'measure') {
     if (d.px < 3) return;
     const [bx, by] = W2S(d.b[0], d.b[1]);
-    cx.save(); cx.strokeStyle = '#f2ede6'; cx.lineWidth = 2 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
+    cx.save(); cx.strokeStyle = PAL.label; cx.lineWidth = 2 * DPR; cx.setLineDash([5 * DPR, 4 * DPR]);
     cx.beginPath(); cx.moveTo(ax, ay); cx.lineTo(bx, by); cx.stroke(); cx.restore();
-    [[ax, ay], [bx, by]].forEach(([x, y]) => { cx.fillStyle = '#f2ede6'; cx.beginPath(); cx.arc(x, y, 4 * DPR, 0, 7); cx.fill(); });
+    [[ax, ay], [bx, by]].forEach(([x, y]) => { cx.fillStyle = PAL.label; cx.beginPath(); cx.arc(x, y, 4 * DPR, 0, 7); cx.fill(); });
     const m = Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]);
     cx.font = `700 ${13 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center';
     const tx = (ax + bx) / 2, ty = (ay + by) / 2 - 10 * DPR, label = `${m.toFixed(2)} m`, w = cx.measureText(label).width + 12 * DPR;
-    cx.fillStyle = 'rgba(34,22,40,.9)'; cx.fillRect(tx - w / 2, ty - 14 * DPR, w, 20 * DPR);
-    cx.fillStyle = '#f2ede6'; cx.fillText(label, tx, ty);
+    cx.fillStyle = PAL.labelBg; cx.fillRect(tx - w / 2, ty - 14 * DPR, w, 20 * DPR);
+    cx.fillStyle = PAL.label; cx.fillText(label, tx, ty);
     return;
   }
   if (T.tool === 'room') {
     if (d.px < 3) return;
     const [bx, by] = W2S(d.b[0], d.b[1]);
-    cx.save(); cx.strokeStyle = '#ffc15a'; cx.fillStyle = 'rgba(255,193,90,.10)'; cx.lineWidth = 2 * DPR; cx.setLineDash([6 * DPR, 4 * DPR]);
+    cx.save(); cx.strokeStyle = PAL.orange; cx.fillStyle = A(PAL.orange, 0.1); cx.lineWidth = 2 * DPR; cx.setLineDash([6 * DPR, 4 * DPR]);
     cx.beginPath(); cx.rect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)); cx.fill(); cx.stroke(); cx.restore();
-    cx.font = `700 ${12 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center'; cx.fillStyle = '#ffc15a';
+    cx.font = `700 ${12 * DPR}px Instrument, sans-serif`; cx.textAlign = 'center'; cx.fillStyle = PAL.orange;
     cx.fillText(`${fmt(Math.abs(d.b[0] - d.a[0]), 1)} × ${fmt(Math.abs(d.b[1] - d.a[1]), 1)} m`, (ax + bx) / 2, (ay + by) / 2);
     return;
   }
-  const color = T.tool === 'goal' ? '#2de2c8' : T.tool === 'locate' ? '#e8407c' : '#ff9f2e';
+  const color = T.tool === 'goal' ? PAL.teal : T.tool === 'locate' ? PAL.magenta : PAL.orange;
   cx.strokeStyle = color; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(ax, ay, 12 * DPR, 0, 7); cx.stroke();
   if (d.px > DRAG_PX) drawArrow(d.a[0], d.a[1], headingOf(d), Math.max(Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), 0.3), color, 3.5);
 }
@@ -888,10 +1023,10 @@ const joy = { x: 0, y: 0, active: false, id: null };
 function drawJoy() {
   const W = jc.width, R = W / 2, r = R * 0.34;
   jx.clearRect(0, 0, W, W);
-  jx.beginPath(); jx.arc(R, R, R - 6, 0, 7); jx.fillStyle = 'rgba(16,16,20,.82)'; jx.fill();
-  jx.save(); jx.shadowColor = '#2de2c8'; jx.shadowBlur = joy.active ? 22 : 12;
-  jx.lineWidth = 4; jx.strokeStyle = joy.active ? '#2de2c8' : 'rgba(45,226,200,.75)'; jx.stroke(); jx.restore();
-  jx.fillStyle = 'rgba(45,226,200,.8)';
+  jx.beginPath(); jx.arc(R, R, R - 6, 0, 7); jx.fillStyle = PAL.joyBg; jx.fill();
+  jx.save(); jx.shadowColor = PAL.teal; jx.shadowBlur = joy.active ? 22 : 12;
+  jx.lineWidth = 4; jx.strokeStyle = joy.active ? PAL.teal : A(PAL.teal, 0.75); jx.stroke(); jx.restore();
+  jx.fillStyle = A(PAL.teal, 0.8);
   [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(([dx, dy]) => {        // direction carets
     const cxp = R + dx * (R - 20), cyp = R + dy * (R - 20), a = Math.atan2(dy, dx);
     jx.beginPath(); jx.moveTo(cxp + Math.cos(a) * 7, cyp + Math.sin(a) * 7);
@@ -899,8 +1034,8 @@ function drawJoy() {
   });
   const kx = R + joy.x * (R - r - 8), ky = R - joy.y * (R - r - 8);
   jx.beginPath(); jx.arc(kx, ky, r, 0, 7);
-  jx.fillStyle = joy.active ? 'rgba(45,226,200,.28)' : 'rgba(30,30,37,.95)'; jx.fill();
-  jx.lineWidth = 3; jx.strokeStyle = joy.active ? '#2de2c8' : 'rgba(45,226,200,.6)'; jx.stroke();
+  jx.fillStyle = joy.active ? A(PAL.teal, 0.28) : PAL.knob; jx.fill();
+  jx.lineWidth = 3; jx.strokeStyle = joy.active ? PAL.teal : A(PAL.teal, 0.6); jx.stroke();
 }
 function joyFrom(e) {
   const r = jc.getBoundingClientRect(), R = r.width / 2;
@@ -1069,7 +1204,7 @@ function renderRooms(st, force) {
   $('#g-rooms').innerHTML = shown.length ? shown.map((r, i) => `
     <li><div class="r-top"><span><span class="r-name">${esc(r.name)}</span>
       <span class="r-sub">${navs.room === r.name ? ' · robot is here' : ''}</span></span>
-      <span class="row gap"><button class="btn small" data-r="${i}" data-a="edit">Edit</button><button class="btn small grad" data-r="${i}" data-a="go">Go</button></span></div>
+      <span class="row gap">${can('operator') ? `<button class="btn small" data-r="${i}" data-a="edit">Edit</button>` : ''}<button class="btn small grad" data-r="${i}" data-a="go">Go</button></span></div>
       ${(r.contents || []).length ? `<div class="things">${r.contents.map(t => `<span class="${hit(t) ? 'hit' : ''}">${esc(t)}</span>`).join('')}</div>`
         : '<span class="r-sub">Nothing listed yet. Edit to add what is in this room.</span>'}</li>`).join('')
     : `<li class="empty">${rooms.length ? 'No room has that.' : 'No rooms yet. Map tab or Drive tab → Room tool, drag a box over a room, then list what is in it. Then say “take me to the 3D printer”.'}</li>`;
@@ -1293,7 +1428,7 @@ function renderStatus(st) {
     : '<li><time></time><span class="muted">Nothing yet.</span></li>';
 }
 $('#s-disconnect').onclick = disconnect;
-$('#t-robot').onclick = () => { setTab('lab'); lab_set('health'); };
+$('#t-robot').onclick = () => { if (can('operator')) { setTab('lab'); lab_set('health'); } else setTab('me'); };
 
 // ------------------------------------------------------------------ Tuning Lab
 const WHEEL_LABELS = { kp: 'Proportional gain, Kp', ki: 'Integral gain, Ki', pwm_min: 'Start‑up PWM', max_mms: 'Top wheel speed', accel: 'Acceleration ramp' };
@@ -1397,7 +1532,7 @@ function chartFrame(c, xr, yr, yUnit) {
   g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
   const X = x => pad.l + (x - xr[0]) / (xr[1] - xr[0] || 1) * (W - pad.l - pad.r);
   const Y = y => H - pad.b - (y - yr[0]) / (yr[1] - yr[0] || 1) * (H - pad.t - pad.b);
-  g.font = `${11 * DPR}px Instrument, sans-serif`; g.fillStyle = '#6f6b76'; g.strokeStyle = 'rgba(255,255,255,.06)'; g.lineWidth = 1;
+  g.font = `${11 * DPR}px Instrument, sans-serif`; g.fillStyle = PAL.dim2; g.strokeStyle = PAL.chartGrid; g.lineWidth = 1;
   const ticks = (a, b, n) => { const s = (b - a) / n, p = Math.pow(10, Math.floor(Math.log10(s))), m = s / p, st = (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; const out = []; for (let v = Math.ceil(a / st) * st; v <= b + 1e-9; v += st) out.push(+v.toFixed(6)); return out; };
   g.textAlign = 'right';
   for (const v of ticks(yr[0], yr[1], 4)) { const y = Y(v); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(W - pad.r, y); g.stroke(); g.fillText(v + (yUnit || ''), pad.l - 5 * DPR, y + 4 * DPR); }
@@ -1415,7 +1550,7 @@ function drawWheelChart() {
   const data = lab.frozen || lab.samples;
   if (!data.length) {
     const g = c.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, c.width, c.height);
-    g.fillStyle = '#6f6b76'; g.font = `${13 * DPR}px Instrument, sans-serif`; g.textAlign = 'center';
+    g.fillStyle = PAL.dim2; g.font = `${13 * DPR}px Instrument, sans-serif`; g.textAlign = 'center';
     g.fillText(lab.live ? 'Waiting for wheel data…' : 'Turn on Live, or run a step test', c.width / 2, c.height / 2);
     return;
   }
@@ -1543,7 +1678,7 @@ function drawTestChart() {
     const pts = s.map(q => { const dx = q[1] - x0, dy = q[2] - y0; return [dx * c0 - dy * s0, (dx * s0 + dy * c0) * 100]; });
     const xmax = Math.max(0.5, ...pts.map(p => p[0])), ymax = Math.max(5, ...pts.map(p => Math.abs(p[1]))) * 1.2;
     const f = chartFrame(c, [0, xmax], [-ymax, ymax], ' cm');
-    f.series([[0, 0], [xmax, 0]], 'rgba(255,255,255,.3)', [5, 5], 1.5);
+    f.series([[0, 0], [xmax, 0]], A(PAL.label.startsWith('#') ? PAL.label : '#888888', 0.3), [5, 5], 1.5);
     f.series(pts, '#e8407c', [], 3);
   } else {
     const yaw = unwrap(s.map(q => q[3])).map(v => v * 57.2958);
@@ -1626,6 +1761,121 @@ $('#l-csv').onclick = async () => {
   } catch (e) { toast(e.message, true); }
 };
 
+// ------------------------------------------------------------------ greeting / where is the robot
+function hello() { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
+function renderWhere(st) {
+  const n = st.nav || {}, b = n.battery || {};
+  const first = String((S.user && (S.user.name || S.user.username)) || '').split(/\s+/)[0];
+  const parts = [];
+  parts.push(n.room ? `Pathik is in ${n.room}` : st.pose ? 'Pathik is on the map' : 'Waiting for its position');
+  parts.push($('#t-mode').textContent.toLowerCase());
+  if (fin(b.pct)) parts.push(`battery ${b.pct}%`);
+  const where = parts.join(' · ');
+  $('#g-hello').textContent = `${hello()}${first ? ', ' + first : ''}`;
+  $('#g-where').textContent = where;
+  $('#sm-where').textContent = where + (n.goal ? `. Heading to ${n.goal.label}.` : '.');
+}
+$('#q-home').onclick = async () => { haptic(15); try { await nav({ type: 'go_home', replace: true }); toast('Coming back'); setFollow(true); } catch (e) { toast(e.message, true); } };
+$('#q-why').onclick = () => { haptic(10); explainNow(true); };
+$('#q-charge').onclick = () => $('#g-charge').click();
+
+// ------------------------------------------------------------------ Me: account, theme, robot, people
+function renderMe(pending) {
+  const u = S.user; if (!u) return;
+  const ini = initials(u.name || u.username);
+  $('#me-ava').textContent = ini; $('#g-ava').textContent = ini;
+  $('#me-name').textContent = u.name || u.username;
+  $('#me-user').textContent = u.legacy ? 'This robot has no accounts (old software)' : `@${u.username}`;
+  const r = $('#me-role'); r.textContent = u.role; r.className = 'role ' + u.role;
+  $('#me-robot').textContent = BASE === DEMO ? 'Pathik demo' : ((S.robot && (S.robot.robot || S.robot.host)) || 'robot');
+  $('#me-net').textContent = `${netType(BASE)} · ${BASE === DEMO ? 'in the app' : BASE.replace('http://', '')}`;
+  $('#me-dot').className = 'dot ' + (S.st && S.fails < 3 ? 'ok' : 'bad');
+  $('#me-pass').hidden = $('#me-out').hidden = !!u.legacy;
+  if (pending !== undefined) setPendingBadge(pending);
+}
+function setPendingBadge(n) { const b = $('#tab-me-badge'); b.textContent = n; b.hidden = !n || !can('admin'); }
+$$('[data-theme-pick]').forEach(b => b.onclick = () => { haptic(8); applyTheme(b.dataset.themePick); });
+$$('.theme-toggle').forEach(b => b.onclick = () => {
+  haptic(8); applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+});
+$('#me-switch').onclick = disconnect;
+$('#me-out').onclick = async () => {
+  if (!await confirmBox('Log out?', 'You can log in again any time on this robot.', 'Log out')) return;
+  try { await post('/api/auth/logout', {}); } catch (e) { /* offline: forget it locally anyway */ }
+  sessions.set(BASE, null); TOKEN = ''; S.user = null; S.gen++; telemetry(false);
+  showAuth('login');
+};
+$('#me-pass').onclick = async () => {
+  const f = await formBox('Change password', `
+    <label>Current password<input name="old" type="password" autocomplete="current-password" required></label>
+    <label>New password (6+ characters)<input name="new" type="password" autocomplete="new-password" minlength="6" required></label>`, 'Change password');
+  if (!f) return;
+  try {
+    const r = await post('/api/auth/password', { old: f.old, new: f.new });
+    toast(r.message || 'Password changed');
+    // the robot ends all sessions on a password change: log straight back in with the new one
+    const l = await post('/api/auth/login', { username: S.user.username, password: f.new });
+    TOKEN = l.token; sessions.set(BASE, { token: l.token, user: l.user });
+  } catch (e) { toast(e.message, true); }
+};
+// admin: people (approve sign-ups, roles, disable, reset password, remove)
+const ROLE_HELP = { staff: 'send & stop the robot', operator: 'also drive, map, tune', admin: 'also manage people' };
+let peopleRows = [];
+async function loadPeople() {
+  if (!can('admin') || S.user.legacy) return;
+  try {
+    const r = await get('/api/users');
+    peopleRows = r.users || [];
+    setPendingBadge(peopleRows.filter(u => u.status === 'pending').length);
+    renderPeople();
+  } catch (e) { $('#people').innerHTML = `<li class="empty">${esc(e.message)}</li>`; }
+}
+function renderPeople() {
+  const me = S.user.username;
+  $('#people').innerHTML = peopleRows.length ? peopleRows.map((u, i) => {
+    const pend = u.status === 'pending', off = u.status === 'disabled';
+    const sub = pend ? 'wants access' : off ? 'disabled' : u.last_login ? `last seen ${new Date(u.last_login * 1000).toLocaleDateString()}` : 'never logged in';
+    const roleSel = `<select data-i="${i}" data-a="role" aria-label="Role">${['staff', 'operator', 'admin'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r} · ${ROLE_HELP[r]}</option>`).join('')}</select>`;
+    return `<li class="${pend ? 'pending' : ''}">
+      <div class="p-top"><span class="avatar sm">${esc(initials(u.name || u.username))}</span>
+        <span class="grow"><b>${esc(u.name || u.username)}${u.username === me ? ' (you)' : ''}</b><small>@${esc(u.username)} · ${esc(sub)}</small></span>
+        <span class="role ${pend ? 'pending' : off ? 'disabled' : u.role}">${pend ? 'pending' : off ? 'off' : u.role}</span></div>
+      <div class="p-act">${pend
+        ? `${roleSel}<button class="btn small grad" data-i="${i}" data-a="approve">Approve</button><button class="btn small" data-i="${i}" data-a="delete">Reject</button>`
+        : u.username === me ? '' : `${roleSel}<button class="btn small" data-i="${i}" data-a="${off ? 'enable' : 'disable'}">${off ? 'Enable' : 'Disable'}</button>
+          <button class="btn small" data-i="${i}" data-a="reset">New password</button><button class="btn small ghost" data-i="${i}" data-a="delete">Remove</button>`}</div></li>`;
+  }).join('') : '<li class="empty">Nobody yet.</li>';
+  $$('#people [data-a]').forEach(el => {
+    const u = peopleRows[+el.dataset.i], a = el.dataset.a;
+    const act = async () => {
+      try {
+        if (a === 'role' && u.status !== 'pending') { await post('/api/users/update', { username: u.username, role: el.value }); toast(`${u.name || u.username} is now ${el.value}`); }
+        else if (a === 'approve') {
+          const role = $(`select[data-i="${el.dataset.i}"]`).value;
+          await post('/api/users/update', { username: u.username, role, status: 'active' }); toast(`Approved ${u.name || u.username} as ${role}`); haptic(20);
+        } else if (a === 'disable' || a === 'enable') {
+          await post('/api/users/update', { username: u.username, status: a === 'disable' ? 'disabled' : 'active' }); toast(a === 'disable' ? 'Account disabled' : 'Account enabled');
+        } else if (a === 'reset') {
+          const f = await formBox(`New password for ${u.name || u.username}`, '<label>New password (6+ characters)<input name="pw" type="text" minlength="6" required autocomplete="off"></label><p class="muted">Tell them in person. They can change it in Me → Change password.</p>', 'Set password');
+          if (!f) return;
+          await post('/api/users/reset', { username: u.username, password: f.pw }); toast('Password set');
+        } else if (a === 'delete') {
+          if (!await confirmBox(u.status === 'pending' ? `Reject ${u.name || u.username}?` : `Remove ${u.name || u.username}?`, 'Their account is deleted. They can ask for access again.', u.status === 'pending' ? 'Reject' : 'Remove')) return;
+          await post('/api/users/delete', { username: u.username }); toast('Done');
+        } else return;
+      } catch (e) { toast(e.message, true); }
+      loadPeople();
+    };
+    if (el.tagName === 'SELECT') el.onchange = act; else el.onclick = act;
+  });
+}
+$('#pp-refresh').onclick = loadPeople;
+// admins: check for new sign-up requests now and then (badge on the Me tab)
+setInterval(async () => {
+  if (!can('admin') || !S.user || S.user.legacy || $('#main').hidden) return;
+  try { const me = await get('/api/auth/me', { timeout: 3000 }); setPendingBadge(me.pending); } catch (e) { /* link poll reports problems */ }
+}, 30000);
+
 // ------------------------------------------------------------------ boot
 $('#c-scan').onclick = scan;
 $('#c-demo').onclick = () => { haptic(15); connect(window.PathikDemo.info); };
@@ -1637,6 +1887,7 @@ $('#c-manual').onsubmit = async e => {
   const r = await probe(base, 2500);
   if (r) connect(r); else $('#c-progress').textContent = `No robot answered at ${base.replace('http://', '')}. Check the address and the Wi‑Fi.`;
 };
+applyTheme();
 drawJoy();
 renderFound(store.get('robots', []).map(r => ({ ...r })));
 (async () => {

@@ -8,8 +8,9 @@ Runs on your LAPTOP (or the Pi) and talks to the robot's HTTP API. No extra pack
 Claude Desktop -> Settings -> Developer -> Edit config (claude_desktop_config.json):
     {"mcpServers": {"pathik": {"command": "python3",
         "args": ["/path/to/slam-robot/scripts/mcp_server.py"],
-        "env": {"ROBOT_URL": "http://slam-robot:8080"}}}}
-Claude Code:  claude mcp add pathik -e ROBOT_URL=http://slam-robot:8080 -- python3 scripts/mcp_server.py
+        "env": {"ROBOT_URL": "http://slam-robot:8080", "ROBOT_USER": "...", "ROBOT_PASSWORD": "..."}}}}
+Claude Code:  claude mcp add pathik -e ROBOT_URL=http://slam-robot:8080 -e ROBOT_USER=... -e ROBOT_PASSWORD=... \
+                  -- python3 scripts/mcp_server.py
 
 Then ask: "Where is Pathik and how much battery is left?", "Send it to the room with the 3D printer",
 "Why did it stop?", "Schedule a patrol of Lab 2 and Lab 3 every weekday at 10".
@@ -23,17 +24,39 @@ import urllib.error
 import urllib.request
 
 ROBOT = os.environ.get('ROBOT_URL', 'http://10.42.0.1:8080').rstrip('/')
+# The robot's API needs a login (an account made in the Pathik app; staff can send the robot,
+# operator can also edit places/schedules). Give it to this server through the environment:
+ROBOT_USER = os.environ.get('ROBOT_USER', '')
+ROBOT_PASSWORD = os.environ.get('ROBOT_PASSWORD', '')
 PROTOCOL = '2024-11-05'
+_token = ''
 
 
-def http(path, body=None, timeout=6.0):
+def _login():
+    global _token
+    if not ROBOT_USER:
+        return False
+    r = http('/api/auth/login', {'username': ROBOT_USER, 'password': ROBOT_PASSWORD}, _retry=False)
+    _token = r.get('token') or ''
+    return bool(_token)
+
+
+def http(path, body=None, timeout=6.0, _retry=True):
     data = None if body is None else json.dumps(body).encode()
+    headers = {'Content-Type': 'application/json'}
+    if _token:
+        headers['Authorization'] = 'Bearer ' + _token
     req = urllib.request.Request(ROBOT + path, data=data, method='POST' if body is not None else 'GET',
-                                 headers={'Content-Type': 'application/json'})
+                                 headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode() or '{}')
     except urllib.error.HTTPError as e:
+        if e.code == 401 and _retry:
+            if _login():
+                return http(path, body, timeout, _retry=False)
+            return {'ok': False, 'error': 'the robot needs a login: set ROBOT_USER and ROBOT_PASSWORD '
+                                          '(an account approved in the Pathik app)'}
         try:
             return json.loads(e.read().decode())
         except ValueError:
