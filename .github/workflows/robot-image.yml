@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'           # the Python version of Ubuntu 22.04 / ROS 2 Humble
-      - run: pip install pytest pyserial numpy
+      - run: pip install "pytest==6.2.5" pyserial numpy    # same pytest as Ubuntu 22.04 inside the image
       - name: Unit tests
         working-directory: ros2_ws/src/lidar_robot
         run: python -m pytest -q
