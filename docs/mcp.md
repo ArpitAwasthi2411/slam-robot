@@ -33,3 +33,9 @@ claude mcp add pathik -e ROBOT_URL=http://slam-robot:8080 -- python3 scripts/mcp
 The assistant can only do what the app can: the e-stop, the RC override, the battery rules and
 the robot's own obstacle and body checks still apply. It cannot release an e-stop.
 Test against the simulator first: `python3 tools/dashboard_sim.py` and `ROBOT_URL=http://localhost:8080`.
+
+
+## Login
+
+The robot needs a login since v2.5. Make an account in the Pathik app (an admin approves it; staff can send the robot, operator can also edit places and schedules) and give it to the server:
+`ROBOT_USER=... ROBOT_PASSWORD=...` next to `ROBOT_URL` in the MCP config.
