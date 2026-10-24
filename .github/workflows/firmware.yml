@@ -1,0 +1,50 @@
+# Compile the ESP32 firmware on every change, for both boards and both Arduino-ESP32 core lines,
+# so a sketch that doesn't build never reaches the robot. Built .bin files are kept as artifacts.
+name: Firmware
+
+on:
+  push:
+    branches: [main]
+    paths: ['firmware/**', '.github/workflows/firmware.yml']
+  pull_request:
+    paths: ['firmware/**', '.github/workflows/firmware.yml']
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sketch: robot_esp32s3
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc
+            core: 3.0.7
+          - sketch: robot_esp32s3
+            fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc
+            core: 2.0.17
+          - sketch: robot_esp32_classic
+            fqbn: esp32:esp32:esp32
+            core: 3.0.7
+          - sketch: robot_esp32_classic
+            fqbn: esp32:esp32:esp32
+            core: 2.0.17
+    name: ${{ matrix.sketch }} (core ${{ matrix.core }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install the ESP32 core
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@${{ matrix.core }}
+      - name: Compile
+        run: |
+          arduino-cli compile --fqbn "${{ matrix.fqbn }}" --warnings default \
+            --output-dir out "firmware/${{ matrix.sketch }}" 2>&1 | tee build.txt
+          test "${PIPESTATUS[0]}" -eq 0 || { grep -E "error" build.txt | head -10 | while read -r l; do echo "::error::$l"; done; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.sketch }}-core${{ matrix.core }}
+          path: out/*.bin
