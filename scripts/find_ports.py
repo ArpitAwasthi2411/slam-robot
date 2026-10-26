@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Find which /dev/ttyUSB* is the ESP32 (it sends 'ODM,' lines) and which is the LiDAR.
+"""Find which port is the ESP32 (it sends 'ODM,' lines) and which is the LiDAR.
 Works no matter which Pi USB socket each cable is in.
-Prints shell assignments:  ESP=/dev/ttyUSBx  LIDAR=/dev/ttyUSBy
+ESP32-S3 (native USB) shows up as /dev/ttyACM*, the LiDAR as /dev/ttyUSB*: then no probing is needed.
+Prints shell assignments:  ESP=/dev/ttyXXX  LIDAR=/dev/ttyUSBy
 Usage:  eval "$(python3 ~/slam-robot/scripts/find_ports.py)"
 """
 import glob
@@ -10,7 +11,14 @@ import time
 
 import serial
 
-ports = sorted(glob.glob('/dev/ttyUSB*'))
+acm = sorted(glob.glob('/dev/ttyACM*'))
+usb = sorted(glob.glob('/dev/ttyUSB*'))
+if acm and usb:                       # ESP32-S3 board: ACM = ESP32, USB = LiDAR
+    sys.stderr.write(f'ESP32 = {acm[0]}   LiDAR = {usb[0]}   (ESP32-S3 native USB)\n')
+    print(f'ESP={acm[0]} LIDAR={usb[0]}')
+    sys.exit(0)
+
+ports = usb + acm
 if len(ports) < 2:
     sys.stderr.write(f'Need 2 USB-serial devices (LiDAR + ESP32), found: {ports}\n')
     sys.exit(1)
