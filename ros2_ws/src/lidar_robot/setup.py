@@ -32,6 +32,7 @@ setup(
             'goal_controller = lidar_robot.goal_controller:main',
             'dashboard = lidar_robot.dashboard:main',
             'navigator = lidar_robot.navigator:main',
+            'vision = lidar_robot.vision_node:main',
         ],
     },
 )

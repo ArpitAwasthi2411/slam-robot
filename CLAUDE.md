@@ -63,7 +63,11 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
   Docker (`Dockerfile`, `deploy/pi/docker-compose.yml`, `scripts/pathik.sh`) is built by CI but not installed on the Pi.
 - CI: `robot-image.yml` (tests → image → ghcr.io/arpitawasthi2411/slam-robot), `android.yml` (APK release),
   `firmware.yml` (S3 + classic on cores 2.0.17 and 3.0.7).
-- Vision: `vision/robot_decision.py` (camera → STOP/SLOW_DOWN/CONTINUE, rules + Groq), pairs with Rashi's `people.py`.
+- Vision on the robot: `vision_node.py` (Camera Module 3 via libcamera/GStreamer subprocess, YOLO11n NCNN ~4 Hz,
+  LiDAR distance per person) -> `/vision/decision` + `/vision/image/compressed`; rules + `VisionGate` in
+  `vision_rules.py`; navigator slows/stops (`use_vision`), app camera card (`/api/camera.jpg`). Setup:
+  `scripts/setup_pi_camera.sh`, `scripts/setup_vision.sh`, `docs/STEPS_camera.md`.
+- Vision on the laptop: `vision/robot_decision.py` (webcam, rules + one Groq vision call per capture), Rashi's `people.py`.
 - Docs: `docs/STEPS_esp32s3_lab.md` (lab bring-up), `docs/deployment.md`, `docs/navigation.md`,
   `docs/troubleshooting.md`, `docs/roadmap.md`.
 
@@ -75,7 +79,8 @@ Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2
 odometry, ultrasonics, navigator driving, app.
 
 Done in code, NOT yet verified on the robot:
-- ESP32-S3 firmware v2.6 + UART link to the Pi (pins 47/8 ↔ Pi 10/8), `setup_pi_uart.sh`
+- ESP32-S3 firmware v2.6 + UART link to the Pi (pins 47/8 ↔ Pi 10/8): ODM/US verified on the Pi; IMU not detected yet
+- Camera Module 3 + YOLO people avoidance + app camera card (APK Pathik-12)
 - accounts/roles + redesigned app (latest APK **Pathik-11**, release v1.0.11)
 - link-drop diagnostics (v2.4.2), battery divider, docking, schedules, rooms + LLM on the real floor
 - Docker deployment, MCP server against the real robot
@@ -85,7 +90,7 @@ Open problems / TODO (priority order):
    (ESP32 used to drop/reconnect while driving: power noise suspected; capacitors planned).
 2. Measure the footprint + wheel separation; tune with the app's Spin / Straight line tests.
 3. Groq key + audio on the Pi; voice node (push-to-talk, Whisper/Vosk from Rashi, Piper TTS).
-4. Camera on Ubuntu 22.04 (libcamera from source + camera_ros), then people detection (YOLO11n) fused with LiDAR range.
+4. Camera + people avoidance done in code (`docs/STEPS_camera.md`): run the two setup scripts on the Pi, tune stop_m/slow_m.
 5. **Docking is still reverse-in in the code; the design is now FRONT docking** with an ArUco/AprilTag marker
    (Neelaksh's `detect()`): change the navigator and relax `US_STOP_MM` while docking.
 6. LLM error recovery (thesis novelty), not implemented yet.
@@ -94,6 +99,9 @@ Open problems / TODO (priority order):
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-10-28 (evening): camera people avoidance: vision node (libcamera, YOLO11n NCNN, LiDAR distance), navigator
+  slows/stops, app camera card + map banner, setup scripts, docs/STEPS_camera.md; laptop robot_decision.py.
 
 - 2026-10-28 (later): "position lost" pauses + hot Pi: Cartographer used all 4 cores and added a node every 0.5 s
   while standing still -> 2 threads, max_time 5 s, grid every 2 s; pose_timeout 1.5; slower turns (nav 0.30 rad/s,

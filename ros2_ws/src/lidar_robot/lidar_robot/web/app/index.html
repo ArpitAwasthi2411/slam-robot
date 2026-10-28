@@ -111,6 +111,8 @@
         <span class="t-link" id="t-link">–</span>
       </button>
       <div class="t-right">
+        <button id="t-cam" class="chip glass cam-chip" aria-label="Camera: what the robot sees" aria-pressed="false" hidden>
+          <svg viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.8l1.4-2h6.6l1.4 2h1.8A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.5" r="3.6"/></svg><i id="t-cam-dot"></i></button>
         <span id="t-bat" class="chip glass bat" hidden></span>
         <button id="t-mode" class="chip glass" aria-label="Robot state. Tap: why?">Idle</button>
       </div>
@@ -120,6 +122,26 @@
     <div id="m-banner" class="m-banner glass" hidden></div>
     <div id="m-confirm" class="m-confirm glass" hidden role="alert"></div>
     <div id="m-why" class="m-why glass" hidden role="status"></div>
+    <div id="m-vis" class="m-vis glass" hidden role="status"></div>
+
+    <!-- camera: live picture + what the robot decided about the people in front of it -->
+    <div id="cam" class="cam glass" hidden>
+      <div class="cam-h">
+        <span id="cam-act" class="cam-act">–</span>
+        <span id="cam-fps" class="cam-fps"></span>
+        <button id="cam-size" class="cam-btn" aria-label="Bigger / smaller picture">
+          <svg viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg></button>
+        <button id="cam-x" class="cam-btn" aria-label="Close the camera">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <div class="cam-pic">
+        <img id="cam-img" alt="Live picture from the robot's camera" hidden>
+        <canvas id="cam-demo" width="320" height="180" hidden></canvas>
+        <p id="cam-empty" class="cam-empty">Waiting for the camera…</p>
+      </div>
+      <p id="cam-why" class="cam-why"></p>
+      <ul id="cam-people" class="cam-people"></ul>
+    </div>
     <div id="m-hint" class="m-hint" data-min="operator">Pick a tool on the left: flag, draw a path, route points…</div>
 
     <!-- tool rail -->

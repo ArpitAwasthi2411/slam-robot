@@ -77,3 +77,22 @@ navigator:
     max_replans: 3
     pose_timeout: 1.5            # s: odometry older than this = position lost (1.0 tripped on short CPU stalls)
     llm_model: llama-3.1-8b-instant   # used only if GROQ_API_KEY is set and there is internet
+
+vision:
+  ros__parameters:
+    camera: auto                 # auto | libcamera (Camera Module 3 Wide) | /dev/video0 (USB webcam)
+    width: 640
+    height: 360                  # 16:9 keeps the wide lens' full view
+    fps: 15
+    hfov_deg: 102.0              # Camera Module 3 Wide: 102 deg horizontal
+    flip: false                  # true if the camera is mounted upside down
+    model_dir: ~/models/yolo11n_ncnn_model   # made by scripts/setup_vision.sh
+    imgsz: 320
+    conf: 0.45
+    threads: 2                   # YOLO threads: the other cores stay free for SLAM + driving
+    det_rate: 4.0                # detections per second
+    stream_rate: 5.0             # app camera picture, frames per second
+    jpeg_quality: 60
+    path_half_angle_deg: 15.0    # a person within +-15 deg of straight ahead is "in the path"
+    stop_m: 0.8                  # LiDAR distance (from the LiDAR, ~0.2 m behind the bumper): stop closer than this
+    slow_m: 1.8                  # slow down closer than this (stop if they walk towards the robot)

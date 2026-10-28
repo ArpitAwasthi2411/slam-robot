@@ -89,6 +89,17 @@ class Range(_Msg):
     _defaults = {'header': Header, 'radiation_type': 0}
 
 
+class CompressedImage(_Msg):
+    __slots__ = ('header', 'format', 'data')
+    _defaults = {'header': Header, 'format': '', 'data': bytes}
+
+
+class LaserScan(_Msg):
+    __slots__ = ('header', 'angle_min', 'angle_max', 'angle_increment', 'time_increment', 'scan_time',
+                 'range_min', 'range_max', 'ranges', 'intensities')
+    _defaults = {'header': Header, 'ranges': list, 'intensities': list}
+
+
 class Bool(_Msg):
     __slots__ = ('data',)
     _defaults = {'data': False}
@@ -191,7 +202,7 @@ def install():
     gm.Twist, gm.TransformStamped, gm.Quaternion = Twist, TransformStamped, Quaternion
     m('geometry_msgs').msg = gm
     sens = m('sensor_msgs.msg')
-    sens.Imu, sens.Range = Imu, Range
+    sens.Imu, sens.Range, sens.CompressedImage, sens.LaserScan = Imu, Range, CompressedImage, LaserScan
     m('sensor_msgs').msg = sens
     nm = m('nav_msgs.msg')
     nm.Odometry = Odometry

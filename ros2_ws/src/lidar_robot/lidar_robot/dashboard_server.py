@@ -14,6 +14,7 @@ The server knows nothing about ROS. It talks to a `backend` object:
     backend.esp_command(dict) -> dict     ({"op": "tune"|"save"|"defaults"|"telemetry"|"query"})
     backend.get_telemetry(since) -> dict
     backend.test_start(dict) / test_stop() / test_status(since) -> dict
+    backend.camera_jpeg() -> bytes | None      (latest annotated camera picture, GET /api/camera.jpg)
 The mobile app (web/app/) is served at / ; the classic dashboard at /classic.
 Every response carries CORS headers so the APK (file:// origin) can call the API.
 
@@ -81,7 +82,7 @@ def make_handler(backend, index_path, app_dir=None, users=None):
             elif isinstance(body, str):
                 body = body.encode()
             zipped = (len(body) > 1200 and 'gzip' in (self.headers.get('Accept-Encoding') or '')
-                      and not ctype.startswith(('image/png', 'font/')))
+                      and not ctype.startswith(('image/png', 'image/jpeg', 'font/')))
             if zipped:                     # ~4x less data: matters when the phone is on mobile data
                 body = gzip.compress(body, compresslevel=5)
             self.send_response(code)
@@ -223,6 +224,12 @@ def make_handler(backend, index_path, app_dir=None, users=None):
                     return self._optional('test_status', int(q.get('since', ['0'])[0]))
                 if url.path == '/api/state':
                     return self._send(200, backend.get_state())
+                if url.path == '/api/camera.jpg':
+                    fn = getattr(backend, 'camera_jpeg', None)
+                    jpg = fn() if fn else None
+                    if not jpg:
+                        return self._send(404, {'error': 'no camera picture'})
+                    return self._send(200, jpg, 'image/jpeg')
                 if url.path == '/api/map':
                     since = int(parse_qs(url.query).get('since', ['-1'])[0])
                     m = backend.get_map(since)

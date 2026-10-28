@@ -4,7 +4,8 @@
 Publishes   /cmd_vel_teleop (Twist)  /estop (Bool, latched)  /goal_pose  /goal_cancel
             /navigator/request (String JSON)
 Subscribes  /map  /scan  /robot/status  /goal_controller/status  /navigator/status
-            /navigator/places  /navigator/response  + TF map->base_link
+            /navigator/places  /navigator/response  /vision/decision  /vision/image/compressed
+            + TF map->base_link
 Map saving writes ~/maps/<name>.pgm/.yaml (map_server format) from /map, plus
 ~/maps/<name>.pbstream (Cartographer state, for slam_mode:=localization) when SLAM is running.
 """
@@ -22,7 +23,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profi
 from rclpy.time import Time
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import OccupancyGrid
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import CompressedImage, LaserScan
 from std_msgs.msg import Bool, Empty, String
 from tf2_ros import Buffer, TransformListener, TransformException
 
@@ -105,6 +106,9 @@ class DashboardNode(Node):
         self.create_subscription(String, 'navigator/status', self._on_nav_status, 10)
         self.create_subscription(String, 'navigator/places', self._on_places, latched)
         self.create_subscription(String, 'navigator/response', self._on_nav_response, 10)
+        self.vision, self.vision_t, self.camera, self.camera_t = None, 0.0, None, 0.0
+        self.create_subscription(String, 'vision/decision', self._on_vision, 10)
+        self.create_subscription(CompressedImage, 'vision/image/compressed', self._on_camera, 2)
         self.write_state_cli = None
         try:                                # Cartographer service to save a .pbstream (optional)
             from cartographer_ros_msgs.srv import WriteState
@@ -240,6 +244,21 @@ class DashboardNode(Node):
                 continue
         return None
 
+    def _on_vision(self, msg):
+        try:
+            v = json.loads(msg.data)
+        except ValueError:
+            return
+        for p in v.get('people', []):
+            p.pop('conf', None)
+        self.vision, self.vision_t = v, time.monotonic()
+
+    def _on_camera(self, msg):
+        self.camera, self.camera_t = bytes(msg.data), time.monotonic()
+
+    def camera_jpeg(self):
+        return self.camera if time.monotonic() - self.camera_t < 2.0 else None
+
     # ------------------------------------------------------------ backend API
     def get_state(self):
         # status comes at 2 Hz; 3 s so a busy Pi (Cartographer) doesn't flash 'not talking'
@@ -274,6 +293,8 @@ class DashboardNode(Node):
             'autosave': self.autosave.info,
             'slam_mode': self.slam_mode,
             'places': self.places,
+            'vision': self.vision if time.monotonic() - self.vision_t < 2.0 else None,
+            'camera': time.monotonic() - self.camera_t < 2.0,
         }
 
     # ------------------------------------------------------------ mobile app / Tuning Lab

@@ -23,6 +23,7 @@ import json
 import math
 import os
 import threading
+import time
 import traceback
 
 import rclpy
@@ -47,6 +48,7 @@ from lidar_robot.places import PlaceStore
 from lidar_robot.planner import GridMap, Planner, PlannerParams
 from lidar_robot.sensors import to_world
 from lidar_robot.us_listener import UltrasonicListener
+from lidar_robot.vision_rules import VisionGate
 
 
 class NavigatorNode(Node):
@@ -92,6 +94,8 @@ class NavigatorNode(Node):
         d('odom_frame', 'odom')
         d('require_localization_confirm', False)   # bringup sets true in slam_mode:=localization
         d('llm_model', 'llama-3.1-8b-instant')
+        d('use_vision', True)           # camera people detection may slow / stop autonomous driving
+        d('vision_timeout', 1.0)        # s: an older camera decision is ignored
         g = lambda n: self.get_parameter(n).value  # noqa: E731
 
         self.global_frame = g('global_frame')
@@ -130,6 +134,8 @@ class NavigatorNode(Node):
                                    critical_pct=float(g('battery_critical_pct'))),
             confirm_timeout_s=float(g('confirm_timeout_s')), dock_offset=float(g('dock_offset')))
         self.core.localized = not bool(g('require_localization_confirm'))
+        self.vision = VisionGate(enabled=bool(g('use_vision')), timeout_s=float(g('vision_timeout')))
+        self.create_subscription(String, 'vision/decision', self._on_vision, 10)
         self.core_lock = threading.RLock()       # callbacks + map worker thread share the core
         self.topic_estop = False
         self.bridge_estop = False
@@ -148,6 +154,7 @@ class NavigatorNode(Node):
         self.places_version_sent = -1
         self.last_plan_sent = None
         self._was_active = False
+        self._vision_said = ''
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              reliability=ReliabilityPolicy.RELIABLE)
@@ -347,6 +354,13 @@ class NavigatorNode(Node):
             with self.core_lock:
                 v, w = self.core.step(pose, front, self.dt)
                 active = bool(self.core.queue.active)
+            v, w = self.vision.apply(v, w, time.monotonic())   # camera: people in the path
+            if self.vision.note and self.vision.note != self._vision_said:
+                self.get_logger().info(self.vision.note)
+                if 'waiting' in self.vision.note:
+                    self.speaker.say('Excuse me, may I pass?', key='make_way', gap_s=12.0)
+            self._vision_said = self.vision.note
+            with self.core_lock:
                 says, self.core.say_queue = self.core.say_queue, []
             for key, text in says:
                 self.speaker.say(text, key=key, gap_s=12.0 if key == 'make_way' else 3.0)
@@ -362,9 +376,16 @@ class NavigatorNode(Node):
             self.cmd_pub.publish(cmd)
         self._was_active = active
 
+    def _on_vision(self, msg: String):
+        try:
+            self.vision.update(json.loads(msg.data), time.monotonic())
+        except ValueError:
+            pass
+
     def _publish_status(self):
         with self.core_lock:
             st = self.core.status()
+        st['vision'] = self.vision.note       # e.g. "camera: person 0.7 m ahead: too close, waiting"
         self.status_pub.publish(String(data=json.dumps(st)))
         key = tuple(map(tuple, st['path'][:3])) + (len(st['path']),)
         if key != self.last_plan_sent:
