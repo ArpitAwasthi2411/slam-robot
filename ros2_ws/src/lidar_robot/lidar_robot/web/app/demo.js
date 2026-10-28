@@ -413,6 +413,16 @@ function navStatus() {
     schedules: schedSummary(), log_stats: stats(),
   };
 }
+function demoVision() {                      // a person walks towards the robot and away again (20 s)
+  const ph = (now() % 20) / 20, d = +(0.6 + 2.6 * Math.abs(1 - 2 * ph)).toFixed(2), b = +(6 * Math.sin(ph * 6.28)).toFixed(1);
+  const approaching = ph < 0.5, p = { id: 1, bearing_deg: b, distance_m: d, approaching, moving_away: !approaching };
+  let action = 'CONTINUE', speed = 0.8, reason = 'people far ahead: careful';
+  if (d <= 0.8) { action = 'STOP'; speed = 0; reason = `person ${d.toFixed(1)} m ahead: too close, waiting`; }
+  else if (d <= 1.8 && approaching) { action = 'STOP'; speed = 0; reason = `person ${d.toFixed(1)} m ahead coming towards me, waiting`; }
+  else if (d <= 1.8) { action = 'SLOW_DOWN'; speed = 0.4; reason = `person ${d.toFixed(1)} m ahead: slowing down`; }
+  return { action, speed_factor: speed, reason, steer: 'none', people: [p], people_in_path: 1, camera_ok: true,
+           camera: 'demo', detector: true, fps: 4.0, lidar: true, frame_w: 640, frame_h: 360 };
+}
 function state() {
   const moving = Math.abs(R.v) + Math.abs(R.w) > 0.001;
   return {
@@ -426,6 +436,7 @@ function state() {
     sensors: { us: [null, null, null], imu_ok: true, yaw_source: 'gyro', us_mounts: [[0.07, 0.12, 0.52], [0.07, 0, 0], [0.07, -0.12, -0.52]], bumper: false },
     nav: navStatus(), places: { map: places.map, home: places.home, dock: places.dock, places: places.places, rooms: places.rooms, version: places.version },
     tune: { ...tune }, fw: '2.4-demo', telemetry: false, turns: 0, sep: 0.3, test_running: false, autosave: {}, slam_mode: 'localization',
+    vision: demoVision(), camera: true,
   };
 }
 

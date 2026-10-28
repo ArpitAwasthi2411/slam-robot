@@ -1,4 +1,4 @@
-# Pathik: every connection (ESP32-S3 build, firmware v2.5)
+# Pathik: every connection (ESP32-S3 build, firmware v2.6: Pi link on the GPIO UART)
 
 Each wire is listed by **where it starts → where it ends**. The pin numbers match
 `firmware/robot_esp32s3/robot_esp32s3.ino` exactly; don't change one without the other.
@@ -22,6 +22,7 @@ white = sensor signals.
 | P7 | Buck **OUT+ / OUT−** | Pi 4 **USB-C** (5 V cable) | `vcgencmd get_throttled` must say `0x0` |
 | P8 | Buck **OUT+** (5 V rail) | 5 V bus: BTS7960 VCC ×2, HC-SR04 VCC ×3, RC receiver +, level shifter **HV**, speaker USB power | |
 | P9 | Buck **OUT−** | GND bus | GND bus also joins ESP32 GND |
+| P10 | 5 V bus | ESP32-S3 **5V** pin (marked 5V / 5Vin) | the ESP32 is powered by the buck now, not by USB. **Unplug this wire before you plug a laptop USB cable into the ESP32** |
 
 ### Capacitors (stripe / short leg = −)
 | # | Where | Part |
@@ -111,14 +112,25 @@ Level shifter: **LV** → ESP32 3V3, **HV** → 5 V bus, **both GND** → GND.
 | S5 | ESP32 **GPIO 1** → **22 kΩ** → | GND | full battery 12.6 V → 2.27 V at the pin. Then set `USE_BAT_ADC 1` |
 **Check S4/S5 with the multimeter before plugging the wire into GPIO 1:** the midpoint must read < 2.5 V.
 
-## 8. ESP32-S3 ↔ Pi
+## 8. ESP32-S3 ↔ Pi (GPIO UART, 3 wires, no USB cable)
 
-| # | From | To |
-|---|---|---|
-| X1 | ESP32-S3 USB socket labelled **"USB"** (not "COM"/"UART") | any Pi USB port (data micro/USB-C cable) |
-| X2 | ESP32-S3 **GND** | GND bus (common ground with drivers and sensors) |
-| — | ESP32 **5V** pin | **not** connected to the buck (it gets 5 V from the Pi's USB). Only C3 goes there |
-Pi sees it as **/dev/ttyACM0**. The ESP32 on-board RGB LED (GPIO 48) needs no wire.
+Both sides are 3.3 V: wire them **directly**, no level shifter. TX goes to RX (crossed).
+
+| # | From | To | Note |
+|---|---|---|---|
+| X1 | ESP32-S3 **GPIO 47** (TX) | Pi header **pin 10** (GPIO 15, RXD) | edge row, 5th pin |
+| X2 | ESP32-S3 **GPIO 8** (RX) | Pi header **pin 8** (GPIO 14, TXD) | edge row, 4th pin |
+| X3 | ESP32-S3 **GND** | Pi header **pin 6** (GND) | edge row, 3rd pin. Also on the GND bus |
+| X4 | ESP32-S3 **5V** pin | 5 V bus (P10) | |
+| — | ESP32 **TX/RX** pins (GPIO 43/44) | **not used** | the board's own USB-UART chip sits on them, and the chip prints its boot text there |
+| — | ESP32 **USB** socket | nothing (laptop only, for flashing; unplug P10 first) | |
+
+Pi header: pin 1 is at the end **away from the USB/Ethernet ports**. Odd pins (1, 3, 5 …) are the row towards
+the middle of the board, **even pins (2, 4, 6 …) are the row along the board's edge**. Counting along the edge row
+from that end: pin 2 = 5 V, 4 = 5 V, **6 = GND, 8 = TXD, 10 = RXD**. Check with the multimeter (Pi on): pins 2 and 4
+read 5 V to pin 6. Never touch pins 2/4 with the ESP32 wires.
+The Pi sees the ESP32 as **/dev/ttyAMA0** (= **/dev/esp32**) after `sudo bash scripts/setup_pi_uart.sh` + reboot.
+The ESP32 on-board RGB LED (GPIO 48) needs no wire.
 
 ## 9. Pi peripherals
 
@@ -133,5 +145,5 @@ Pi sees it as **/dev/ttyACM0**. The ESP32 on-board RGB LED (GPIO 48) needs no wi
 | N1 | Ethernet cable | laptop | Pi 169.254.1.2 / laptop 169.254.1.1 |
 
 ## 10. Pins left free (don't use)
-0, 3, 45, 46 (boot straps) · 19, 20 (USB) · 26–32 (flash) · 33–37 (PSRAM) · 43, 44 (debug UART) · 38/48 (LED).
-Free for later (e.g. push-to-talk button / dock): 8, 47.
+0, 3, 45, 46 (boot straps) · 19, 20 (USB) · 26–32 (flash) · 33–37 (PSRAM) · 43, 44 (UART0 / on-board USB-UART chip) · 38/48 (LED).
+Used by the Pi link: 8, 47. Free for later (e.g. push-to-talk button / dock): 38 (if the LED is on 48).

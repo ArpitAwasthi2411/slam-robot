@@ -1,9 +1,13 @@
 /*
- * robot_esp32s3  v2.5  —  ESP32-S3 (ESP32-S3-DevKitC-1, N8R8 / N16R8 / N8 ...)
+ * robot_esp32s3  v2.6  —  ESP32-S3 (ESP32-S3-DevKitC-1, N8R8 / N16R8 / N8 ...)
  * -----------------------------------------------------------------------------
  *  Same protocol and features as robot_esp32_classic v2.4, plus the on-board RGB LED.
- *  The Pi side needs no change: plug the board's "USB" socket into the Pi -> /dev/ttyACM0
- *  (or /dev/esp32 with the udev rules). The LiDAR stays /dev/ttyUSB0, so they can't be mixed up.
+ *  v2.6: the Pi link is a UART on the Pi's 40-pin header, no USB cable to the Pi any more:
+ *    ESP32 GPIO 47 (TX) -> Pi pin 10 (GPIO 15, RXD)     ESP32 GPIO 8 (RX) <- Pi pin 8 (GPIO 14, TXD)
+ *    ESP32 GND -> Pi pin 6 (GND)                        ESP32 5V pin <- 5 V buck (not the Pi)
+ *  On the Pi that is /dev/ttyAMA0 (scripts/setup_pi_uart.sh, then /dev/esp32 points at it).
+ *  The board's "USB" socket still works for flashing and the laptop Serial Monitor: everything is
+ *  sent to both, and commands are accepted from both (USB_ECHO below).
  *
  *  ARDUINO IDE (Tools menu):  Board "ESP32S3 Dev Module"
  *    USB Mode: Hardware CDC and JTAG     USB CDC On Boot: Enabled
@@ -15,6 +19,8 @@
  *  - E-STOP latch ('E' or the mushroom button) blocks the Pi AND the RC until released ('R')
  *  - MPU-6050 gyro, 3x HC-SR04, battery (INA226 or divider), bumpers, live tuning (Tuning Lab)
  *  - v2.5: RGB LED shows what the robot is doing (rainbow while driving, see ledUpdate())
+ *  - v2.6: Pi link on a UART (PI_UART_RX/TX); lines that aren't a well-formed command are ignored
+ *          (the Pi's boot/console text on the UART can't trigger E, R, S ...)
  *
  * WIRING (ESP32-S3 GPIO)                          (full table: hardware/wiring_esp32s3.md)
  *   Left BTS7960  RPWM 4, LPWM 5        Right BTS7960  RPWM 6, LPWM 7
@@ -27,7 +33,9 @@
  *   E-stop sense 42 -> NO contact -> GND           Bumpers 2 -> switches (NO, parallel) -> GND
  *   Battery divider: battery+ -> 100k -> GPIO 1 -> 22k -> GND (+100 nF across the 22k)
  *   RGB LED: on-board WS2812 on GPIO 48 (DevKitC-1 v1.0) or 38 (v1.1): set RGB_PIN below
- *   NEVER use 0, 3, 45, 46 (boot straps), 19/20 (USB), 26-32 (flash), 33-37 (PSRAM on R8 boards).
+ *   Pi UART: TX 47 -> Pi pin 10 (RXD), RX 8 <- Pi pin 8 (TXD), GND -> Pi pin 6 (3.3 V both sides: direct)
+ *   NEVER use 0, 3, 45, 46 (boot straps), 19/20 (USB), 26-32 (flash), 33-37 (PSRAM on R8 boards),
+ *   43/44 (UART0: wired to the board's own USB-UART chip, and the ESP32 prints its boot text there).
  *
  * SERIAL PROTOCOL (115200 baud, newline-terminated ASCII)
  *  ESP32 -> Pi
@@ -40,6 +48,7 @@
  *  Pi -> ESP32
  *    V,<left_mm_s>,<right_mm_s>   P,<left_pwm>,<right_pwm>   S stop   E e-stop   R release
  *    C print RC pulses   G re-calibrate gyro   ? print config
+ *    (v2.6: only "X" alone or "X,<numbers>" counts as a command; anything else is ignored)
  *  v2.3 tuning (used by the mobile app's Tuning Lab):
  *    K,<kp>,<ki>,<pwm_min>,<max_mms>,<accel_mms2>   set speed-loop gains live
  *    W  save them to flash (kept after power-off)      X  back to factory defaults
@@ -60,24 +69,24 @@
   #error "This sketch is for the ESP32-S3: Tools > Board > ESP32S3 Dev Module (classic ESP32: robot_esp32_classic)"
 #endif
 
-// ---- Which serial object talks to the Pi: the native USB socket ------------------------------
+// ---- The native USB socket (flashing + laptop Serial Monitor) --------------------------------
 // With "USB CDC On Boot: Enabled", Serial is the USB socket. If someone flashes with it Disabled,
-// Serial would be UART0 (GPIO 43/44) and the Pi would hear nothing, so pick the USB port explicitly.
+// Serial would be UART0 (GPIO 43/44), so pick the USB port explicitly.
 #if defined(ARDUINO_USB_MODE) && ARDUINO_USB_MODE && defined(ARDUINO_USB_CDC_ON_BOOT) && !ARDUINO_USB_CDC_ON_BOOT
   #if ESP_ARDUINO_VERSION_MAJOR >= 3
     #if defined(HWCDC_SERIAL_IS_DEFINED)
-      #define LINK HWCDCSerial
+      #define USB_PORT HWCDCSerial
     #else
       HWCDC robotUsbLink;
-      #define LINK robotUsbLink
+      #define USB_PORT robotUsbLink
     #endif
   #else
-    #define LINK USBSerial
+    #define USB_PORT USBSerial
   #endif
 #else
-  #define LINK Serial
+  #define USB_PORT Serial
 #endif
-#define FW_VERSION "2.5"
+#define FW_VERSION "2.6"
 #include <Wire.h>
 #include <Preferences.h>     // tuning values survive reboot (ESP32 flash)
 #include <esp_system.h>      // esp_reset_reason(): why the ESP32 restarted (sent in the READY line)
@@ -94,6 +103,12 @@
 #define ENC_LEFT_B   16
 #define ENC_RIGHT_A  17
 #define ENC_RIGHT_B  18
+
+// ============================ LINK TO THE PI (v2.6) ===========================
+#define PI_UART_RX   8       // <- Pi pin 8  (GPIO 14, TXD)
+#define PI_UART_TX   47      // -> Pi pin 10 (GPIO 15, RXD)
+#define PI_BAUD      115200
+#define USB_ECHO     1       // 1 = also talk on the USB socket (laptop Serial Monitor); 0 = UART only
 
 // ============================ OPTIONAL SENSORS ================================
 // Set to 0 for anything not wired yet. All are safe to leave on with nothing connected:
@@ -189,6 +204,33 @@
 #define CONTROL_PERIOD_MS     20      // 50 Hz control + ODM output
 #define CMD_TIMEOUT_MS        300
 
+
+// ============================ LINK (UART to the Pi + USB) =====================
+// Everything printed with LINK.printf goes to the Pi's UART and, when there is room, to the USB
+// socket. Never blocks on the USB side: with no laptop attached its buffer just fills and is skipped.
+class RobotLink : public Print {
+ public:
+  void begin() {
+    Serial1.setRxBufferSize(512);
+    Serial1.setTxBufferSize(1024);           // a whole 20 ms burst (ODM+IMU+US+SPD) fits
+    Serial1.begin(PI_BAUD, SERIAL_8N1, PI_UART_RX, PI_UART_TX);
+#if USB_ECHO
+    USB_PORT.begin(PI_BAUD);
+#endif
+  }
+  using Print::write;
+  size_t write(uint8_t c) override { return write(&c, 1); }
+  size_t write(const uint8_t *buf, size_t n) override {
+    size_t w = Serial1.write(buf, n);
+#if USB_ECHO
+    if (USB_PORT.availableForWrite() >= (int)n) USB_PORT.write(buf, n);
+#endif
+    return w;
+  }
+  int availableForWrite() override { return Serial1.availableForWrite(); }
+};
+RobotLink LINK;
+
 // ============================ STATE ===========================================
 enum Mode : uint8_t { MODE_IDLE = 0, MODE_RC = 1, MODE_PI = 2, MODE_ESTOP = 3 };
 
@@ -235,8 +277,8 @@ bool estop_latched = false;
 int raw_pwm_l = 0, raw_pwm_r = 0;
 Mode mode = MODE_IDLE;
 
-char rx_buf[64];
-uint8_t rx_len = 0;
+struct LineBuf { char buf[64]; uint8_t len; };
+LineBuf rx_uart = {{0}, 0}, rx_usb = {{0}, 0};
 
 // IMU state
 bool imu_ok = false;
@@ -683,7 +725,19 @@ long parseLong(const char *&p) {
   return strtol(p, (char **)&p, 10);
 }
 
+// A command is one known letter alone ("S") or a letter, a comma and numbers ("V,120,-80").
+// Anything else on the line (Pi boot/console text, a half line after a reset) is ignored.
+bool validCommand(const char *s) {
+  if (!s[0]) return false;
+  if (!s[1]) return strchr("SERCGWX?", s[0]) != nullptr;
+  if (s[1] != ',' || !strchr("VPKTL", s[0])) return false;
+  for (const char *q = s + 2; *q; q++)
+    if (!strchr("0123456789+-., ", *q)) return false;
+  return true;
+}
+
 void handleLine(char *line) {
+  if (!validCommand(line)) return;
   const char *p = line + 1;
   pi_seen = true;
   switch (line[0]) {
@@ -783,21 +837,29 @@ void handleLine(char *line) {
   }
 }
 
-void pollSerial() {
-  while (LINK.available()) {
-    char c = (char)LINK.read();
+// each source has its own line buffer, so a laptop and the Pi typing at once can't mix lines
+void pollStream(Stream &in, LineBuf &lb) {
+  while (in.available()) {
+    char c = (char)in.read();
     if (c == '\n' || c == '\r') {
-      if (rx_len > 0) {
-        rx_buf[rx_len] = '\0';
-        handleLine(rx_buf);
-        rx_len = 0;
+      if (lb.len > 0) {
+        lb.buf[lb.len] = '\0';
+        handleLine(lb.buf);
+        lb.len = 0;
       }
-    } else if (rx_len < sizeof(rx_buf) - 1) {
-      rx_buf[rx_len++] = c;
+    } else if (lb.len < sizeof(lb.buf) - 1) {
+      lb.buf[lb.len++] = c;
     } else {
-      rx_len = 0;  // overflow: drop the line
+      lb.len = 0;  // overflow: drop the line
     }
   }
+}
+
+void pollSerial() {
+  pollStream(Serial1, rx_uart);
+#if USB_ECHO
+  pollStream(USB_PORT, rx_usb);
+#endif
 }
 
 // Why did we (re)start? BROWNOUT = supply dipped below ~2.4 V (motors pulling the 5 V/3.3 V down),
@@ -820,7 +882,7 @@ const char *resetReasonName() {
 
 // ============================ SETUP ===========================================
 void setup() {
-  LINK.begin(115200);
+  LINK.begin();
 
   pinMode(RC_STEERING_PIN, INPUT);
   pinMode(RC_THROTTLE_PIN, INPUT);
@@ -852,7 +914,8 @@ void setup() {
   batInit();
   loadTune();
   last_control_ms = millis();
-  LINK.printf("INFO,READY,robot_esp32 v%s %s reset=%s\n", FW_VERSION, BOARD_NAME, resetReasonName());
+  LINK.printf("INFO,READY,robot_esp32 v%s %s reset=%s link=uart%d/%d\n", FW_VERSION, BOARD_NAME,
+              resetReasonName(), PI_UART_TX, PI_UART_RX);
   printTune();
 }
 

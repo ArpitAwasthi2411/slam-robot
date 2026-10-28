@@ -43,7 +43,7 @@ options = {
 }
 
 MAP_BUILDER.use_trajectory_builder_2d = true
-MAP_BUILDER.num_background_threads = 4
+MAP_BUILDER.num_background_threads = 2            -- 2 of the Pi 4's 4 cores: the rest stay free for the bridge + navigator
 
 TRAJECTORY_BUILDER_2D.use_imu_data = false
 TRAJECTORY_BUILDER_2D.min_range = 0.15
@@ -61,12 +61,12 @@ TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.rotation_delta_cost_wei
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.translation_weight = 2.
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.rotation_weight = 4.
 
-TRAJECTORY_BUILDER_2D.motion_filter.max_time_seconds = 0.5
+TRAJECTORY_BUILDER_2D.motion_filter.max_time_seconds = 5.0   -- standing still adds no new nodes (0.5 grew the graph + CPU load every minute)
 TRAJECTORY_BUILDER_2D.motion_filter.max_distance_meters = 0.05
 TRAJECTORY_BUILDER_2D.motion_filter.max_angle_radians = math.rad(1.0)
 
 POSE_GRAPH.optimize_every_n_nodes = 40
-POSE_GRAPH.optimization_problem.ceres_solver_options.num_threads = 4
+POSE_GRAPH.optimization_problem.ceres_solver_options.num_threads = 2   -- leave cores for the Python nodes (all 4 busy = stale odometry = "position lost")
 POSE_GRAPH.constraint_builder.min_score = 0.60
 POSE_GRAPH.constraint_builder.global_localization_min_score = 0.65
 

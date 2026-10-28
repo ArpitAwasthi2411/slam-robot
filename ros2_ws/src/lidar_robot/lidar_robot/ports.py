@@ -1,7 +1,8 @@
 """Find the ESP32's serial port without grabbing the LiDAR's (pure Python, unit-tested).
 
 Search order:
-  1. /dev/esp32           udev symlink (scripts/install_udev.sh) — the reliable way
+  1. /dev/esp32           udev symlink: the Pi's GPIO UART /dev/ttyAMA0 (scripts/setup_pi_uart.sh,
+                          firmware v2.6) or the S3's USB (scripts/install_udev.sh)
   2. /dev/ttyACM*         ESP32-S3 native USB
   3. /dev/ttyUSB*         classic ESP32 (CP2102/CH340 bridge) — same family as the RPLiDAR,
                           so the LiDAR's port (and /dev/rplidar's target) is always skipped
@@ -32,6 +33,16 @@ def pick_esp32_port(exclude=(), glob_fn=glob.glob, realpath=os.path.realpath):
     return None, False
 
 
+def uart_ports(glob_fn=glob.glob, realpath=os.path.realpath):
+    """The ESP32 on the Pi's GPIO UART: /dev/esp32 when it points at a non-USB tty (/dev/ttyAMA0)."""
+    out = []
+    for link in glob_fn('/dev/esp32'):
+        real = realpath(link)
+        if not real.startswith(('/dev/ttyUSB', '/dev/ttyACM')):
+            out.append(real)
+    return out
+
+
 def detect_ports(ports=None, open_fn=None, listen_s=6.0, wait_devices_s=15.0, clock=None, sleep=None):
     """Find the ESP32 and the LiDAR by what they send, whatever USB socket they're in.
 
@@ -54,7 +65,7 @@ def detect_ports(ports=None, open_fn=None, listen_s=6.0, wait_devices_s=15.0, cl
     if ports is None:
         end = clock() + wait_devices_s           # at boot the USB devices can appear late
         while True:
-            ports = sorted(glob.glob('/dev/ttyUSB*')) + sorted(glob.glob('/dev/ttyACM*'))
+            ports = sorted(glob.glob('/dev/ttyUSB*')) + sorted(glob.glob('/dev/ttyACM*')) + uart_ports()
             if len(ports) >= 2 or clock() > end:
                 break
             sleep(0.5)

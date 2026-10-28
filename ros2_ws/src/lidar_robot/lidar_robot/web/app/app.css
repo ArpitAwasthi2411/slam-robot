@@ -562,3 +562,38 @@ body.tab-me .rail, body.tab-me .cockpit { display: none; }
 :root, :root[data-theme="dark"] { --joy-bg: rgba(16,16,20,.82); --joy-knob: rgba(30,30,37,.95); --chart-grid: rgba(255,255,255,.06); }
 :root[data-theme="light"] { --joy-bg: rgba(255,255,255,.88); --joy-knob: rgba(255,255,255,.98); --chart-grid: rgba(0,0,0,.07); }
 body.tab-me .m-hint, body.tab-go .m-hint, body.tab-lab .m-hint { display: none; }
+
+/* ---------- camera (vision node): chip in the top bar, picture-in-picture card, map banner ---------- */
+.cam-chip { position: relative; display: inline-flex; align-items: center; padding: 7px 10px; }
+.cam-chip svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+.cam-chip[aria-pressed="true"] { color: var(--orange); border-color: rgba(255,159,46,.55); }
+.cam-chip i { position: absolute; right: 5px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--dim-2); }
+.cam-chip i.go { background: var(--good); } .cam-chip i.slow { background: var(--orange); }
+.cam-chip i.stop { background: var(--red); animation: cam-pulse 1s infinite; }
+@keyframes cam-pulse { 50% { opacity: .35; } }
+.cam { position: absolute; right: 12px; top: calc(62px + var(--safe-t)); z-index: 7; width: min(48vw, 320px);
+  border-radius: var(--r-m); padding: 8px; display: grid; gap: 6px; box-shadow: 0 10px 30px var(--shadow); }
+.cam.big { left: 12px; width: auto; }
+.cam-h { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cam-act { font-family: var(--display); font-weight: 700; font-size: 13px; padding: 3px 9px; border-radius: 999px;
+  background: var(--surface-3); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cam-act.go { background: rgba(71,227,164,.18); color: var(--good); }
+.cam-act.slow { background: rgba(255,159,46,.2); color: var(--orange); }
+.cam-act.stop { background: var(--red); color: #fff; }
+.cam-fps { flex: 1; font-size: 11px; color: var(--dim); white-space: nowrap; }
+.cam-btn { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line-2);
+  background: transparent; color: var(--text); display: grid; place-items: center; cursor: pointer; }
+.cam-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.cam-pic { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-s); overflow: hidden; background: #000; }
+.cam-pic img, .cam-pic canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-empty { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; padding: 10px;
+  text-align: center; font-size: 12.5px; color: #cfc9c0; }
+.cam-why { margin: 0; font-size: 13px; line-height: 1.35; }
+.cam-people { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12.5px; color: var(--dim); }
+.cam-people b { color: var(--text-2); font-weight: 650; }
+.cam-people em { color: var(--orange); font-style: normal; }
+.cam-people:empty { display: none; }
+.m-vis { position: absolute; left: 12px; right: 12px; top: calc(112px + var(--safe-t)); z-index: 6; padding: 10px 14px;
+  border-radius: var(--r-m); font-size: 14px; border-color: rgba(255,159,46,.55); }
+.m-vis b { font-family: var(--display); }
+@media (max-width: 420px) { .cam:not(.big) { width: 56vw; } .cam:not(.big) .cam-fps { display: none; } .cam-act { flex: 1; } }

@@ -246,7 +246,8 @@ function enterMain(user, pending = 0) {
   else if (!user.legacy) toast(`Welcome, ${user.name || user.username}`);
   S.gen++; S.fails = 0; S.mapVer = -1; S.mapImg = null; S.st = null;
   const g = S.gen;
-  pollState(g); pollMap(g);
+  pollState(g); pollMap(g); pollCam(g);
+  setCam(CAM.open);
   resize();
   $('#m-hint').classList.remove('gone');
   setTimeout(() => $('#m-hint').classList.add('gone'), 7000);
@@ -340,6 +341,96 @@ async function pollState(g) {
     await sleep(S.fails ? Math.min(2000, 250 * S.fails) : every);
   }
 }
+// ------------------------------------------------------------------ camera (vision node on the robot)
+const CAM = { open: !!store.get('cam', false), big: false, url: null };
+const VIS_TXT = { STOP: 'Stopped: person', SLOW_DOWN: 'Slowing down', CONTINUE: 'Path clear', UNKNOWN: 'Camera only' };
+const VIS_CLS = { STOP: 'stop', SLOW_DOWN: 'slow', CONTINUE: 'go' };
+function setCam(open) {
+  CAM.open = open; store.set('cam', open);
+  $('#cam').hidden = !open; $('#t-cam').setAttribute('aria-pressed', open);
+  if (S.st) renderVision(S.st);
+}
+$('#t-cam').onclick = () => { haptic(8); setCam(!CAM.open); };
+$('#cam-x').onclick = () => setCam(false);
+$('#cam-size').onclick = () => { CAM.big = !CAM.big; $('#cam').classList.toggle('big', CAM.big); };
+async function camFrame() {
+  if (BASE === DEMO) { drawDemoCam(S.st && S.st.vision); return true; }
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 3000);
+  try {
+    const r = await fetch(BASE + '/api/camera.jpg', { signal: ctl.signal, cache: 'no-store',
+      headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {} });
+    if (!r.ok) return false;
+    const url = URL.createObjectURL(await r.blob());
+    const img = $('#cam-img'), old = CAM.url;
+    CAM.url = url;
+    img.onload = () => { if (old) URL.revokeObjectURL(old); };
+    img.src = url;
+    return true;
+  } catch (e) { return false; } finally { clearTimeout(t); }
+}
+async function pollCam(g) {
+  while (g === S.gen) {
+    if (CAM.open && !document.hidden) {
+      const ok = await camFrame();
+      $('#cam-img').hidden = !ok || BASE === DEMO;
+      $('#cam-demo').hidden = BASE !== DEMO;
+      $('#cam-empty').hidden = ok;
+    }
+    // ~5 pictures a second on Wi-Fi, ~2 over mobile data; nothing while closed
+    await sleep(!CAM.open || document.hidden ? 500 : S.rtt > 150 ? 450 : 200);
+  }
+}
+function renderVision(st) {
+  const v = st.vision, navs = st.nav || {}, note = navs.vision || '';
+  $('#t-cam').hidden = !v && !st.camera && BASE !== DEMO;
+  const act = v ? v.action : 'UNKNOWN', cls = VIS_CLS[act] || 'off';
+  $('#t-cam-dot').className = cls;
+  // on the map: say it when the camera is holding the robot back (the card says it when open)
+  const mv = $('#m-vis');
+  mv.hidden = !note || CAM.open;
+  if (note) mv.innerHTML = `<b>${/waiting/.test(note) ? 'Waiting for a person.' : 'Slowing down.'}</b> ${esc(note.replace(/^camera: /, ''))}`;
+  if (!CAM.open) return;
+  const a = $('#cam-act');
+  a.textContent = v ? (VIS_TXT[act] || act) : 'Camera off';
+  a.className = 'cam-act ' + cls;
+  $('#cam-fps').textContent = v && v.fps ? `${v.fps}/s${v.lidar ? ' · LiDAR' : ''}` : '';
+  let why;
+  if (!v) why = 'The camera program is not running on the robot (vision:=false or not installed).';
+  else if (!v.camera_ok) why = v.camera_error || 'No picture from the camera.';
+  else if (!v.detector) why = v.detector_error || 'People detection is off.';
+  else why = (v.reason || '') + (act === 'SLOW_DOWN' ? ` (speed ×${v.speed_factor})` : '') +
+             (note ? '. The robot is obeying this.' : '');
+  $('#cam-why').textContent = why;
+  if (!v || !v.camera_ok) $('#cam-empty').textContent = why;
+  $('#cam-people').innerHTML = ((v && v.people) || []).map(p => {
+    const b = Math.round(p.bearing_deg), side = Math.abs(b) <= 15 ? 'ahead' : `${Math.abs(b)}° ${b < 0 ? 'left' : 'right'}`;
+    return `<li><b>Person ${p.id}</b> ${side}${p.distance_m != null ? ` · ${(+p.distance_m).toFixed(1)} m` : ''}` +
+           `${p.approaching ? ' · <em>coming closer</em>' : p.moving_away ? ' · moving away' : ''}</li>`;
+  }).join('');
+}
+function drawDemoCam(v) {                       // demo: a drawn corridor with the simulated people
+  const c = $('#cam-demo'), g = c.getContext('2d'), w = c.width, h = c.height;
+  g.fillStyle = '#c9c2b6'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#9b948a'; g.beginPath(); g.moveTo(0, h); g.lineTo(w * 0.42, h * 0.45); g.lineTo(w * 0.58, h * 0.45); g.lineTo(w, h); g.fill();
+  g.fillStyle = '#e7e1d6'; g.fillRect(w * 0.42, h * 0.18, w * 0.16, h * 0.27);
+  g.strokeStyle = 'rgba(255,255,255,.7)'; g.setLineDash([4, 4]);
+  [-15, 15].forEach(a => { g.beginPath(); g.moveTo(w / 2 + a / 102 * w, h); g.lineTo(w / 2 + a / 102 * w, h * 0.45); g.stroke(); });
+  g.setLineDash([]);
+  ((v && v.people) || []).forEach(p => {
+    const d = p.distance_m || 3, bh = Math.min(h * 0.95, h * 0.55 / d), bw = bh * 0.38;
+    const x = w / 2 + p.bearing_deg / 102 * w - bw / 2, y = h * 0.45 + h * 0.25 / d - bh * 0.55;
+    g.fillStyle = '#3d4a5c'; g.fillRect(x + bw * 0.2, y + bh * 0.2, bw * 0.6, bh * 0.8);
+    g.beginPath(); g.arc(x + bw / 2, y + bh * 0.11, bw * 0.22, 0, 7); g.fill();
+    g.strokeStyle = Math.abs(p.bearing_deg) <= 15 ? (v.action === 'STOP' ? '#e8282a' : '#ffaa00') : '#00c8ff';
+    g.lineWidth = 2; g.strokeRect(x, y, bw, bh);
+    g.fillStyle = g.strokeStyle; g.font = '11px sans-serif';
+    g.fillText(`${p.bearing_deg > 0 ? '+' : ''}${Math.round(p.bearing_deg)}° ${d.toFixed(1)}m`, x, Math.max(11, y - 3));
+  });
+  g.fillStyle = 'rgba(0,0,0,.75)'; g.fillRect(0, 0, w, 18);
+  g.fillStyle = { STOP: '#ff5a4f', SLOW_DOWN: '#ffb547', CONTINUE: '#47e3a4' }[v && v.action] || '#bbb';
+  g.font = 'bold 11px sans-serif'; g.fillText(`DEMO  ${v ? v.action : ''}  ${v ? v.reason : ''}`.slice(0, 60), 6, 13);
+}
 async function pollMap(g) {
   while (g === S.gen) {
     try {
@@ -387,7 +478,7 @@ function onState(st) {
   // banner on the map for things that block driving
   const banner = $('#m-banner');
   let b = '';
-  if (!st.bridge_alive) b = '<b>Motor board not talking.</b> Check the ESP32 USB cable, then restart with robot_up.';
+  if (!st.bridge_alive) b = '<b>Motor board not talking.</b> Check the ESP32 power and its 3 wires to the Pi (pins 6, 8, 10).';
   else if (!st.pose) b = '<b>Waiting for the robot’s position.</b> Is the LiDAR spinning?';
   else if (navs && navs.localized === false) b = '<b>Confirm the position.</b> Drive a little until the orange dots sit on the walls, then Map → Position OK. Wrong place? Use the Locate tool.';
   banner.innerHTML = b; banner.hidden = !b; banner.classList.remove('link');
@@ -398,6 +489,7 @@ function onState(st) {
   $('#d-v').textContent = fmt(od.v); $('#d-w').textContent = fmt(od.w);
 
   renderWhere(st);
+  renderVision(st);
   renderExplore(st);
   renderMapStats(st);
   if (S.tab === 'go') renderGo(st);

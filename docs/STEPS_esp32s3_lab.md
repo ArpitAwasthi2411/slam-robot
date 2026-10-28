@@ -29,7 +29,7 @@ cd slam-robot
    then press **RST** once after it finishes.
 5. **Check:** Serial Monitor at **115200**:
    ```
-   INFO,READY,robot_esp32 v2.5 ESP32-S3 reset=POWERON
+   INFO,READY,robot_esp32 v2.6 ESP32-S3 reset=POWERON link=uart47/8
    ```
    The on-board LED **breathes blue**. Dark LED → change `#define RGB_PIN 48` to `38`, upload again.
 6. Type `?` → config lines. Type `L,255,0,255,2000` → LED magenta for 2 s.
@@ -37,7 +37,9 @@ cd slam-robot
 ## 2. Wiring (battery OFF, ESP32 unplugged)
 
 Follow `hardware/CONNECTIONS_esp32s3.md` in this order: power + capacitors (section 1) → motor drivers (2) →
-encoders (3) → RC (4) → IMU (5) → ultrasonics + level shifter (6) → e-stop (7) → ESP32 GND + USB (8).
+encoders (3) → RC (4) → IMU (5) → ultrasonics + level shifter (6) → e-stop (7) → ESP32 ↔ Pi UART (8):
+**ESP32 GPIO 47 → Pi pin 10, ESP32 GPIO 8 → Pi pin 8, ESP32 GND → Pi pin 6**, ESP32 **5V** ← buck 5 V (P10).
+No USB cable between the ESP32 and the Pi any more.
 
 Before power-on, with the multimeter:
 - [ ] Buck output = **5.0–5.1 V**
@@ -45,13 +47,18 @@ Before power-on, with the multimeter:
 - [ ] Battery divider midpoint (if fitted) **< 2.5 V** with the battery connected
 - [ ] Encoder A pin swings 0 → ≤ 3.3 V when you turn the wheel (encoder on 3V3)
 - [ ] No ECHO wire goes straight to the ESP32
+- [ ] Pi header: the 3 ESP32 wires are on pins **6, 8, 10** (the even row along the board edge), not on 2/4 (5 V)
+- [ ] TX/RX crossed: ESP32 **47 → pin 10**, ESP32 **8 → pin 8**
 
 If you fitted the battery divider: set `#define USE_BAT_ADC 1` and upload again.
 If you fitted bumpers: `#define USE_BUMPER 1`.
 
 ## 3. First power-up checks (robot ON BLOCKS, wheels in the air, ESP32 on the laptop USB)
 
-Serial Monitor 115200:
+**Unplug the ESP32's 5V wire (P10) first**, then plug the laptop USB into the ESP32's "USB" socket: the laptop powers
+the ESP32, the battery powers the motors. Never have both the 5V wire and the USB cable in at once.
+
+Serial Monitor 115200 (the firmware talks on USB and on the Pi UART at the same time):
 1. **Encoders:** turn each wheel forward by hand → `ODM,` values go up (positive) on both.
    Wrong sign → flip `LEFT_ENC_DIR` / `RIGHT_ENC_DIR` (1 ↔ −1), upload.
 2. **Motors:** battery ON. Type `P,120,120` → both wheels turn **forward**. `S` stops.
@@ -63,7 +70,8 @@ Serial Monitor 115200:
 7. **Ultrasonics:** `US,` lines; hand 30 cm in front of each sensor ≈ `300`.
 8. **Battery:** `INFO,battery sensor: divider on GPIO 1` and `BAT,` mV ≈ multimeter reading (± 0.2 V).
 
-Close the Serial Monitor. Plug the ESP32 into the **Pi** instead of the laptop.
+Close the Serial Monitor. **Unplug the laptop USB, plug the ESP32 5V wire (P10) back in.** The ESP32 now runs
+from the buck and talks to the Pi over the 3 UART wires.
 
 ## 4. Connect to the Pi
 
@@ -74,7 +82,7 @@ ssh arpit@169.254.1.2                 # host key error: ssh-keygen -R 169.254.1.
 ```
 **Check** on the Pi:
 ```bash
-ls /dev/ttyACM* /dev/ttyUSB*          # expect /dev/ttyACM0 (ESP32-S3) and /dev/ttyUSB0 (LiDAR)
+ls /dev/ttyUSB*                       # expect /dev/ttyUSB0 (LiDAR)
 vcgencmd get_throttled                # must be throttled=0x0
 ```
 
@@ -95,6 +103,23 @@ colcon build --symlink-install --packages-select lidar_robot
 sudo cp ~/slam-robot/scripts/robot.service /etc/systemd/system/ && sudo systemctl daemon-reload
 ```
 
+## 5b. Free the Pi's GPIO UART for the ESP32 (once per SD card)
+
+Ubuntu puts a login console and Bluetooth on pins 8/10. The script moves them off (backups as `*.bak-pathik`).
+Pi:
+```bash
+sudo bash ~/slam-robot/scripts/setup_pi_uart.sh
+sudo reboot
+```
+After the reboot (ssh again):
+```bash
+ls -l /dev/esp32 /dev/ttyAMA0                          # /dev/esp32 -> ttyAMA0
+sudo systemctl stop robot
+python3 -m serial.tools.miniterm /dev/ttyAMA0 115200   # ODM,... lines scroll. Type ? + Enter -> INFO lines. Ctrl+] quits
+```
+**Check:** `ODM,` lines arrive (ESP32 → Pi works) **and** `?` answers (Pi → ESP32 works).
+Nothing at all → swap the wires on pins 8 and 10. Only one direction works → that wire or the GND (pin 6).
+
 ## 6. robot.env (ports + Groq key; this file never goes to GitHub)
 
 Pi:
@@ -104,16 +129,17 @@ nano ~/robot.env
 ```
 Contents (paste your own key from console.groq.com, keep the quotes off):
 ```
-ROBOT_ARGS=esp32_port:=/dev/ttyACM0 lidar_port:=/dev/ttyUSB0
+ROBOT_ARGS=esp32_port:=/dev/ttyAMA0 lidar_port:=/dev/ttyUSB0
 GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxx
 ```
 ```bash
 chmod 600 ~/robot.env
 bash ~/slam-robot/tools/link_doctor.sh --fix     # Wi-Fi power save off, stop ModemManager/brltty (needs sudo)
 sudo systemctl enable --now robot
-journalctl -u robot -f                           # look for "Connected to ESP32 on /dev/ttyACM0"; Ctrl+C
+journalctl -u robot -f                           # look for "Connected to ESP32 on /dev/ttyAMA0"; Ctrl+C
 ```
-**Check:** `bash ~/slam-robot/tools/link_doctor.sh` shows the ESP32 on /dev/ttyACM0 and no errors.
+**Check:** `bash ~/slam-robot/tools/link_doctor.sh` shows the ESP32 on /dev/ttyAMA0, "serial console off",
+"disable-bt set" and no errors.
 
 ## 7. App: install, first account, drive
 
@@ -186,7 +212,10 @@ Then add places (Lab, HOD office, …) and rooms with contents, and try:
 
 | Problem | Fix |
 |---|---|
-| No `/dev/ttyACM0` | cable is power-only, or plugged into the "COM" socket. Try another cable / socket |
+| No `/dev/ttyAMA0` / `/dev/esp32` | `setup_pi_uart.sh` not run, or no reboot after it |
+| miniterm shows nothing | ESP32 not powered (5V wire), wires on 8/10 swapped, or GND (pin 6) missing |
+| miniterm shows garbage / a `login:` prompt | serial console still on: run `setup_pi_uart.sh` again, reboot |
+| Laptop doesn't see the ESP32 for flashing | USB cable is power-only, or plugged into the "COM" socket. Try another cable / socket |
 | ESP32 port appears, but app says motor board offline | `journalctl -u robot -f`; check `robot.env` ports; `bash ~/slam-robot/tools/link_doctor.sh` |
 | LED blue forever when on the Pi | the robot service isn't running or holds the wrong port |
 | Upload: "No serial data received" | hold BOOT, tap RST, upload |

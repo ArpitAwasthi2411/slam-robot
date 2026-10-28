@@ -18,11 +18,14 @@ Arguments
   dashboard     true        web dashboard on http://<pi>:8080
   places        ~/maps/places.json
   lidar_port    auto           the USB-serial port that is NOT the ESP32 (or give a path, e.g. /dev/ttyUSB0)
-  esp32_port    auto           the port that streams ODM lines (found at every start, any USB socket)
+  esp32_port    auto           the port that streams ODM lines (found at every start, any USB socket,
+                               or the GPIO UART /dev/ttyAMA0 when /dev/esp32 points at it)
   laser_x/y/z/yaw              LiDAR pose on the robot (base_link -> laser)
   us_x / us_y / us_side_deg / us_z   ultrasonic mounts: centre at (us_x, 0), left/right at
                                (us_x, +-us_y) angled +-us_side_deg outwards, height us_z
   imu_x/imu_y/imu_z            MPU-6050 position (orientation: chip X forward, Z up)
+  vision        true        camera people detection (vision node); the navigator slows / stops for people
+  camera        auto        auto | libcamera (Camera Module 3) | /dev/videoN (USB webcam)
 """
 import os
 
@@ -48,6 +51,7 @@ def _setup(context):
     map_file = os.path.expanduser(cfg('map'))
     nav_mode = cfg('nav_mode')
     places = os.path.expanduser(cfg('places'))
+    vision = _truthy(cfg('vision'))
 
     if slam and slam_mode == 'localization':
         if not map_file or not os.path.isfile(map_file):
@@ -76,7 +80,8 @@ def _setup(context):
     actions_ports = [LogInfo(msg=f'[bringup] ports: ESP32={esp_port}  LiDAR={lidar_port}{port_msg}')]
 
     actions = actions_ports + [LogInfo(msg=f'[bringup] odom={use_odom} slam={slam} slam_mode={slam_mode} '
-                           f'map={map_file or "-"} nav_mode={nav_mode} dashboard={cfg("dashboard")}')]
+                           f'map={map_file or "-"} nav_mode={nav_mode} dashboard={cfg("dashboard")} '
+                           f'vision={vision} camera={cfg("camera")}')]
 
     actions.append(Node(
         package='tf2_ros', executable='static_transform_publisher', name='base_to_laser',
@@ -126,18 +131,24 @@ def _setup(context):
         actions.append(Node(
             package='cartographer_ros', executable='cartographer_occupancy_grid_node',
             name='cartographer_occupancy_grid_node', output='screen',
-            arguments=['-resolution', '0.05', '-publish_period_sec', '1.0']))
+            arguments=['-resolution', '0.05', '-publish_period_sec', '2.0']))
 
     goal_frame = 'map' if slam else 'odom'
     if nav_mode == 'planner':
         actions.append(Node(
             package='lidar_robot', executable='navigator', name='navigator', output='screen',
             parameters=[params, {'global_frame': goal_frame, 'places_file': places,
-                                 'require_localization_confirm': slam and slam_mode == 'localization'}]))
+                                 'require_localization_confirm': slam and slam_mode == 'localization',
+                                 'use_vision': vision}]))
     elif nav_mode == 'direct':
         actions.append(Node(
             package='lidar_robot', executable='goal_controller', name='goal_controller',
             output='screen', parameters=[params, {'global_frame': goal_frame}]))
+
+    if vision:
+        actions.append(Node(
+            package='lidar_robot', executable='vision', name='vision', output='screen',
+            parameters=[params, {'camera': cfg('camera'), 'laser_yaw': float(cfg('laser_yaw'))}]))
 
     if _truthy(cfg('dashboard')):
         actions.append(Node(
@@ -157,6 +168,7 @@ def generate_launch_description():
         ('laser_x', '-0.13'), ('laser_y', '0.0'), ('laser_z', '0.10'), ('laser_yaw', '0.0'),
         ('us_x', '0.07'), ('us_y', '0.12'), ('us_side_deg', '30'), ('us_z', '0.06'),
         ('imu_x', '0.0'), ('imu_y', '0.0'), ('imu_z', '0.05'),
+        ('vision', 'true'), ('camera', 'auto'),
     ]
     return LaunchDescription(
         [DeclareLaunchArgument(n, default_value=d) for n, d in args] + [OpaqueFunction(function=_setup)])

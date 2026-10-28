@@ -27,7 +27,7 @@ MM_PER_TICK = math.pi * WHEEL_D_MM / TICKS_PER_REV
 def find_port(p):
     if p != 'auto':
         return p
-    for pat in ('/dev/esp32', '/dev/ttyACM*'):
+    for pat in ('/dev/esp32', '/dev/ttyACM*', '/dev/ttyAMA0'):   # ttyAMA0 = Pi GPIO UART (firmware v2.6)
         hits = sorted(glob.glob(pat))
         if hits:
             return hits[0]
@@ -119,7 +119,9 @@ def cmd_watch(s, secs):
               '    classic ESP32: is this really the ESP32 port and not the LiDAR? (--port)\n'
               ' 3. Press the ESP32 RESET (RST) button, run this again\n'
               ' 4. sudo systemctl stop ModemManager   (it grabs /dev/ttyACM* devices)\n'
-              ' 5. Try the other USB socket on the ESP32 board (UART vs USB)')
+              ' 5. Try the other USB socket on the ESP32 board (UART vs USB)\n'
+              ' 6. GPIO UART (/dev/ttyAMA0): ESP GPIO 47 -> Pi pin 10, ESP GPIO 8 <- Pi pin 8, GND -> pin 6;\n'
+              '    serial console off + Bluetooth moved off the UART: sudo bash scripts/setup_pi_uart.sh')
     elif '3' in st.modes:
         print('-> ESP32 E-STOP is latched (mode 3). Release from the dashboard, or press the ESP32 RESET button.')
     elif not any(m in st.modes for m in ('0', '1', '2')):

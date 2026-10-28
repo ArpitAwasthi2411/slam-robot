@@ -228,3 +228,31 @@ def test_http_login_roles_and_admin_flow(tmp_path):
     finally:
         srv.stop()
         time.sleep(0.05)
+
+
+def test_http_camera_picture_needs_login(tmp_path):
+    from lidar_robot.dashboard_server import DashboardServer
+
+    class CamBackend(Backend):
+        jpg = None
+
+        def camera_jpeg(self):
+            return self.jpg
+
+    be = CamBackend()
+    users = UserStore(str(tmp_path / 'users.json'))
+    srv = DashboardServer(be, host='127.0.0.1', port=0, users=users)
+    srv.start()
+    base = f'http://127.0.0.1:{srv.httpd.server_address[1]}'
+    try:
+        token = call(base, '/api/auth/signup', {'username': 'arpit', 'password': 'secret1'})[1]['token']
+        assert call(base, '/api/camera.jpg')[0] == 401
+        assert call(base, '/api/camera.jpg', token=token)[0] == 404          # camera not running yet
+        be.jpg = b'\xff\xd8\xff\xe0fakejpeg' * 200
+        req = urllib.request.Request(base + '/api/camera.jpg', headers={'Authorization': 'Bearer ' + token,
+                                                                         'Accept-Encoding': 'gzip'})
+        with urllib.request.urlopen(req) as r:
+            assert r.status == 200 and r.headers['Content-Type'] == 'image/jpeg'
+            assert r.headers.get('Content-Encoding') is None and r.read() == be.jpg   # JPEG is never gzipped
+    finally:
+        srv.stop()

@@ -263,7 +263,8 @@ def required_role(method, path, body=None):
         return None
     if path.startswith('/api/users'):
         return 'admin'
-    if path in ('/api/state', '/api/map', '/api/auth/me', '/api/auth/logout', '/api/auth/password'):
+    if path in ('/api/state', '/api/map', '/api/camera.jpg', '/api/auth/me', '/api/auth/logout',
+                '/api/auth/password'):
         return 'staff'
     if path == '/api/estop':
         # anyone logged in can STOP the robot; releasing the stop needs the robot team

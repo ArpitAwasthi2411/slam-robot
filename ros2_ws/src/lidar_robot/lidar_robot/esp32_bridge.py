@@ -47,7 +47,7 @@ from lidar_robot.tuning import clamp_values, WHEEL_RANGES
 
 RESET_HINTS = {
     'BROWNOUT': 'Supply dipped: motors pulling the ESP32 power down -> 1000 uF cap on its 5 V, separate supply.',
-    'POWERON': 'Power was lost completely: USB cable/port or the Pi\'s USB power.',
+    'POWERON': 'Power was lost completely: the ESP32 5V wire from the buck (or its USB cable), or the buck itself.',
     'EXT': 'RESET/EN pin pulsed: USB-serial DTR/RTS glitch or noise on EN.',
     'PANIC': 'Firmware crashed: send the log to Claude.',
     'INT_WDT': 'Firmware hung in an interrupt: likely noise on encoder/RC/echo pins flooding interrupts.',
@@ -228,7 +228,7 @@ class Esp32Bridge(Node):
                         if not warned_missing:
                             self.get_logger().error(
                                 'No ESP32 serial port found (tried /dev/esp32, /dev/ttyACM*, /dev/ttyUSB*). '
-                                'Is the USB cable in? Retrying every 2 s.')
+                                'Is the cable in? GPIO UART: run scripts/setup_pi_uart.sh. Retrying every 2 s.')
                             warned_missing = True
                         time.sleep(2.0)
                         continue
@@ -511,7 +511,9 @@ class Esp32Bridge(Node):
                 f'Port {self.port} is open but no ODM data for {age:.0f}s. Check: '
                 '(1) firmware v2 flashed, (2) Arduino IDE "USB CDC On Boot" setting, '
                 '(3) press the ESP32 RESET button, '
-                '(4) run tools/serial_probe.py to see raw output.',
+                '(4) run tools/serial_probe.py to see raw output, '
+                '(5) GPIO UART (/dev/ttyAMA0): TX/RX crossed, GND joined, Pi serial console off '
+                '(scripts/setup_pi_uart.sh).',
                 throttle_duration_sec=10.0)
 
     def _publish_status(self):
