@@ -1,12 +1,13 @@
-# Wiring: ESP32-S3 (firmware `firmware/robot_esp32s3`, v2.5)
+# Wiring: ESP32-S3 (firmware `firmware/robot_esp32s3`, v2.6)
 
 Board: **ESP32-S3-DevKitC-1** (N8, N8R8, N16R8 all fine). Flash with Arduino IDE → *ESP32S3 Dev Module*,
 **USB Mode: Hardware CDC and JTAG**, **USB CDC On Boot: Enabled**, using the socket labelled **USB**
-(not "COM"/"UART"). The Pi then sees it as **/dev/ttyACM0** and the LiDAR stays **/dev/ttyUSB0**:
-they can no longer be swapped.
+(not "COM"/"UART"). Since v2.6 the Pi talks to it over the **GPIO UART** (Pi header pins 8/10, 3 wires):
+the Pi sees it as **/dev/ttyAMA0** (= /dev/esp32) and the LiDAR stays **/dev/ttyUSB0**. The USB socket
+is only for flashing / the laptop Serial Monitor (the firmware talks on both).
 
 **Pins never used:** 0, 3, 45, 46 (boot straps) · 19, 20 (USB) · 26–32 (flash) · 33–37 (PSRAM on R8 boards) ·
-43, 44 (UART0, kept for debugging) · 48 or 38 (on-board RGB LED).
+43, 44 (UART0: the board's own USB-UART chip is on them) · 48 or 38 (on-board RGB LED).
 
 ## 1. Pin table
 
@@ -35,9 +36,11 @@ they can no longer be swapped.
 | **1** | Battery divider midpoint | `USE_BAT_ADC 1` |
 | **48** | on-board RGB LED | already on the board (38 on DevKitC-1 v1.1: set `RGB_PIN`) |
 | **3V3** | encoder VCC, MPU VCC, INA226 VCC, level shifter **LV** | |
-| **5V** | from the 5 V buck (only if the board is *not* powered by the Pi's USB, see 3) | |
-| **GND** | common ground: everything | |
-| **USB** socket | Pi USB | power + data, /dev/ttyACM0 |
+| **47** | Pi header **pin 10** (GPIO 15, RXD) | ESP32 TX → Pi RX, direct (both 3.3 V) |
+| **8** | Pi header **pin 8** (GPIO 14, TXD) | Pi TX → ESP32 RX, direct |
+| **5V** | from the 5 V buck | the ESP32's power since v2.6 |
+| **GND** | common ground: everything, and Pi header **pin 6** | |
+| **USB** socket | laptop only (flashing) | unplug the 5V wire first |
 
 ## 2. Do I need level shifters?
 
@@ -65,24 +68,25 @@ measure A to GND. It must swing between 0 and **≤ 3.3 V**.
                                       │              └── level shifter HV
                                       └── 100k ── GPIO 1 ── 22k ── GND   (battery %)
 3S battery − ── common GND (buck, drivers, ESP32, Pi, sensors)
-ESP32-S3: powered by the Pi's USB  ->  1000 µF 25 V across its 5V/GND pins (stripe to GND)
+                                                     └── ESP32-S3 5V pin (+1000 µF 25 V across its 5V/GND, stripe to GND)
 Each motor: 100 nF soldered across its two terminals
 ```
 - All four BTS7960 **EN** pins: 5 V → e-stop **NC** contact → R_EN/L_EN (+10k to GND), unchanged.
-- Do **not** connect the buck's 5 V to the ESP32's 5V pin *and* the Pi USB at the same time.
+- Do **not** have the buck's 5 V on the ESP32's 5V pin *and* a USB cable in the ESP32 at the same time:
+  unplug the 5V wire before flashing from the laptop.
 
 ## 4. Pi side
 
 ```bash
+sudo bash ~/slam-robot/scripts/setup_pi_uart.sh   # UART on pins 8/10 free: console off, Bluetooth off the UART
+sudo reboot
 # robot.env
-ROBOT_ARGS=esp32_port:=/dev/ttyACM0 lidar_port:=/dev/ttyUSB0
-# optional fixed names (/dev/esp32, /dev/rplidar), the S3 has its own USB ID so this now just works:
-sudo bash ~/slam-robot/scripts/install_udev.sh
+ROBOT_ARGS=esp32_port:=/dev/ttyAMA0 lidar_port:=/dev/ttyUSB0
 ```
 
 ## 5. First power-up checks (in order)
 
-1. Only USB connected → flash → Serial Monitor 115200 → `INFO,READY,robot_esp32 v2.5 ESP32-S3 reset=POWERON`.
+1. Only USB connected → flash → Serial Monitor 115200 → `INFO,READY,robot_esp32 v2.6 ESP32-S3 reset=POWERON link=uart47/8`.
    The LED **breathes blue** (waiting for the Pi). If it stays dark: `RGB_PIN 38`.
 2. Type `?` → config lines. Type `L,255,0,255,2000` → LED magenta for 2 s.
 3. Encoders (wheels by hand): `ODM,` values change; forward roll → both positive (else flip `*_ENC_DIR`).
@@ -90,7 +94,8 @@ sudo bash ~/slam-robot/scripts/install_udev.sh
    The LED turns **rainbow** while the Pi drives.
 5. RC: sticks move the wheels, LED **magenta**. `E` → LED **flashes red**, `R` releases.
 6. IMU: `?` shows `imu=ok`. Ultrasonics: `US,` lines, hand at 30 cm ≈ 300.
-7. Plug into the Pi, `sudo systemctl restart robot`, app → Motor board ≈ 50 Hz. LED **teal** when idle.
+7. Unplug USB, connect the 3 UART wires + the 5V wire, `sudo systemctl restart robot`, app → Motor board ≈ 50 Hz.
+   LED **teal** when idle.
 
 Your calibrated values from the classic sketch are already in this one (`*_MOTOR_DIR`, `*_ENC_DIR`,
 RC `STEERING_*` / `THROTTLE_*`, `TICKS_PER_REV`, speed-loop defaults). Re-check directions with

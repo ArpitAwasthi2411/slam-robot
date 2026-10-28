@@ -1,0 +1,4 @@
+# ESP32-S3 on the Pi's GPIO UART (header pins 8/10, firmware v2.6). Installed by scripts/setup_pi_uart.sh.
+# With dtoverlay=disable-bt, /dev/ttyAMA0 is the PL011 UART on GPIO 14/15 -> /dev/esp32 points at it.
+# Don't also plug the ESP32's USB socket into the Pi (the USB rule in 99-robot.rules would claim /dev/esp32 too).
+KERNEL=="ttyAMA0", SYMLINK+="esp32", GROUP="dialout", MODE="0666"

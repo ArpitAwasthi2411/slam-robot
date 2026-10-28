@@ -18,7 +18,8 @@ Arguments
   dashboard     true        web dashboard on http://<pi>:8080
   places        ~/maps/places.json
   lidar_port    auto           the USB-serial port that is NOT the ESP32 (or give a path, e.g. /dev/ttyUSB0)
-  esp32_port    auto           the port that streams ODM lines (found at every start, any USB socket)
+  esp32_port    auto           the port that streams ODM lines (found at every start, any USB socket,
+                               or the GPIO UART /dev/ttyAMA0 when /dev/esp32 points at it)
   laser_x/y/z/yaw              LiDAR pose on the robot (base_link -> laser)
   us_x / us_y / us_side_deg / us_z   ultrasonic mounts: centre at (us_x, 0), left/right at
                                (us_x, +-us_y) angled +-us_side_deg outwards, height us_z

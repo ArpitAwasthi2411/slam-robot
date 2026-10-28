@@ -33,8 +33,10 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 ## Hardware (current build)
 
 - Raspberry Pi 4 (Ubuntu 22.04, ROS 2 Humble, user `arpit`, ethernet `169.254.1.2`, Tailscale `slam-robot`).
-- RPLiDAR A1M8 → `/dev/ttyUSB0`. **ESP32-S3-DevKitC-1** (native USB) → `/dev/ttyACM0` (moving from the
-  classic ESP32, which was `/dev/ttyUSB*`).
+- RPLiDAR A1M8 → `/dev/ttyUSB0`. **ESP32-S3-DevKitC-1** on the Pi's **GPIO UART** (since 2026-10-28):
+  ESP GPIO 47 (TX) → Pi pin 10 (RXD), ESP GPIO 8 (RX) ← Pi pin 8 (TXD), GND → pin 6; ESP 5V pin from the buck.
+  Pi side `/dev/ttyAMA0` = `/dev/esp32` after `scripts/setup_pi_uart.sh` (disable-bt, console off). ESP USB socket
+  = laptop flashing only (unplug the 5V wire first). Classic ESP32 was `/dev/ttyUSB*`.
 - 2 × 12 V 100 RPM encoder motors (~4970 ticks/rev), 125 mm wheels, separation 0.30 m (to calibrate),
   2 × BTS7960, MPU-6050, 3 × HC-SR04 (ECHO via BSS138 shifter), mushroom e-stop (NC → driver EN, NO → GPIO 42),
   FlySky RC, 3S Li-ion 11.1 V 7.5 Ah, XL4015 5 V buck, battery divider 100k/22k → GPIO 1.
@@ -44,7 +46,8 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Software map
 
-- `firmware/robot_esp32s3/` **v2.5** (S3, RGB status LED, `L,r,g,b,ms`), `firmware/robot_esp32_classic/` v2.4.
+- `firmware/robot_esp32s3/` **v2.6** (S3, RGB status LED `L,r,g,b,ms`, Pi link on UART1 pins 47/8 + echo on USB,
+  only well-formed command lines accepted), `firmware/robot_esp32_classic/` v2.4.
   Serial protocol 115200 text: ESP→Pi `ODM, IMU, US, BAT, BMP, SPD, INFO`; Pi→ESP `V P S E R C G ? K W X T L`
   (`lidar_robot/protocol.py`).
 - ROS package `ros2_ws/src/lidar_robot` (ament_python). Nodes: `esp32_bridge` (odom/TF/imu/ultrasonic, link-drop
@@ -65,13 +68,13 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Current status (update every session)
 
-**Last updated: 2026-10-27**
+**Last updated: 2026-10-28**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
 
 Done in code, NOT yet verified on the robot:
-- ESP32-S3 firmware v2.5 (compiles in CI) + S3 wiring
+- ESP32-S3 firmware v2.6 + UART link to the Pi (pins 47/8 ↔ Pi 10/8), `setup_pi_uart.sh`
 - accounts/roles + redesigned app (latest APK **Pathik-11**, release v1.0.11)
 - link-drop diagnostics (v2.4.2), battery divider, docking, schedules, rooms + LLM on the real floor
 - Docker deployment, MCP server against the real robot
@@ -90,6 +93,9 @@ Open problems / TODO (priority order):
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-10-28: ESP32 ↔ Pi moved from USB to the GPIO UART (pins 6/8/10, ESP powered from the buck): firmware v2.6,
+  `scripts/setup_pi_uart.sh` + `udev/98-esp32-uart.rules`, find_ports/ports/serial_probe/link_doctor know ttyAMA0, docs.
 
 - 2026-10-27: find_ports.py recognises the S3 (/dev/ttyACM*); added `hardware/CONNECTIONS_esp32s3.md`,
   `docs/STEPS_esp32s3_lab.md` and this CLAUDE.md. Lab kit prepared (zip, S3 .ino, Pathik-11 APK).

@@ -33,7 +33,17 @@ check() {
   fi
 
   echo; echo "== Serial ports =="
-  ls -l /dev/ttyUSB* /dev/ttyACM* /dev/esp32 /dev/rplidar 2>/dev/null
+  ls -l /dev/ttyUSB* /dev/ttyACM* /dev/ttyAMA0 /dev/esp32 /dev/rplidar 2>/dev/null
+
+  echo; echo "== Pi GPIO UART (ESP32 on pins 8/10, firmware v2.6) =="
+  cmd=/boot/firmware/cmdline.txt; cfg=/boot/firmware/config.txt
+  if [ -f "$cmd" ]; then
+    grep -qE 'console=(serial0|ttyAMA0|ttyS0)' "$cmd" && echo "  serial console is ON in $cmd -> sudo bash scripts/setup_pi_uart.sh" || echo "  serial console off (good)"
+  fi
+  [ -f "$cfg" ] && { grep -qE '^dtoverlay=disable-bt' "$cfg" && echo "  dtoverlay=disable-bt set (good: ttyAMA0 = pins 8/10)" || echo "  dtoverlay=disable-bt missing in $cfg -> sudo bash scripts/setup_pi_uart.sh"; }
+  for g in serial-getty@ttyAMA0 serial-getty@ttyS0; do
+    st=$(systemctl is-active "$g" 2>/dev/null); [ "$st" = "active" ] && echo "  $g is RUNNING (it eats the ESP32 data) -> sudo bash scripts/setup_pi_uart.sh"
+  done
   echo; echo "== USB devices and the power each one asks for (Pi 4 total for all ports: 1.2 A) =="
   lsusb 2>/dev/null
   lsusb -v 2>/dev/null | awk '/^Bus /{dev=$0} /MaxPower/{print "  " $2 "  " dev}' | sort -u
@@ -44,7 +54,7 @@ check() {
     [ "$st" = "active" ] && echo "  $s is RUNNING -> sudo systemctl disable --now $s" || echo "  $s: ${st:-not installed} (good)"
   done
   echo "  processes holding the ports:"
-  for p in /dev/ttyUSB* /dev/ttyACM*; do [ -e "$p" ] && echo "    $p: $(fuser "$p" 2>/dev/null | xargs -n1 -I{} ps -o comm= -p {} 2>/dev/null | tr '\n' ' ')"; done
+  for p in /dev/ttyUSB* /dev/ttyACM* /dev/ttyAMA0; do [ -e "$p" ] && echo "    $p: $(fuser "$p" 2>/dev/null | xargs -n1 -I{} ps -o comm= -p {} 2>/dev/null | tr '\n' ' ')"; done
 
   echo; echo "== Wi-Fi (phone <-> Pi link) =="
   if command -v iw >/dev/null; then

@@ -2,7 +2,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from lidar_robot.ports import pick_esp32_port  # noqa: E402
+from lidar_robot.ports import pick_esp32_port, uart_ports  # noqa: E402
 
 
 def fake_fs(devices, links=None):
@@ -84,3 +84,17 @@ def test_detect_ports_when_esp32_is_silent_or_busy():
         return _FakePort(b'')
     esp, lidar = detect_ports(['/dev/ttyUSB0', '/dev/ttyUSB1'], busy, clock=clock, sleep=sleep)
     assert esp is None and lidar == '/dev/ttyUSB0'
+
+
+def test_gpio_uart_via_udev_symlink():
+    # firmware v2.6: ESP32 on the Pi's GPIO UART, /dev/esp32 -> /dev/ttyAMA0, LiDAR on ttyUSB0
+    g, rp = fake_fs(['/dev/esp32', '/dev/ttyAMA0', '/dev/ttyUSB0'], {'/dev/esp32': '/dev/ttyAMA0'})
+    assert pick_esp32_port(['/dev/ttyUSB0'], g, rp) == ('/dev/esp32', False)
+    assert uart_ports(g, rp) == ['/dev/ttyAMA0']
+
+
+def test_uart_ports_ignores_usb_symlink():
+    g, rp = fake_fs(['/dev/esp32', '/dev/ttyACM0'], {'/dev/esp32': '/dev/ttyACM0'})
+    assert uart_ports(g, rp) == []
+    g, rp = fake_fs(['/dev/ttyUSB0'])
+    assert uart_ports(g, rp) == []
