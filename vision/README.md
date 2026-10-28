@@ -4,11 +4,11 @@
 It sits next to `people.py` (YOLO `detect_people()` + Groq `describe()`), which lives in the vision project.
 
 - Layer 1, every frame: rules on the YOLO tracks (in path = |bearing| <= 15 deg, closeness = box height / frame height).
-- Layer 2, every 5 s: Groq text model reads the vision description + YOLO summary, replies JSON.
+- Layer 2, on SPACE/ENTER: one Groq vision call returns scene + obstacles + decision as JSON.
 - The more careful decision wins; Groq errors fall back to the rules.
 
 ```
 python -m pytest -q test_robot_decision.py     # 11 tests, no camera/internet
-python robot_decision.py                       # webcam demo (q quit, c ask Groq now)
+python robot_decision.py                       # webcam demo (SPACE/ENTER capture + decide, q quit)
 ```
-Env: GROQ_API_KEY, GROQ_VISION_MODEL, GROQ_DECISION_MODEL (default llama-3.1-8b-instant), CAMERA_INDEX, DESCRIBE_EVERY_S.
+Env: GROQ_API_KEY, GROQ_VISION_MODEL, CAMERA_INDEX. Captures are saved to captures/.
