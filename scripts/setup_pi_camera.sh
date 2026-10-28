@@ -1,31 +1,36 @@
 #!/usr/bin/env bash
 # Camera Module 3 (Wide) on Ubuntu 22.04: build Raspberry Pi's libcamera with its GStreamer element
 # (libcamerasrc), which the robot's vision node reads the camera through.
-#   sudo bash ~/slam-robot/scripts/setup_pi_camera.sh       (30-60 min on a Pi 4), then: sudo reboot
-# Another libcamera version:  sudo LIBCAMERA_TAG=v0.3.2+rpt20240927 bash setup_pi_camera.sh
+#   sudo bash ~/slam-robot/scripts/setup_pi_camera.sh       (40-70 min on a Pi 4), then: sudo reboot
+# Ubuntu 22.04 kernels have no Camera Module 3 driver: step 1 builds it (setup_imx708_driver.sh).
+# libcamera v0.1.0 is the oldest Raspberry Pi release still published, the closest to the Pi's 5.15
+# kernel. Another version:  sudo LIBCAMERA_TAG=v0.2.0+rpt20240418 bash setup_pi_camera.sh
 set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "run with sudo"; exit 1; }
-TAG="${LIBCAMERA_TAG:-v0.7.2+rpt20261009}"
+TAG="${LIBCAMERA_TAG:-v0.1.0+rpt20231122}"
 SRC=/opt/src/libcamera
 boot=/boot/firmware; [ -d "$boot" ] || boot=/boot
 cfg="$boot/config.txt"
 
-echo "== 1/5 kernel driver for the Camera Module 3 (imx708)"
-if modinfo imx708 >/dev/null 2>&1; then echo "  imx708 driver: present"
-else
-  echo "  !! kernel $(uname -r) has no imx708 driver. Update the kernel first:"
-  echo "     sudo apt update && sudo apt full-upgrade -y && sudo reboot   (then run this script again)"
+echo "== 0/5 internet"
+if ! getent hosts github.com >/dev/null || ! getent hosts ports.ubuntu.com >/dev/null; then
+  echo "  !! the Pi can't reach the internet (name lookup failed). Fix that first:"
+  echo "     ping -c2 8.8.8.8      works -> DNS problem;  fails -> no network (join Wi-Fi / hotspot)"
   exit 1
 fi
-
-echo "== 2/5 config.txt: camera auto-detect"
 cp -n "$cfg" "$cfg.bak-pathik-camera"
-if grep -qE '^camera_auto_detect=1' "$cfg"; then echo "  camera_auto_detect=1 already set"
+
+echo "== 1/5 kernel driver for the Camera Module 3 (imx708)"
+if modinfo imx708 >/dev/null 2>&1; then
+  echo "  imx708 driver: present"
+  grep -qE '^dtoverlay=imx708' "$cfg" || grep -qE '^camera_auto_detect=1' "$cfg" || \
+    printf '\n[all]\n# pathik: Camera Module 3\ncamera_auto_detect=1\n' >> "$cfg"
 else
-  sed -i -E 's/^camera_auto_detect=0/#camera_auto_detect=0/' "$cfg"
-  printf '\n[all]\n# pathik: Camera Module 3\ncamera_auto_detect=1\n' >> "$cfg"
-  echo "  camera_auto_detect=1 added (reboot needed)"
+  echo "  kernel $(uname -r) has no imx708 driver (no Ubuntu 22.04 kernel has): building it"
+  bash "$(dirname "$0")/setup_imx708_driver.sh"
 fi
+
+echo "== 2/5 (config.txt done in step 1)"
 
 echo "== 3/5 build tools and libraries"
 systemctl stop robot 2>/dev/null || true          # free CPU + RAM for the compiler
