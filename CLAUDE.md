@@ -58,7 +58,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 - App: `lidar_robot/web/app/` (served at `/app/`, bundled in the Android WebView APK `android/`); demo mode `demo.js`.
 - MCP server: `scripts/mcp_server.py` (logs in with `ROBOT_USER`/`ROBOT_PASSWORD`), docs `docs/mcp.md`.
 - Tools: `tools/dashboard_sim.py --demo-users` (whole app without the robot), `tools/link_doctor.sh`,
-  `tools/serial_probe.py`, `tools/eval_commands.py`, `tools/eval_nav.py`, `scripts/find_ports.py`.
+  `tools/robot_check.sh` (one-shot health check), `tools/serial_probe.py`, `tools/eval_commands.py`, `tools/eval_nav.py`, `scripts/find_ports.py`.
 - Deploy: `scripts/robot.service` + `~/robot.env` (ROBOT_ARGS, GROQ_API_KEY) is what runs today.
   Docker (`Dockerfile`, `deploy/pi/docker-compose.yml`, `scripts/pathik.sh`) is built by CI but not installed on the Pi.
 - CI: `robot-image.yml` (tests → image → ghcr.io/arpitawasthi2411/slam-robot), `android.yml` (APK release),
@@ -94,6 +94,9 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-28 (later): "position lost" pauses + hot Pi: Cartographer used all 4 cores and added a node every 0.5 s
+  while standing still -> 2 threads, max_time 5 s, grid every 2 s; pose_timeout 1.5; slower turns (nav 0.30 rad/s,
+  joystick 0.40); `tools/robot_check.sh` one-shot health check. Old LiDAR dropouts = USB/5 V dips.
 - 2026-10-28: ESP32 ↔ Pi moved from USB to the GPIO UART (pins 6/8/10, ESP powered from the buck): firmware v2.6,
   `scripts/setup_pi_uart.sh` + `udev/98-esp32-uart.rules`, find_ports/ports/serial_probe/link_doctor know ttyAMA0, docs.
 

@@ -127,7 +127,7 @@ def _setup(context):
         actions.append(Node(
             package='cartographer_ros', executable='cartographer_occupancy_grid_node',
             name='cartographer_occupancy_grid_node', output='screen',
-            arguments=['-resolution', '0.05', '-publish_period_sec', '1.0']))
+            arguments=['-resolution', '0.05', '-publish_period_sec', '2.0']))
 
     goal_frame = 'map' if slam else 'odom'
     if nav_mode == 'planner':
