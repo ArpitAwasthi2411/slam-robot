@@ -1,5 +1,7 @@
 """vision_node end to end with a fake libcamera (a gst-launch-1.0 script that streams raw frames),
-a fake detector and the fake ROS layer. Needs OpenCV (skipped where it isn't installed, e.g. CI)."""
+a fake detector and the fake ROS layer. Needs OpenCV (skipped where it isn't installed, e.g. CI).
+The skip happens inside the test, never at import: in the ROS image a module-level skip escapes through
+the launch_testing pytest plugin and stops the whole collection."""
 import json
 import math
 import os
@@ -8,9 +10,6 @@ import sys
 import time
 
 import pytest
-
-cv2 = pytest.importorskip('cv2')
-import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -45,6 +44,8 @@ class FakeDetector:
 
 
 def test_vision_node_with_fake_camera(tmp_path, monkeypatch):
+    cv2 = pytest.importorskip('cv2')
+    import numpy as np
     for name, body in (('gst-launch-1.0', FAKE_GST), ('gst-inspect-1.0', '#!/bin/sh\nexit 0\n')):
         p = tmp_path / name
         p.write_text(body)
