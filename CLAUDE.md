@@ -66,7 +66,8 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 - Vision on the robot: `vision_node.py` (Camera Module 3 via libcamera/GStreamer subprocess, YOLO11n NCNN ~4 Hz,
   LiDAR distance per person) -> `/vision/decision` + `/vision/image/compressed`; rules + `VisionGate` in
   `vision_rules.py`; navigator slows/stops (`use_vision`), app camera card (`/api/camera.jpg`). Setup:
-  `scripts/setup_pi_camera.sh`, `scripts/setup_vision.sh`, `docs/STEPS_camera.md`.
+  `scripts/setup_pi_camera.sh` (+ `setup_imx708_driver.sh`: Ubuntu kernels lack imx708), `scripts/setup_vision.sh`,
+  `docs/STEPS_camera.md`.
 - Vision on the laptop: `vision/robot_decision.py` (webcam, rules + one Groq vision call per capture), Rashi's `people.py`.
 - Docs: `docs/STEPS_esp32s3_lab.md` (lab bring-up), `docs/deployment.md`, `docs/navigation.md`,
   `docs/troubleshooting.md`, `docs/roadmap.md`.
@@ -99,6 +100,10 @@ Open problems / TODO (priority order):
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-10-28 (night): no Ubuntu 22.04 raspi kernel has imx708 (checked 1108/1110 debs): setup_imx708_driver.sh
+  builds imx708 + dw9807-vcm (rpi-5.15.y) with DKMS + imx708.dtbo (compile-tested vs 1108 headers);
+  setup_pi_camera.sh checks internet, calls it, libcamera v0.1.0+rpt20231122. Pi had no DNS at the time.
 
 - 2026-10-28 (evening): camera people avoidance: vision node (libcamera, YOLO11n NCNN, LiDAR distance), navigator
   slows/stops, app camera card + map banner, setup scripts, docs/STEPS_camera.md; laptop robot_decision.py.
