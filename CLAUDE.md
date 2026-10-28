@@ -63,6 +63,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
   Docker (`Dockerfile`, `deploy/pi/docker-compose.yml`, `scripts/pathik.sh`) is built by CI but not installed on the Pi.
 - CI: `robot-image.yml` (tests → image → ghcr.io/arpitawasthi2411/slam-robot), `android.yml` (APK release),
   `firmware.yml` (S3 + classic on cores 2.0.17 and 3.0.7).
+- Vision: `vision/robot_decision.py` (camera → STOP/SLOW_DOWN/CONTINUE, rules + Groq), pairs with Rashi's `people.py`.
 - Docs: `docs/STEPS_esp32s3_lab.md` (lab bring-up), `docs/deployment.md`, `docs/navigation.md`,
   `docs/troubleshooting.md`, `docs/roadmap.md`.
 
