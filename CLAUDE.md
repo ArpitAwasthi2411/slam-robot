@@ -81,7 +81,8 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Current status (update every session)
 
-Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**.
+Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
+in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
 **Last updated: 2026-10-29**
 
@@ -118,6 +119,8 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-29: wrap-up of phases 0-6: README feature list/layout/status, docs/KEYS.md (every key + account and its
+  ~/robot.env line), final PR summary with robot tests and what still needs hardware.
 - 2026-10-29: Phase 6 URDF: pathik.urdf.xacro (base box from the footprint, wheels, caster, laser, camera + optical,
   imu_link, us_*), robot_state_publisher in bringup (urdf:=false keeps static TFs), urdf_model.py fallback renderer,
   RViz RobotModel, test_urdf.py (frames/offsets vs launch defaults + params, same as real xacro).
