@@ -11,6 +11,8 @@ Pi -> ESP32:  V,<left_mm_s>,<right_mm_s>
               K,<kp>,<ki>,<pwm_min>,<max_mms>,<accel>  W (save)  X (defaults)  T,<0|1>  ?
               P,<left_pwm>,<right_pwm>
               S
+              D,<0|1>               (S3 v2.7 / classic v2.5: front-docking mode, refresh < 2 s)
+              I                     (I2C scan -> INFO,I2C,0x40,0x68)
 """
 import math
 from dataclasses import dataclass
@@ -184,3 +186,12 @@ def format_tune(kp, ki, pwm_min, max_mms, accel) -> bytes:
 
 def format_telemetry(on: bool) -> bytes:
     return b'T,1\n' if on else b'T,0\n'
+
+
+def format_dock(on: bool) -> bytes:
+    """Docking mode: the ESP32 relaxes its 15 cm front ultrasonic stop at creep speed (needs a refresh every < 2 s)."""
+    return b'D,1\n' if on else b'D,0\n'
+
+
+def format_i2c_scan() -> bytes:
+    return b'I\n'

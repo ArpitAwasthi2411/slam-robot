@@ -22,8 +22,9 @@ JSON request API (handle):
   {"type": "add_room", "name": "Lab 3", "polygon": [[x, y], ...], "contents": [..], "aliases": [..]}
   {"type": "update_room", "name": "Lab 3", "contents": [..]}  /  {"type": "delete_room", "name": ..}
   {"type": "goto_room", "name": "Lab 3"}  or  {"type": "goto_room", "thing": "3D printer"}
-  {"type": "set_dock", "here": true}     robot is sitting ON the dock, contacts touching
-  {"type": "go_dock"}                    drive to the dock and reverse onto the contacts
+  {"type": "set_dock", "here": true}     robot is sitting ON the dock, contacts touching (front docking: facing it)
+  {"type": "go_dock"}                    drive in front of the dock, then creep nose-first onto the contacts guided
+                                         by the dock marker (docking.py); dock_front=False = old reverse docking
   {"type": "schedule_add", "name": "Patrol", "at": "10:00", "days": [0,1,2,3,4], "action": {...}}
   {"type": "schedule_delete", "id": 1} / {"type": "schedule_enable", "id": 1, "on": false}
   {"type": "mission_log", "n": 50}       evaluation records + summary stats
@@ -39,13 +40,14 @@ RECOVERING) and the LLM (or the rules) picks one action from a fixed menu; see s
 
 Failure reason codes (for logs, the dashboard and LLM error recovery):
   NO_MAP, NO_PATH, GOAL_IN_OBSTACLE, OUTSIDE_MAP, START_BLOCKED, BLOCKED, POSE_LOST, ESTOP, UNKNOWN_PLACE,
-  DOCK_NO_CONTACT
+  DOCK_NO_CONTACT, DOCK_NO_MARKER
 """
 import math
 import os
 import time
 
 from lidar_robot import drawn_path
+from lidar_robot.docking import DockParams, FrontDocker, fuse_yaw, synth_observation
 from lidar_robot.battery import BatteryMonitor
 from lidar_robot.explain import explain
 from lidar_robot.footprint import Footprint, FootprintGuard, check_path
@@ -88,7 +90,8 @@ class NavigatorCore:
     def __init__(self, places, planner_params=None, follower_params=None, parser=None,
                  dwell_s=3.0, auto_return_s=0.0, max_replans=3, plan_retry_s=2.0, max_plan_attempts=3,
                  clock=time.monotonic, tuning_path=None, footprint=None, data_dir=None, battery=None,
-                 localtime=time.localtime, confirm_timeout_s=300.0, dock_offset=0.55, recovery=None):
+                 localtime=time.localtime, confirm_timeout_s=300.0, dock_offset=0.55, recovery=None,
+                 dock_front=True, dock_params=None, dock_without_marker=False):
         self.places = places
         self.planner = Planner(planner_params or PlannerParams())
         self.follower = PathFollower(follower_params or FollowerParams())
@@ -141,6 +144,10 @@ class NavigatorCore:
         self.dock_offset = dock_offset           # m in front of the dock where the reverse starts
         self.docked = False
         self._dock = None
+        self.dock_front = dock_front                 # front docking with the marker (False: reverse, v2.4)
+        self.docker = FrontDocker(dock_params or DockParams())
+        self.dock_without_marker = dock_without_marker   # no camera: use the map pose of the dock instead
+        self._marker = (None, -1e9)
         self.localtime = localtime
         self.rec = recovery or Recovery(mode='off')      # error recovery (off unless the node/sim turns it on)
         self.rec.clock = clock
@@ -164,6 +171,14 @@ class NavigatorCore:
     def update_scan_base(self, pts):
         """Scan / ultrasonic points in base_link (robot frame) for the body-shape checks."""
         self.scan_base = pts
+
+    def set_marker(self, obs):
+        """Latest dock marker observation from the camera (marker_pose.detect format), any time."""
+        self._marker = (obs, self.clock())
+
+    def dock_mode(self):
+        """True while the ESP32 should relax its front ultrasonic stop (creeping onto the dock)."""
+        return self.dock_front and self.state == DOCKING and self.docker.mode_on()
 
     def set_battery(self, volts, amps=None, src='ina226'):
         self.battery.update(volts, amps, src)
@@ -463,8 +478,12 @@ class NavigatorCore:
         d = self.places.dock
         if not d:
             raise ValueError('the dock is not set (put the robot on the dock → Set dock here)')
-        ax = d['x'] + self.dock_offset * math.cos(d['yaw'])
-        ay = d['y'] + self.dock_offset * math.sin(d['yaw'])
+        if self.dock_front:                       # in front of the dock, facing it
+            ax = d['x'] - self.docker.p.predock_m * math.cos(d['yaw'])
+            ay = d['y'] - self.docker.p.predock_m * math.sin(d['yaw'])
+        else:                                     # v2.4: the approach point is ahead, then reverse in
+            ax = d['x'] + self.dock_offset * math.cos(d['yaw'])
+            ay = d['y'] + self.dock_offset * math.sin(d['yaw'])
         st = Stop('dock', ax, ay, d['yaw'], dock=True)
         return self._enqueue([st], priority, source, 'charge on the dock')
 
@@ -708,8 +727,14 @@ class NavigatorCore:
             if m.current.dock:
                 self.follower.clear()
                 self._dock = {'t0': now, 'contact_t': None}
-                self._set(DOCKING, 'reversing onto the dock')
-                self._log('at the dock: reversing onto the contacts')
+                if self.dock_front:
+                    self.docker.start(now)
+                    self._set(DOCKING, 'in front of the dock: looking for the marker')
+                    self._log('in front of the dock: aligning with the marker')
+                    self.say_queue.append(('dock', 'Docking.'))
+                else:
+                    self._set(DOCKING, 'reversing onto the dock')
+                    self._log('at the dock: reversing onto the contacts')
                 return 0.0, 0.0
             if m.source not in ('explore',) and m.current.label not in ('map goal', 'drawn path') \
                     and not m.current.label.startswith('point '):
@@ -813,14 +838,56 @@ class NavigatorCore:
             self._log('off the dock')
             self._set(PLANNING, 'off the dock')
             return 0.0, 0.0
+        if self.dock_front:                       # nose on the dock: back straight off it first
+            rear = -self.footprint.rear
+            hw = self.footprint.half_width + 0.03
+            if any(rear - 0.30 < x < rear and abs(y) < hw for x, y in self.scan_base):
+                self._set(UNDOCKING, 'leaving the dock: something is behind me')
+                return 0.0, 0.0
+            self._set(UNDOCKING, 'backing off the dock')
+            return -0.06, 0.0
         if front_clearance < self.follower.p.stop_distance:
             self._set(UNDOCKING, 'leaving the dock: something is in front of me')
             return 0.0, 0.0
         self._set(UNDOCKING, 'leaving the dock')
         return 0.08, 0.0
 
+    def _front_docking(self, m, pose, now):
+        d = self.places.dock
+        obs, t = self._marker
+        p = self.docker.p
+        fresh = obs is not None and obs.get('found') and now - t < 0.6
+        marker_world = (d['x'] + p.contact_dist_m * math.cos(d['yaw']), d['y'] + p.contact_dist_m * math.sin(d['yaw']),
+                        d['yaw'] + math.pi)
+        if fresh:
+            obs = fuse_yaw(obs, pose[2], d['yaw'])
+        elif self.dock_without_marker:
+            obs = synth_observation(pose, marker_world, p)          # no camera: the map's idea of the marker
+        else:
+            obs = None
+        rear = -self.footprint.rear
+        hw = self.footprint.half_width + 0.03
+        rear_clear = not any(rear - 0.30 < x < rear and abs(y) < hw for x, y in self.scan_base)
+        v, w = self.docker.step(now, obs, pose, self.battery.info(), rear_clear)
+        self.message = self.docker.message
+        res = self.docker.result
+        if res == 'docked':
+            self.docker.stop()
+            return self._docked(m, 'charging started')
+        if res:
+            self.docker.stop()
+            self._log(f'docking failed: {res[2]}', 'error')
+            self._fail(res[1], res[2])
+            return 0.0, 0.0
+        if self.docker.phase == 'backoff' and getattr(self, '_dock_said', None) != self.docker.try_n:
+            self._dock_said = self.docker.try_n
+            self._log(f'docking: {self.docker.message}', 'warn')
+        return v, w
+
     def _docking(self, m, pose, now):
         """Reverse along the dock line until the charger current starts (or the dock pose is reached)."""
+        if self.dock_front:
+            return self._front_docking(m, pose, now)
         d = self.places.dock
         yd = d['yaw']
         c, s = math.cos(yd), math.sin(yd)
@@ -1299,7 +1366,23 @@ class NavigatorCore:
             'schedules': self.schedules.summary(),
             'log_stats': self.mlog.stats(),
             'recovery': self.rec.public(), 'recovery_mode': self.rec.mode,
+            'docking': self._docking_status(m), 'dock_direction': 'front' if self.dock_front else 'reverse',
         }
+
+    def _docking_status(self, m):
+        """For the app's docking card: phase predock / align / creep / contact / backoff / failed / charging."""
+        if not self.dock_front:
+            return None
+        if self.state == DOCKING:
+            return self.docker.status()
+        if m and m.current and m.current.dock:
+            return {'phase': 'predock', 'try': None, 'tries': self.docker.p.tries,
+                    'message': 'driving to the front of the dock', 'marker': None}
+        if self.docked and self.state == CHARGING:
+            pct = self.battery.info().get('pct')
+            return {'phase': 'charging', 'try': None, 'tries': self.docker.p.tries, 'marker': None,
+                    'message': 'on the dock' + (f', {pct} %' if pct is not None else '')}
+        return None
 
 
 def _decimate(path, step=0.2):

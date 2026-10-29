@@ -22,7 +22,8 @@ Ordered by value for the thesis, the demo and the applications.
   scripted failures (LLM vs rules: success rate, time to recover).
   Prompt: *"Read CLAUDE.md and docs/WORK_LEFT.md, then do task A1: LLM error recovery in navigator_core with a validated action menu, offline fallback, app card, tests and tools/eval_recovery.py."*
 
-- [ ] **A2. Front docking with an ArUco marker (code still docks in reverse)**
+- [x] **A2. Front docking with an ArUco marker**: done 29 Oct (`docs/docking.md`; firmware S3 v2.7 / classic v2.5 `D` docking
+  mode). Left: measure `dock_contact_dist_m` + camera mount, calibrate the camera, try on the real dock (B14).
   Navigator drives to a pre-dock pose, then aligns on the marker with the camera (pose from OpenCV ArUco,
   DICT_4X4_50, size from config), creeps forward ≤ 5 cm/s, stops on contact/charging current; retry if
   misaligned. Firmware: a command that relaxes the 15 cm front ultrasonic stop (`US_STOP_MM`) only while
@@ -40,7 +41,8 @@ Ordered by value for the thesis, the demo and the applications.
   camera card), voice and MCP. Rate-limited, works without a key (says so).
   Prompt: *"Do task A4 from docs/WORK_LEFT.md: describe-the-scene endpoint, app button, MCP tool, tests."*
 
-- [ ] **A5. Firmware: IMU not detected on the S3 + I2C scan**
+- [x] **A5. Firmware: IMU not detected on the S3 + I2C scan**: done 29 Oct (`I` command, scan at boot, SDA/SCL in `?`,
+  3 init tries; v2.7). Robot check: B2.
   Add an `I` (I2C scan) command that lists found addresses at boot and on demand; print SDA/SCL pins in `?`;
   retry MPU-6050 init; document the checks. Bump to v2.7, keep the firmware CI green.
   Prompt: *"Do task A5 from docs/WORK_LEFT.md: I2C scan command and IMU init retries in the S3 firmware."*
@@ -86,6 +88,7 @@ Ordered by value for the thesis, the demo and the applications.
 - [ ] **B8.** Install the latest APK; MCP test: Claude sends the robot to a room.
 - [ ] **B9.** Record the demo video (mapping, a spoken/typed Hinglish command, driving to a room, stopping for a person) → portfolio, ROSCon, IndiaAI.
 - [ ] **B13.** Error recovery on the robot: stand in the corridor, block a door, ask-a-person flow (`docs/STEPS_next_run.md`, Phase 3); run `tools/eval_recovery.py` with the Groq key.
+- [ ] **B14.** Front docking on the real dock: print the marker (`tools/marker_webcam.py --print`), measure, run `docs/STEPS_next_run.md` Phase 4.
 - [ ] **B12.** Try the redesigned app on a phone with each role (`docs/STEPS_next_run.md`, Phase 2).
 - [ ] **B11.** Remote control: robot on phone A's hotspot, phone B on mobile data (`docs/STEPS_remote_control.md`).
 - [ ] **B10.** Docker on the Pi (make the GHCR package public first), `scripts/pathik.sh install`.

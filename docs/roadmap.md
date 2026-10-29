@@ -19,7 +19,7 @@
 7. ~~IMU~~ **code done (firmware v2.2)**: the MPU-6050 gyro gives odometry heading; wire it per
    [hardware/sensors.md](../hardware/sensors.md). Ultrasonics and the mushroom e-stop are done the same way.
 8. ~~Battery voltage~~ **code done (v2.4)**: INA226 voltage + current, app battery chip, goes to charge
-   when low, reverses onto the dock and confirms by charging current ([hardware/battery_dock.md](../hardware/battery_dock.md)).
+   when low, docks nose-first on the ArUco marker and confirms by charging current ([docs/docking.md](docking.md)).
 
 ## Later (project polish / report)
 9. **RC mode switch on CH5/CH6** (docs/WORK_LEFT.md A9): a physical MANUAL / AUTO / E-STOP switch on the transmitter

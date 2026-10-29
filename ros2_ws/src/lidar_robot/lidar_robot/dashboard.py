@@ -312,7 +312,7 @@ class DashboardNode(Node):
 
     def esp_command(self, req):
         op = req.get('op')
-        if op not in ('tune', 'save', 'defaults', 'telemetry', 'query'):
+        if op not in ('tune', 'save', 'defaults', 'telemetry', 'query', 'i2c_scan'):
             raise ValueError('unknown op')
         self.esp_cmd_pub.publish(String(data=json.dumps(req)))
         return {'ok': True}

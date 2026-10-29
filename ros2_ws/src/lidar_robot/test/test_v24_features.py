@@ -163,7 +163,7 @@ def test_battery_percent_and_levels():
 
 
 def test_low_battery_sends_robot_to_dock_and_it_reverses_on(tmp_path):
-    core, occ = make_core(tmp_path, [('Lab', 6.5, 3.0, 0.0)])
+    core, occ = make_core(tmp_path, [('Lab', 6.5, 3.0, 0.0)], dock_front=False)     # the old reverse dock
     core.battery.confirm_s = 0.0
     core.places.set_dock(1.0, 1.0, math.pi / 2)      # dock against the south area, robot faces north on it
     pose = (2.0, 4.5, 0.0)

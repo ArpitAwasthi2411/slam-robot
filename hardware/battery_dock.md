@@ -1,7 +1,11 @@
 # Battery monitor (INA226) and the charging dock
 
 Firmware v2.4 reports the battery and the navigator uses it: it drives back to charge on its own
-when the battery is low, reverses onto the dock and checks that charging current starts.
+when the battery is low and checks that charging current starts.
+
+> **Since Phase 4 the robot docks nose first**, guided by an ArUco marker on the dock: see
+> [docs/docking.md](../docs/docking.md). The reverse-docking description below is the v2.4 way
+> (`dock_direction: reverse`); the INA226 and contact wiring parts still apply.
 
 ## 1. INA226 battery monitor (do this first)
 

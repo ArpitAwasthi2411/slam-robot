@@ -46,9 +46,9 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Software map
 
-- `firmware/robot_esp32s3/` **v2.6** (S3, RGB status LED `L,r,g,b,ms`, Pi link on UART1 pins 47/8 + echo on USB,
-  only well-formed command lines accepted), `firmware/robot_esp32_classic/` v2.4.
-  Serial protocol 115200 text: ESP→Pi `ODM, IMU, US, BAT, BMP, SPD, INFO`; Pi→ESP `V P S E R C G ? K W X T L`
+- `firmware/robot_esp32s3/` **v2.7** (S3, RGB status LED `L,r,g,b,ms`, Pi link on UART1 pins 47/8 + echo on USB,
+  only well-formed command lines accepted, docking mode `D,1`, I2C scan `I`), `firmware/robot_esp32_classic/` v2.5.
+  Serial protocol 115200 text: ESP→Pi `ODM, IMU, US, BAT, BMP, SPD, INFO`; Pi→ESP `V P S E R C G ? K W X T L D I`
   (`lidar_robot/protocol.py`).
 - ROS package `ros2_ws/src/lidar_robot` (ament_python). Nodes: `esp32_bridge` (odom/TF/imu/ultrasonic, link-drop
   counters), `navigator` (`navigator_core.py`: A* `planner.py`, `follower.py`, missions, places/rooms, schedules,
@@ -84,11 +84,13 @@ Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2
 odometry, ultrasonics, navigator driving, app.
 
 Done in code, NOT yet verified on the robot:
+- front docking on the ArUco marker (docking.py, marker_pose.py, vision /vision/dock_marker, firmware D docking mode)
 - LLM error recovery (fixed menu, validation, rules fallback, app card, eval: rules 6/6 vs none 1/6 in sim)
 - redesigned app (v3 layout, every feature kept: docs/APP_FEATURES.md); next APK build after the merge
 - remote control from another network: Tailscale auth key/boot, optional Funnel with login limits, app path tag +
   slow-link joystick pause, hotspot-first Wi-Fi (`docs/STEPS_remote_control.md`)
 - ESP32-S3 firmware v2.6 + UART link to the Pi (pins 47/8 ↔ Pi 10/8): ODM/US verified on the Pi; IMU not detected yet
+  (v2.7 adds the `I` I2C scan + docking mode: flash it next)
 - Camera Module 3 + YOLO people avoidance + app camera card (APK Pathik-12)
 - accounts/roles + redesigned app (latest APK **Pathik-12**, release v1.0.12)
 - link-drop diagnostics (v2.4.2), battery divider, docking, schedules, rooms + LLM on the real floor
@@ -100,8 +102,8 @@ Open problems / TODO (priority order):
 2. Measure the footprint + wheel separation; tune with the app's Spin / Straight line tests.
 3. Groq key + audio on the Pi; voice node (push-to-talk, Whisper/Vosk from Rashi, Piper TTS).
 4. Camera + people avoidance done in code (`docs/STEPS_camera.md`): run the two setup scripts on the Pi, tune stop_m/slow_m.
-5. **Docking is still reverse-in in the code; the design is now FRONT docking** with an ArUco/AprilTag marker
-   (Neelaksh's `detect()`): change the navigator and relax `US_STOP_MM` while docking.
+5. Front docking with the ArUco marker done in code (`docs/docking.md`, firmware v2.7 `D` mode): measure
+   `dock_contact_dist_m` + the camera mount, calibrate the camera, try on Yogit's dock.
 6. LLM error recovery: done in code (`docs/recovery.md`); needs the Groq-key eval run + a robot test.
 7. Install Docker on the Pi (make the GHCR package public first).
 
@@ -109,6 +111,9 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-29: Phase 4 front docking: docking.py (align/creep<=5 cm/s/contact/backoff+retry, map-fused heading),
+  marker_pose.py detect() (ArUco, 4.5 + 4.7+ APIs, best-reprojection PnP), vision node marker topic, firmware S3 v2.7 /
+  classic v2.5 (D docking mode, I2C scan, IMU retries), bridge /dock_mode, sim + demo front dock, marker_webcam.py.
 - 2026-10-29: Phase 3 LLM error recovery: recovery.py (8-action menu, JSON validation + clamping, rules ladder, Groq
   in a thread), RECOVERING state, recovery_answer (staff), mission-log recoveries, Home card + demo, MCP answer_robot,
   tools/eval_recovery.py + sim blocks/pose drops (results/recovery_eval.md: rules 6/6, none 1/6). docs/recovery.md.

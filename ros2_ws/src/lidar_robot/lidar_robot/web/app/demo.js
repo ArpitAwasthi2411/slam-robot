@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 const RES = 0.05, W = 300, H = 200, OX = -0.5, OY = -0.5;
-const HOME = { x: 1.0, y: 4.25, yaw: 0 }, DOCK = { x: 0.45, y: 4.25, yaw: 0 };
+const HOME = { x: 1.0, y: 4.25, yaw: 0 }, DOCK = { x: 0.42, y: 4.25, yaw: Math.PI };   // front docking: nose on the dock
 const FP = [0.07, 0.37, 0.21];
 const occ = new Uint8Array(W * H);
 function box(x0, y0, x1, y1) {
@@ -257,7 +257,7 @@ function step(dt) {
   // move with a simple body check (no driving through walls)
   const nx = R.x + v * Math.cos(R.yaw) * dt, ny = R.y + v * Math.sin(R.yaw) * dt;
   const hit = [0, 1, 2, 3, 4, 5, 6, 7].some(k => isOcc(nx + 0.2 * Math.cos(k * 0.785), ny + 0.2 * Math.sin(k * 0.785)));
-  if (!hit || N.dockRev) { if (N.active) N.active.dist += Math.hypot(nx - R.x, ny - R.y); R.x = nx; R.y = ny; } else v = 0;
+  if (!hit || N.dockIn) { if (N.active) N.active.dist += Math.hypot(nx - R.x, ny - R.y); R.x = nx; R.y = ny; } else v = 0;
   R.yaw = wrap(R.yaw + w * dt); R.v = v; R.w = w;
   // battery: drains while driving, charges on the dock
   N.bat = Math.max(5, Math.min(100, N.bat + (N.docked ? 0.4 : (Math.abs(v) + Math.abs(w) > 0.01 ? -0.03 : -0.004)) * dt));
@@ -276,7 +276,28 @@ function navStep(t, dt) {
   }
   const m = N.active, st = m.stops[m.next];
   if (N.docked) { N.docked = false; log('off the dock'); }
-  if (N.dockRev) {                                  // reversing onto the contacts
+  if (N.dockIn) {                                   // front docking: align on the marker, creep in, contact
+    const D = N.dockIn, c = Math.cos(DOCK.yaw), s = Math.sin(DOCK.yaw);
+    const along = -((R.x - DOCK.x) * c + (R.y - DOCK.y) * s), lat = -(R.x - DOCK.x) * s + (R.y - DOCK.y) * c;
+    const head = wrap(DOCK.yaw - R.yaw);
+    D.marker = along > 0.18 ? { found: true, x_m: +(lat).toFixed(3), y_m: 0, z_m: +(along + 0.05).toFixed(3), yaw_deg: +(-head * 57.3).toFixed(1) } : { found: false };
+    if (D.phase === 'align') {
+      N.message = 'turning to the marker';
+      if (Math.abs(head) < 0.05 && t - D.t0 > 1.2) { D.phase = 'creep'; log('marker found: creeping in'); }
+      return [0, Math.sign(head) * Math.min(0.3, Math.abs(head) * 1.5)];
+    }
+    if (D.phase === 'creep') {
+      if (along <= 0.20) { D.phase = 'contact'; D.t0 = t; }
+      N.message = `creeping in: ${Math.round(along * 100)} cm to go, ${(lat * 100).toFixed(1)} cm off the line`;
+      return [0.04, Math.max(-0.3, Math.min(0.3, 2 * head - 3 * lat))];
+    }
+    if (D.phase === 'contact') {
+      if (along <= 0.004) { if (!D.touch) D.touch = t; if (t - D.touch > 1) { N.dockIn = null; N.docked = true; finish(m, 'DONE', 'charging started'); N.active = null; N.state = 'CHARGING'; N.message = 'charging started'; log('docked: charging'); return [0, 0]; } N.message = 'touching the contacts…'; return [0, 0]; }
+      N.message = 'touching the contacts…';
+      return [0.03, 2 * head];
+    }
+  }
+  if (N.dockRev) {                                  // (old reverse docking, unused)
     const along = (R.x - DOCK.x) * Math.cos(DOCK.yaw) + (R.y - DOCK.y) * Math.sin(DOCK.yaw);
     if (along <= 0.005) { N.dockRev = false; N.docked = true; finish(m, 'DONE', 'charging started'); N.active = null; N.state = 'CHARGING'; N.message = 'charging started'; log('charging started'); return [0, 0]; }
     N.state = 'DOCKING'; N.message = `reversing onto the dock (${Math.round(along * 100)} cm to go)`;
@@ -313,7 +334,7 @@ function arrive(t) {
   const m = N.active, st = m.stops[m.next];
   N.path = []; log(`arrived at ${st.label}`);
   if (N.rec && N.rec.status === 'running' && N.rec.mission === m.id) { recResolve('recovered'); log(`recovered: reached ${st.label}`); }
-  if (st.dock) { N.dockRev = true; log('at the dock: reversing onto the contacts'); return [0, 0]; }
+  if (st.dock) { N.dockIn = { phase: 'align', t0: t, try: 1 }; N.state = 'DOCKING'; N.message = 'in front of the dock: looking for the marker'; log('in front of the dock: aligning with the marker'); return [0, 0]; }
   if (st.confirm) { N.state = 'CONFIRM'; N.message = `at ${st.label}: waiting for OK`; N.confirmUntil = t + 300; log(`waiting for OK at ${st.label}`); return [0, 0]; }
   N.state = 'DWELL'; N.message = `at ${st.label}`; N.dwellUntil = t + (m.next < m.stops.length - 1 ? 2 : 0) + (st.wait_s || 0);
   return [0, 0];
@@ -390,7 +411,7 @@ function stopsFrom(c) {
   if (c.then_home) stops.push({ label: 'home', ...places.home });
   return stops;
 }
-const goDock = (prio, src) => enqueue([{ label: 'dock', x: DOCK.x + 0.55 * Math.cos(DOCK.yaw), y: DOCK.y + 0.55 * Math.sin(DOCK.yaw), yaw: DOCK.yaw, dock: true }], prio, src, 'charge on the dock');
+const goDock = (prio, src) => enqueue([{ label: 'dock', x: DOCK.x - 0.6 * Math.cos(DOCK.yaw), y: DOCK.y - 0.6 * Math.sin(DOCK.yaw), yaw: DOCK.yaw, dock: true }], prio, src, 'charge on the dock');
 
 // ---------------------------------------------------------------- navigator requests
 function navReq(q) {
@@ -497,6 +518,10 @@ function navStatus() {
     battery: { v: +(9.9 + 2.7 * pct / 100).toFixed(2), pct, a: N.docked ? -1.5 : (Math.abs(R.v) > 0.01 ? 1.6 : 0.45), charging: N.docked, level: N.docked ? 'charging' : pct < 12 ? 'critical' : pct < 25 ? 'low' : 'ok', src: 'demo' },
     confirm: N.state === 'CONFIRM' && st ? { label: st.label, left_s: Math.max(0, Math.round(N.confirmUntil - now())) } : null,
     schedules: schedSummary(), log_stats: stats(),
+    dock_direction: 'front',
+    docking: N.dockIn ? { phase: N.dockIn.phase, try: N.dockIn.try, tries: 3, message: N.message, marker: N.dockIn.marker || null }
+      : (m && st && st.dock) ? { phase: 'predock', try: null, tries: 3, message: 'driving to the front of the dock', marker: null }
+      : (N.docked && N.state === 'CHARGING') ? { phase: 'charging', try: null, tries: 3, message: `on the dock, ${pct} %`, marker: null } : null,
     recovery: N.rec ? Object.fromEntries(Object.entries({ ...N.rec, left_s: N.rec._until && ['running', 'asking'].includes(N.rec.status) ? Math.max(0, Math.round(N.rec._until - now())) : null })
       .filter(([k]) => !k.startsWith('_'))) : null, recovery_mode: 'rules',
   };
