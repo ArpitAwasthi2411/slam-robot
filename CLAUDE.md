@@ -108,7 +108,7 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
-- 2026-10-29: Phase 2 app redesign: docs/APP_FEATURES.md inventory (106 rows, all mapped), new tabs + Home status
+- 2026-10-29: Phase 2 app redesign: docs/APP_FEATURES.md inventory (104 rows, all mapped), new tabs + Home status
   card + Send flow + Operate hub, STOP in the tab bar, recovery/docking/voice cards ready, delete place, Android back +
   font size; test_app_parity.py (static + 303 browser checks on the demo).
 - 2026-10-29: Phase 1 remote control: setup_tailscale.sh (TS_AUTHKEY from ~/robot.env, boot, status, funnel on/off
