@@ -73,7 +73,19 @@ navigator:
     battery_low_pct: 25          # go and charge after the current task
     battery_critical_pct: 12     # go and charge now, refuse new tasks
     confirm_timeout_s: 300.0     # "wait for OK" stops continue after this
-    dock_offset: 0.55            # m in front of the dock where the reverse onto it starts
+    dock_offset: 0.55            # reverse docking only: m in front of the dock where the reverse starts
+    # front docking (docs/docking.md): nose-first onto the contacts, guided by the ArUco marker on the dock
+    dock_direction: front        # front | reverse (the old v2.4 way)
+    dock_predock_m: 0.60         # pre-dock pose: this far in front of the docked pose, facing the dock
+    dock_contact_dist_m: 0.10    # base_link to the marker plane when the contacts touch (MEASURE on the dock)
+    dock_creep_speed: 0.04       # m/s, capped at 0.05 (the ESP32 relaxes its front stop only <= 0.06)
+    dock_tries: 3                # back off and retry this many times, then error recovery takes over
+    dock_backoff_m: 0.25
+    dock_volt_rise: 0.15         # V rise that counts as contact when there is no current sensor (divider only)
+    dock_without_marker: false   # true = dock on the map pose alone (no camera; less precise)
+    camera_x: 0.05               # camera in base_link (m): forward, left, height (MEASURE)
+    camera_y: 0.0
+    camera_z: 0.20
     dwell_s: 3.0                 # wait at each intermediate stop (s)
     auto_return_s: 0.0           # >0: drive home after this many idle seconds
     max_replans: 3
@@ -103,3 +115,9 @@ vision:
     path_half_angle_deg: 15.0    # a person within +-15 deg of straight ahead is "in the path"
     stop_m: 0.8                  # LiDAR distance (from the LiDAR, ~0.2 m behind the bumper): stop closer than this
     slow_m: 1.8                  # slow down closer than this (stop if they walk towards the robot)
+    dock_marker: true            # look for the dock marker (/vision/dock_marker, ~10 Hz)
+    marker_dict: DICT_4X4_50
+    marker_id: 0
+    marker_size_m: 0.08          # black square side, without the white border
+    marker_rate: 10.0
+    camera_calib: ''             # '' = built-in Camera Module 3 Wide defaults; or the path of a measured YAML

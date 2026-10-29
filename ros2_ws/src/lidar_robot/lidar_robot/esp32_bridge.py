@@ -41,7 +41,8 @@ from lidar_robot.kinematics import (DiffDriveOdometry, quaternion_from_yaw,
 from lidar_robot.protocol import (parse_line, OdomPacket, InfoPacket, ImuPacket, UsPacket, SpdPacket,
                                   BatPacket, BumpPacket,
                                   MODE_NAMES, MODE_ESTOP, parse_tune, format_tune, format_telemetry,
-                                  format_velocity, format_stop, format_estop)
+                                  format_velocity, format_stop, format_estop, format_dock,
+                                  format_i2c_scan)
 from lidar_robot.tuning import clamp_values, WHEEL_RANGES
 
 
@@ -144,6 +145,11 @@ class Esp32Bridge(Node):
                              reliability=ReliabilityPolicy.RELIABLE)
         volatile = QoSProfile(depth=1, durability=DurabilityPolicy.VOLATILE,
                               reliability=ReliabilityPolicy.RELIABLE)
+        # front docking: the navigator publishes True (4 Hz) while creeping onto the dock
+        self.create_subscription(Bool, 'dock_mode', self._on_dock_mode, 10)
+        self.dock_until = 0.0
+        self.dock_sent = 0.0
+        self.dock_on = False
         self.create_subscription(Bool, 'estop', self._on_estop, latched)
         self.create_subscription(Bool, 'estop', self._on_estop, volatile)
 
@@ -438,8 +444,24 @@ class Esp32Bridge(Node):
             self.estop_released_at = time.monotonic()
         self.get_logger().warn(f'E-STOP {"ENGAGED (ESP32 latched, RC blocked)" if on else "released"}')
 
+    def _on_dock_mode(self, msg: Bool):
+        self.dock_until = time.monotonic() + 1.0 if msg.data else 0.0
+
+    def _dock_refresh(self, now):
+        want = now < self.dock_until
+        if want and (not self.dock_on or now - self.dock_sent > 0.5):
+            self._write(format_dock(True))
+            self.dock_sent = now
+            if not self.dock_on:
+                self.get_logger().info('docking mode ON: ESP32 front stop relaxed at creep speed')
+        elif not want and self.dock_on:
+            self._write(format_dock(False))
+            self.get_logger().info('docking mode OFF')
+        self.dock_on = want
+
     def _send_cmd(self):
         now = time.monotonic()
+        self._dock_refresh(now)
         twist, source = None, 'none'
         if not self.estop:
             for src in ('teleop', 'nav'):            # priority order
@@ -483,6 +505,8 @@ class Esp32Bridge(Node):
                 self._write(format_telemetry(self.telemetry_on))
             elif op == 'query':
                 self._write(b'?\n')
+            elif op == 'i2c_scan':
+                self._write(format_i2c_scan())
             else:
                 self.get_logger().warn(f'esp_cmd: unknown op {op!r}')
                 return

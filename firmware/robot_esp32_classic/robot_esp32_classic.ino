@@ -47,6 +47,10 @@
  *    W  save them to flash (kept after power-off)      X  back to factory defaults
  *    T,1 / T,0  stream / stop  SPD,<tgtL>,<measL>,<pwmL>,<tgtR>,<measR>,<pwmR>  (50 Hz)
  *    ESP32 -> Pi:  INFO,TUNE,<kp>,<ki>,<pwm_min>,<max_mms>,<accel>
+ *  v2.5 front docking + IMU check:
+ *    D,1 / D,0  docking mode: the front ultrasonic stop drops from US_STOP_MM to US_STOP_DOCK_MM, only while
+ *               the Pi refreshes D,1 (every < 2 s) and only at <= DOCK_MAX_MMS forward (creep speed)
+ *    I          I2C scan -> INFO,I2C,0x40,0x68 (which chips answer: MPU-6050 0x68, INA226 0x40)
  * -----------------------------------------------------------------------------
  */
 
@@ -63,7 +67,7 @@
 #endif
 
 #define LINK Serial               // classic ESP32: USB-UART chip -> /dev/ttyUSB0 on the Pi
-#define FW_VERSION "2.4"
+#define FW_VERSION "2.5"
 #include <Wire.h>
 #include <Preferences.h>     // tuning values survive reboot (ESP32 flash)
 #include <esp_system.h>      // esp_reset_reason(): why the ESP32 restarted (sent in the READY line)
@@ -117,6 +121,11 @@
 #define US_SLOT_MS        25     // one sensor fired every 25 ms -> each sensor ~13 Hz
 #define US_MAX_MM         4000
 #define US_STOP_MM        150    // AUTO mode: obstacle this close in front -> forward motion removed
+// Front docking (D,1 from the Pi): the dock itself is in front of the sensors, so the stop distance is
+// relaxed ONLY while docking mode is refreshed (every < 2 s) AND the commanded speed is creep speed.
+#define US_STOP_DOCK_MM    30    // docking mode: stop only this close (contacts touch at ~0)
+#define DOCK_MAX_MMS       60    // docking mode applies only at or below this forward speed (mm/s)
+#define DOCK_MODE_HOLD_MS 2000   // docking mode ends by itself without a fresh D,1
 
 // ============================ DIRECTION FIXES =================================
 // Test 1 (robot on blocks): send "P,120,120" with tools/serial_probe.py.
@@ -205,6 +214,7 @@ unsigned long report_dt = 0;
 
 unsigned long last_control_ms = 0;
 unsigned long last_cmd_ms = 0;
+unsigned long dock_mode_until = 0;      // docking mode (D,1) active until this millis()
 unsigned long last_rc_active_ms = 0;
 bool have_cmd = false;
 bool raw_pwm_mode = false;
@@ -248,7 +258,7 @@ void IRAM_ATTR throttleISR() {
   if (digitalRead(RC_THROTTLE_PIN)) { throttle_rise = t; }
   else { throttle_pw = t - throttle_rise; throttle_last = t; }
 }
-// 2x decoding on channel A (keeps the measured 4740 ticks/rev calibration valid)
+// 2x decoding on channel A (TICKS_PER_REV above was measured with this decoding)
 void IRAM_ATTR encLeftA_ISR() {
   enc_left_count = enc_left_count + ((digitalRead(ENC_LEFT_B) == digitalRead(ENC_LEFT_A)) ? -1 : 1);
 }
@@ -383,12 +393,34 @@ void usUpdate(unsigned long now_ms) {
 #endif
 }
 
-bool frontBlocked() {
+bool dockModeActive() { return dock_mode_until && (long)(dock_mode_until - millis()) > 0; }
+
+// fwd_mms: the commanded forward speed. In docking mode, at creep speed, only a very close echo blocks.
+bool frontBlocked(float fwd_mms) {
 #if USE_ULTRASONIC
+  uint16_t limit = (dockModeActive() && fwd_mms <= DOCK_MAX_MMS) ? US_STOP_DOCK_MM : US_STOP_MM;
   for (int i = 0; i < 3; i++)
-    if (us_mm[i] && us_mm[i] < US_STOP_MM) return true;
+    if (us_mm[i] && us_mm[i] < limit) return true;
+#else
+  (void)fwd_mms;
 #endif
   return false;
+}
+
+// I2C bus scan (command I): which chips answer (MPU-6050 0x68/0x69, INA226 0x40..0x4F)
+void i2cScan() {
+  char buf[160];
+  int n = snprintf(buf, sizeof(buf), "INFO,I2C");
+  int found = 0;
+  for (uint8_t a = 0x08; a < 0x78; a++) {
+    Wire.beginTransmission(a);
+    if (Wire.endTransmission() == 0) {
+      found++;
+      if (n < (int)sizeof(buf) - 8) n += snprintf(buf + n, sizeof(buf) - n, ",0x%02X", a);
+    }
+  }
+  if (!found) snprintf(buf + n, sizeof(buf) - n, ",none (check SDA/SCL, 3.3V, GND)");
+  LINK.printf("%s\n", buf);
 }
 
 // ============================ E-STOP BUTTON ====================================
@@ -645,6 +677,15 @@ void handleLine(char *line) {
       loadTune();
       printTune();
       break;
+    case 'D': {   // D,1 = docking mode (refresh every < 2 s), D,0 = off
+      long on = parseLong(p);
+      dock_mode_until = on ? millis() + DOCK_MODE_HOLD_MS : 0;
+      if (on && !dock_mode_until) dock_mode_until = 1;     // millis() wrapped to 0: still "on"
+      break;
+    }
+    case 'I':     // I2C scan
+      i2cScan();
+      break;
     case 'T': {   // T,1 = stream SPD telemetry, T,0 = stop
       long on = parseLong(p);
       telemetry = on != 0;
@@ -677,6 +718,8 @@ void handleLine(char *line) {
                   FW_VERSION, BOARD_NAME, ESP_ARDUINO_VERSION_MAJOR, MM_PER_TICK, g_max_mms, g_pwm_min, g_kp, g_ki, g_accel);
       printTune();
       LINK.printf("INFO,uptime_s=%lu\n", millis() / 1000UL);   // the bridge spots a silent reboot from this
+      LINK.printf("INFO,dock_mode=%s (stop %d mm at <= %d mm/s)\n", dockModeActive() ? "on" : "off", US_STOP_DOCK_MM, DOCK_MAX_MMS);
+      LINK.printf("INFO,i2c SDA=%d SCL=%d (send I to scan the bus)\n", I2C_SDA, I2C_SCL);
       LINK.printf("INFO,sensors imu=%s(who=0x%02X bias=%.1f) ultrasonic=%s estop_button=%s(%s)\n",
                   USE_IMU ? (imu_ok ? "ok" : "FAIL") : "off", imu_whoami, gyro_bias_z,
                   USE_ULTRASONIC ? "on" : "off", USE_ESTOP_BUTTON ? "on" : "off",
@@ -753,10 +796,14 @@ void setup() {
 #endif
   delay(300);
   imuInit();                       // calibrates the gyro: keep the robot still at power-up
+#if USE_IMU
+  for (int i = 0; i < 2 && !imu_ok; i++) { delay(200); imuInit(); }   // a slow-starting GY-521: try again
+#endif
   batInit();
   loadTune();
   last_control_ms = millis();
   LINK.printf("INFO,READY,robot_esp32 v%s %s reset=%s\n", FW_VERSION, BOARD_NAME, resetReasonName());
+  i2cScan();                       // which I2C chips answer (IMU 0x68, INA226 0x40): see docs/troubleshooting.md
   printTune();
 }
 
@@ -833,9 +880,9 @@ void loop() {
       setMotor(motorL, raw_pwm_l);
       setMotor(motorR, raw_pwm_r);
     } else {
-      if (frontBlocked()) {
+      float avg = 0.5f * (loopL.cmd_mms + loopR.cmd_mms);
+      if (frontBlocked(avg)) {
         // low-level safety net under the Pi: remove the forward part, keep turning in place
-        float avg = 0.5f * (loopL.cmd_mms + loopR.cmd_mms);
         if (avg > 0) { loopL.cmd_mms -= avg; loopR.cmd_mms -= avg; }
       }
       rampTargets(dt_s);

@@ -9,11 +9,14 @@ Subscribes  /map                  nav_msgs/OccupancyGrid
             /goal_cancel          std_msgs/Empty
             /estop                std_msgs/Bool
             /navigator/request    std_msgs/String  JSON request (see navigator_core.py)
+            /vision/decision      std_msgs/String  camera people decision (vision_node)
+            /vision/dock_marker   std_msgs/String  dock marker pose (vision_node, marker_pose.detect format)
 Publishes   /cmd_vel              geometry_msgs/Twist
             /plan                 nav_msgs/Path    current route (RViz: add Path display)
             /navigator/status     std_msgs/String  JSON, 4 Hz
             /navigator/places     std_msgs/String  JSON, latched, on change
             /navigator/response   std_msgs/String  JSON replies to requests ({"req_id": ...})
+            /dock_mode            std_msgs/Bool    True while creeping onto the dock (the bridge sends D,1)
 
 Optional: export GROQ_API_KEY=... before launching for LLM command parsing (needs internet).
 Without it (or offline) the built-in rule parser is used.
@@ -38,6 +41,7 @@ from tf2_ros import Buffer, TransformListener, TransformException
 
 from lidar_robot.commands import CommandParser
 from lidar_robot.recovery import Recovery, RecoveryLLM
+from lidar_robot.docking import DockParams
 from lidar_robot.battery import BatteryMonitor
 from lidar_robot.follower import FollowerParams
 from lidar_robot.footprint import Footprint
@@ -83,7 +87,18 @@ class NavigatorNode(Node):
         d('battery_low_pct', 25)
         d('battery_critical_pct', 12)
         d('confirm_timeout_s', 300.0)      # "wait for OK" stops give up after this
-        d('dock_offset', 0.55)             # m in front of the dock where the reverse starts
+        d('dock_offset', 0.55)             # reverse docking only: m in front of the dock where the reverse starts
+        d('dock_direction', 'front')       # front: nose-first onto the contacts, guided by the marker (docking.py)
+        d('dock_predock_m', 0.60)          # pre-dock pose this far in front of the docked pose
+        d('dock_contact_dist_m', 0.10)     # base_link to the marker plane when docked
+        d('dock_creep_speed', 0.04)        # m/s (capped at 0.05)
+        d('dock_tries', 3)
+        d('dock_backoff_m', 0.25)
+        d('dock_volt_rise', 0.15)          # V: counts as contact when there is no current sensor
+        d('dock_without_marker', False)    # true = dock on the map pose alone (no camera; less precise)
+        d('camera_x', 0.05)                # camera position in base_link (m) and height (m)
+        d('camera_y', 0.0)
+        d('camera_z', 0.20)
         d('front_cone_deg', 25.0)
         d('dwell_s', 3.0)
         d('speech', True)                  # speak through a speaker on the Pi (needs espeak-ng)
@@ -138,12 +153,18 @@ class NavigatorNode(Node):
             battery=BatteryMonitor(cells=int(g('battery_cells')), low_pct=float(g('battery_low_pct')),
                                    critical_pct=float(g('battery_critical_pct'))),
             confirm_timeout_s=float(g('confirm_timeout_s')), dock_offset=float(g('dock_offset')),
+            dock_front=str(g('dock_direction')) != 'reverse', dock_without_marker=bool(g('dock_without_marker')),
+            dock_params=DockParams(predock_m=float(g('dock_predock_m')), contact_dist_m=float(g('dock_contact_dist_m')),
+                                   creep_speed=min(0.05, float(g('dock_creep_speed'))), tries=int(g('dock_tries')),
+                                   backoff_m=float(g('dock_backoff_m')), volt_rise=float(g('dock_volt_rise')),
+                                   cam_x=float(g('camera_x')), cam_y=float(g('camera_y')), cam_z=float(g('camera_z'))),
             recovery=Recovery(llm=RecoveryLLM(key, model=str(g('recovery_llm_model'))), mode=str(g('recovery_mode')),
                               max_per_mission=int(g('recovery_max_per_mission')),
                               ask_timeout_s=float(g('recovery_ask_timeout_s'))))
         self.core.localized = not bool(g('require_localization_confirm'))
         self.vision = VisionGate(enabled=bool(g('use_vision')), timeout_s=float(g('vision_timeout')))
         self.create_subscription(String, 'vision/decision', self._on_vision, 10)
+        self.create_subscription(String, 'vision/dock_marker', self._on_marker, 10)
         self.core_lock = threading.RLock()       # callbacks + map worker thread share the core
         self.topic_estop = False
         self.bridge_estop = False
@@ -173,6 +194,7 @@ class NavigatorNode(Node):
         self.status_pub = self.create_publisher(String, 'navigator/status', 5)
         self.places_pub = self.create_publisher(String, 'navigator/places', latched)
         self.resp_pub = self.create_publisher(String, 'navigator/response', 10)
+        self.dock_mode_pub = self.create_publisher(Bool, 'dock_mode', 10)     # ESP32 docking mode via the bridge
 
         self.create_subscription(OccupancyGrid, 'map', self._on_map, 1)
         self.create_subscription(LaserScan, 'scan', self._on_scan, qos_profile_sensor_data)
@@ -393,9 +415,21 @@ class NavigatorNode(Node):
         except ValueError:
             pass
 
+    def _on_marker(self, msg: String):
+        try:
+            obs = json.loads(msg.data)
+        except ValueError:
+            return
+        with self.core_lock:
+            self.core.set_marker(obs)
+
     def _publish_status(self):
         with self.core_lock:
             st = self.core.status()
+            dock_mode = self.core.dock_mode()
+        if dock_mode or getattr(self, '_dock_mode_was', False):
+            self.dock_mode_pub.publish(Bool(data=dock_mode))
+        self._dock_mode_was = dock_mode
         st['vision'] = self.vision.note       # e.g. "camera: person 0.7 m ahead: too close, waiting"
         self.status_pub.publish(String(data=json.dumps(st)))
         key = tuple(map(tuple, st['path'][:3])) + (len(st['path']),)

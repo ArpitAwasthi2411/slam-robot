@@ -14,6 +14,8 @@ sudo apt-get install -y python3-opencv python3-numpy python3-venv python3-pip
 # --no-deps: ncnn's wheel would pull opencv-python + a new numpy over Ubuntu's (ROS uses those)
 pip3 install --user --no-deps 'ncnn==1.0.20250503'
 python3 -c "import ncnn, cv2, numpy; print('  ncnn', ncnn.__version__, '| opencv', cv2.__version__, '| numpy', numpy.__version__)"
+# the dock marker (front docking) uses OpenCV's ArUco module: Ubuntu's python3-opencv has it (contrib build)
+python3 -c "import cv2; print('  dock marker (ArUco):', 'ok' if hasattr(cv2, 'aruco') else 'MISSING: sudo apt install python3-opencv (contrib)')"
 
 echo "== 2/3 YOLO11n model for NCNN (320 x 320)"
 if [ -f "$OUT/model.ncnn.param" ] && [ -f "$OUT/model.ncnn.bin" ]; then

@@ -200,6 +200,13 @@ class VisionNode(Node):
         d('path_half_angle_deg', 15.0)
         d('stop_m', 0.8)
         d('slow_m', 1.8)
+        # dock marker for front docking (marker_pose.py): ArUco DICT_4X4_50, id 0, 8 cm, ~10 Hz
+        d('dock_marker', True)
+        d('marker_dict', 'DICT_4X4_50')
+        d('marker_id', 0)
+        d('marker_size_m', 0.08)
+        d('marker_rate', 10.0)
+        d('camera_calib', '')           # YAML (config/camera_calib.yaml); empty = built-in defaults
         g = lambda n: self.get_parameter(n).value  # noqa: E731
         self.p = {n: g(n) for n in ('hfov_deg', 'flip', 'conf', 'det_rate', 'stream_rate', 'jpeg_quality',
                                      'laser_yaw')}
@@ -210,6 +217,7 @@ class VisionNode(Node):
             pass
 
         self.dec_pub = self.create_publisher(String, 'vision/decision', 10)
+        self.marker_pub = self.create_publisher(String, 'vision/dock_marker', 10)
         self.img_pub = self.create_publisher(CompressedImage, 'vision/image/compressed', 2)
         self.create_subscription(LaserScan, 'scan', self._on_scan, qos_profile_sensor_data)
         self.scan, self.scan_t = None, 0.0
@@ -227,6 +235,20 @@ class VisionNode(Node):
         self.tracker = PersonTracker()
         self.running = True
         threading.Thread(target=self._detect_loop, daemon=True).start()
+        self.marker = None
+        if g('dock_marker'):
+            from lidar_robot.marker_pose import MarkerDetector, load_calibration
+            try:
+                calib = load_calibration(str(g('camera_calib')) or None)
+            except Exception as e:      # bad YAML: say so, use the defaults
+                self.get_logger().warn(f'camera_calib: {e}; using built-in defaults')
+                calib = None
+            self.marker = MarkerDetector(calib, g('marker_dict'), int(g('marker_id')), float(g('marker_size_m')))
+            if self.marker.error:
+                self.get_logger().warn(f'dock marker detection off: {self.marker.error}')
+            else:
+                self.marker_period = 1.0 / max(1.0, float(g('marker_rate')))
+                threading.Thread(target=self._marker_loop, daemon=True).start()
         self.create_timer(1.0 / max(0.5, float(self.p['stream_rate'])), self._publish_image)
         self.get_logger().info('vision node up')
 
@@ -243,6 +265,17 @@ class VisionNode(Node):
             import cv2
             f = cv2.rotate(f, cv2.ROTATE_180)
         return f
+
+    def _marker_loop(self):
+        while self.running:
+            t0 = time.monotonic()
+            frame = self._frame()
+            r = self.marker.detect(frame) if frame is not None else {'found': False, 'error': 'no camera picture'}
+            r['t'] = round(time.time(), 2)
+            if self.marker.calib_note:
+                r['note'] = self.marker.calib_note
+            self.marker_pub.publish(String(data=json.dumps(r)))
+            time.sleep(max(0.0, self.marker_period - (time.monotonic() - t0)))
 
     def _detect_loop(self):
         period = 1.0 / max(0.5, float(self.p['det_rate']))

@@ -42,6 +42,7 @@ WHAT = {
     'OUTSIDE_MAP': '{place} is outside the map.',
     'POSE_LOST': 'I lost my position on the map on the way to {place}.',
     'DOCK_NO_CONTACT': 'I reached the dock but the charging contacts did not connect.',
+    'DOCK_NO_MARKER': "I couldn't see the dock marker in front of the dock.",
     'NO_MAP': "I don't have a map yet.",
 }
 RECOVERABLE = set(WHAT)
@@ -83,7 +84,7 @@ def allowed_actions(ctx):
         a.append('reorder')
     if ctx.get('home_set') and not ctx.get('going_home'):
         a.append('go_home')
-    if ctx.get('dock_set') and ctx['failure']['code'] != 'DOCK_NO_CONTACT':
+    if ctx.get('dock_set') and not ctx['failure']['code'].startswith('DOCK_'):
         a.append('go_dock')
     return [x for x in MENU if x in a]
 
@@ -137,6 +138,7 @@ LADDER = {
     'OUTSIDE_MAP': [('skip_stop', {}), ('ask_person', {})],
     'POSE_LOST': [('wait_retry', {'wait_s': 20}), ('ask_person', {})],
     'DOCK_NO_CONTACT': [('wait_retry', {'wait_s': 5}), ('wait_retry', {'wait_s': 10}), ('ask_person', {})],
+    'DOCK_NO_MARKER': [('wait_retry', {'wait_s': 5}), ('ask_person', {})],
     'NO_MAP': [('wait_retry', {'wait_s': 20}), ('ask_person', {})],
 }
 

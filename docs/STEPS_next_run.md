@@ -85,3 +85,34 @@ Checks (robot running, a map with places, the app open on Home):
 5. Press STOP during a recovery: it ends at once; Resume continues as before.
 6. Numbers for the report (laptop or Pi, with the key): `python3 tools/eval_recovery.py --rounds 3`
    → `results/recovery_eval.md` (LLM vs rules vs none).
+
+## Phase 4: front docking with the ArUco marker (docs/docking.md)
+
+What changed: the robot docks nose first. It drives to 60 cm in front of the dock, turns to the marker,
+creeps in at 4 cm/s correcting sideways and heading, touches the contacts, and confirms with the charging
+current (or a voltage rise). If that fails it backs off and retries up to 3 times, then error recovery decides.
+Firmware **S3 v2.7** (classic v2.5) adds docking mode `D,1` (front ultrasonic stop 15 → 3 cm, only at creep speed
+and only while the Pi refreshes it) and the `I` I2C scan.
+
+Set up:
+1. Flash `firmware/robot_esp32s3/robot_esp32s3.ino` v2.7 (unplug the 5 V wire first, as in STEPS_esp32s3_lab.md).
+   Check: `python3 ~/slam-robot/tools/serial_probe.py --port /dev/ttyAMA0` → `INFO,READY,robot_esp32 v2.7` and an
+   `INFO,I2C,...` line (0x68 = IMU, 0x40 = INA226; `none` = check SDA 11 / SCL 12 / 3V3 / GND).
+2. Print the marker: `python3 tools/marker_webcam.py --print marker.png` → print at 100 %, the black square must be
+   8.0 cm; glue it flat, centred on the dock face at camera height.
+3. Measure and set in `robot_params.yaml` (navigator): `camera_x/y/z` (camera lens from the wheel axle) and
+   `dock_contact_dist_m` (axle to the marker face when the contacts touch). Rebuild + restart.
+4. Push the robot onto the dock by hand (contacts touching, facing the marker) → app Home → Charging →
+   "Robot is on the dock: save it here".
+
+Checks:
+1. `ros2 topic echo /vision/dock_marker --once` with the robot 50 cm in front of the dock: `found: true`,
+   `z_m` ≈ 0.5, `x_m` ≈ 0 when centred (moves + when the robot is to the left of the marker).
+2. Drive 1–2 m away, app → Charge. Home shows the docking card: In front → Find marker → Creep in → Contact →
+   Charging. `journalctl -u robot | grep -i dock` shows "docking mode ON" then "OFF".
+3. Start 10 cm to the side and 15° turned: it still ends centred (contacts touch, charger LED on).
+4. Cover the marker: it searches, backs off, retries 3 times, then Home shows the recovery card (DOCK_NO_MARKER).
+5. Unplug the charger: it creeps in, gets no current, backs off and retries (DOCK_NO_CONTACT).
+6. Send a mission while docked: it backs straight off (30 cm) before turning.
+Without the robot: `python3 tools/dashboard_sim.py --demo-users` → Charge, or the app's demo; laptop webcam:
+`python3 tools/marker_webcam.py`.

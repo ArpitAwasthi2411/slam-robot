@@ -726,15 +726,16 @@ function drawMap() {
       cx.textAlign = 'center';
     }
   }
-  // charging dock: a bracket the robot backs into
+  // charging dock: a bracket in front of the docked robot (front docking), or behind it (old reverse docking)
   const dock = st.places && st.places.dock;
   if (dock) {
-    const dc = Math.cos(dock.yaw), ds = Math.sin(dock.yaw), bx = -0.40;
+    const front = navs.dock_direction !== 'reverse', sgn = front ? 1 : -1;
+    const dc = Math.cos(dock.yaw), ds = Math.sin(dock.yaw), bx = front ? 0.12 : -0.40;
     const D = (u, v) => W2S(dock.x + dc * u - ds * v, dock.y + ds * u + dc * v);
     cx.save(); cx.strokeStyle = PAL.good; cx.lineWidth = 3 * DPR; cx.lineCap = 'round'; cx.shadowColor = PAL.good; cx.shadowBlur = 10 * DPR;
-    cx.beginPath(); [[bx + 0.12, 0.28], [bx, 0.28], [bx, -0.28], [bx + 0.12, -0.28]].forEach((p, i) => { const [x, y] = D(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
+    cx.beginPath(); [[bx - sgn * 0.12, 0.28], [bx, 0.28], [bx, -0.28], [bx - sgn * 0.12, -0.28]].forEach((p, i) => { const [x, y] = D(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
     cx.stroke(); cx.restore();
-    const [lx, ly] = D(bx - 0.12, 0); cx.font = `700 ${11 * DPR}px Instrument, sans-serif`; cx.fillStyle = PAL.good; cx.fillText('⚡', lx, ly + 4 * DPR);
+    const [lx, ly] = D(bx + sgn * 0.12, 0); cx.font = `700 ${11 * DPR}px Instrument, sans-serif`; cx.fillStyle = PAL.good; cx.fillText('⚡', lx, ly + 4 * DPR);
   }
   // spots where the route barely fits the body (it slows down there)
   for (const t of navs.tight || []) {
@@ -1421,7 +1422,10 @@ $('#g-charge').onclick = async () => {
   try { await nav({ type: 'go_dock', replace: true }); toast('Going to charge'); setFollow(true); } catch (e) { toast(e.message, true); }
 };
 $('#g-dock').onclick = async () => {
-  if (!await confirmBox('Is the robot on the dock now?', 'Push it onto the dock so the contacts touch (the charger LED changes). This spot becomes the dock: the robot backs onto it by itself when the battery is low.', 'Save dock here')) return;
+  const front = !(S.st && S.st.nav && S.st.nav.dock_direction === 'reverse');
+  if (!await confirmBox('Is the robot on the dock now?', front
+    ? 'Push it nose-first onto the dock so the contacts touch (the charger LED changes), facing the marker. This spot becomes the dock: the robot drives in front of it and creeps on by itself when the battery is low.'
+    : 'Push it onto the dock so the contacts touch (the charger LED changes). This spot becomes the dock: the robot backs onto it by itself when the battery is low.', 'Save dock here')) return;
   try { await nav({ type: 'set_dock', here: true }); toast('Dock saved'); } catch (e) { toast(e.message, true); }
 };
 function renderCharging(st) {

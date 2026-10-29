@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'ros2_ws', 'src', 'lidar_robot'))
 
 from lidar_robot.auth import UserStore                           # noqa: E402
 from lidar_robot.commands import CommandParser                    # noqa: E402
+from lidar_robot.docking import DockParams, synth_observation      # noqa: E402
 from lidar_robot.dashboard_server import DashboardServer          # noqa: E402
 from lidar_robot.explorer import MapAutoSaver                    # noqa: E402
 from lidar_robot.footprint import Footprint                       # noqa: E402
@@ -42,7 +43,8 @@ ORIGIN = (-0.5, -0.5)
 HOME = (1.0, 4.25, 0.0)
 US_MOUNTS = [[0.07, 0.12, math.radians(30)], [0.07, 0.0, 0.0], [0.07, -0.12, -math.radians(30)]]
 FP = Footprint(front=0.07, rear=0.37, half_width=0.21)      # the real body: axle near the FRONT
-DOCK = (0.45, 4.25, 0.0)              # sitting on the dock: back against the west wall, facing east
+DOCK = (0.42, 4.25, math.pi)          # docked: nose on the dock at the west wall (front docking, marker on it)
+DOCK_FACE_X = DOCK[0] - 0.07           # the dock's front face: the robot's nose touches it here
 ROOMS = [
     ('Lab 3', [[0.1, 0.1], [4.5, 0.1], [4.5, 3.5], [0.1, 3.5]], ['computers', 'projector', 'whiteboard']),
     ('Lab 2', [[4.6, 0.1], [9.0, 0.1], [9.0, 3.5], [4.6, 3.5]], ['3D printer', 'soldering station', 'oscilloscope']),
@@ -141,8 +143,10 @@ class SimBackend:
             recovery = Recovery(llm=RecoveryLLM(os.environ.get('GROQ_API_KEY'),
                                                 model=os.environ.get('RECOVERY_MODEL', 'llama-3.3-70b-versatile')),
                                 mode=os.environ.get('RECOVERY_MODE', 'llm'))
+        self.dock_params = DockParams()
         self.nav = NavigatorCore(self.places, parser=parser, dwell_s=2.0, footprint=FP, data_dir=sim_dir, clock=clock,
-                                 tuning_path=os.path.join(maps, 'sim_tuning.json'), recovery=recovery)
+                                 tuning_path=os.path.join(maps, 'sim_tuning.json'), recovery=recovery,
+                                 dock_params=self.dock_params)
         # scripted trouble (tools/eval_recovery.py): [x, y, radius, until_t] obstacles, and position dropouts
         self.blocks = []
         self.pose_drop_until = -1.0
@@ -189,8 +193,16 @@ class SimBackend:
         return any(self._occupied(x + c * bx - s * by, y + s * bx + c * by) for bx, by in self.outline)
 
     def _on_dock(self):
-        return (math.hypot(self.x - DOCK[0], self.y - DOCK[1]) < 0.04
-                and abs(wrap_angle(self.yaw - DOCK[2])) < 0.2)
+        """The charging contacts touch: nose against the dock face, centred within the contact width."""
+        return (abs(self.x - DOCK[0]) < 0.012 and abs(self.y - DOCK[1]) < 0.025
+                and abs(wrap_angle(self.yaw - DOCK[2])) < 0.12)
+
+    def _marker_obs(self):
+        """What the camera's dock-marker detector would report (marker 10 cm in front of the docked axle)."""
+        p = self.dock_params
+        mx = DOCK[0] + p.contact_dist_m * math.cos(DOCK[2])
+        my = DOCK[1] + p.contact_dist_m * math.sin(DOCK[2])
+        return synth_observation((self.x, self.y, self.yaw), (mx, my, DOCK[2] + math.pi), p) or {'found': False}
 
     def _battery(self, dt):
         moving = abs(self.v) > 0.01 or abs(self.w) > 0.05
@@ -261,6 +273,7 @@ class SimBackend:
             if self.use_body_checks:
                 self.nav.update_scan_base([p for p in self.scan_pts if p[0] * p[0] + p[1] * p[1] < 1.0])
             self.nav.set_battery(*self._battery(t0 - self._last_scan if self._last_scan > 0 else 0.1))
+            self.nav.set_marker(self._marker_obs())          # the camera's dock-marker detector (~10 Hz)
             self._last_scan = t0
         if t0 - self._last_map > 1.0:
             self._push_map()
@@ -294,15 +307,20 @@ class SimBackend:
         nx = self.x + self.v * math.cos(self.yaw) * dt
         ny = self.y + self.v * math.sin(self.yaw) * dt
         nyaw = wrap_angle(self.yaw + self.w * dt)
-        docking = self._on_dock() and self.v <= 0
-        if (abs(self.v) > 1e-4 or abs(self.w) > 1e-4) and not docking \
+        # the dock face stops the nose (front docking): no bump, that is how docking ends
+        nose_on_dock = (self.v > 0 and math.cos(nyaw) < -0.8 and abs(ny - DOCK[1]) < 0.20
+                        and nx < DOCK[0] - 0.002 and self.x >= DOCK[0] - 0.05)
+        if nose_on_dock:
+            self.v = 0.0
+            nx, ny = self.x, self.y
+        if (abs(self.v) > 1e-4 or abs(self.w) > 1e-4) \
                 and self._body_hits(nx, ny, nyaw) and not self._body_hits(self.x, self.y, self.yaw):
             self.v = self.w = 0.0          # the body (any part of the rectangle) touched a wall
             if not self._contact:
                 self.bumps += 1
                 self.nav.note_bump()
             self._contact = True
-        elif docking or not self._body_hits(nx, ny, nyaw):
+        elif not self._body_hits(nx, ny, nyaw):
             self.x, self.y, self.yaw = nx, ny, nyaw
             self._contact = False
         # wheel odometry over-counts turns by 4 % (as if wheel_separation were set 4 % too small)

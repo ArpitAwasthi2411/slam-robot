@@ -168,6 +168,14 @@ async function runRecovery(browser) {
     const st = await p.evaluate(t => window.PathikDemo.handle('/api/state', 'GET', undefined, t).nav, tok);
     check(st.recovery.source === 'person' && st.recovery.outcome === 'gave_up_home', 'recovery: the answer is carried out');
   }
+  // front docking: Charge on Home -> the docking card walks through the steps until charging
+  await p.evaluate(t => window.PathikDemo.handle('/api/nav', 'POST', { type: 'cancel' }, t), tok);
+  await tab(p, 'home');
+  await p.click('#q-charge');
+  const dockCard = await p.waitForSelector('#h-docking:not([hidden])', { timeout: 60000 }).then(() => true, () => false);
+  check(dockCard, 'docking: progress card on Home');
+  const docked = await p.waitForFunction(() => /Docked and charging/.test(document.querySelector('#h-docking').textContent), null, { timeout: 120000 }).then(() => true, () => false);
+  check(docked, 'docking: the demo robot docks nose-first and the card says so');
   check(errs.length === 0, `recovery: page errors ${errs.join(' | ')}`);
   await ctx.close();
 }
