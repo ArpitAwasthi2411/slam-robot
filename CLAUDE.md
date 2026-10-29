@@ -74,6 +74,8 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Current status (update every session)
 
+Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**.
+
 **Last updated: 2026-10-28**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
