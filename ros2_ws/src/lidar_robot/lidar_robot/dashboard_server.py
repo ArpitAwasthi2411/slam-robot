@@ -31,11 +31,13 @@ The ROS node (dashboard.py) and the offline simulator (tools/dashboard_sim.py)
 both implement this interface.
 """
 import gzip
+import ipaddress
 import json
 import math
 import mimetypes
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -81,7 +83,49 @@ STATIC_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascr
                 '.ico': 'image/x-icon', '.woff2': 'font/woff2'}
 
 
-def make_handler(backend, index_path, app_dir=None, users=None):
+LOOPBACK = ('127.0.0.1', '::1', '::ffff:127.0.0.1')
+SECURITY_HEADERS = (('X-Content-Type-Options', 'nosniff'), ('Referrer-Policy', 'no-referrer'),
+                    ('X-Frame-Options', 'DENY'))
+
+
+class PublicLink:
+    """Is the robot reachable from the internet (Tailscale Funnel)? scripts/setup_tailscale.sh funnel on
+    writes the public https URL to `flag_file`; `funnel off` removes it. Re-read every few seconds."""
+
+    def __init__(self, flag_file=None, clock=time.monotonic):
+        self.flag_file, self.clock = flag_file, clock
+        self._url, self._t = None, -1e9
+
+    def url(self):
+        if not self.flag_file:
+            return None
+        if self.clock() - self._t > 3.0:
+            self._t = self.clock()
+            try:
+                with open(self.flag_file) as f:
+                    self._url = f.read().strip() or 'public'
+            except OSError:
+                self._url = None
+        return self._url
+
+
+def link_kind(addr):
+    """How a (real) client address reaches the robot: tailscale / lan / local."""
+    try:
+        ip = ipaddress.ip_address(addr.split('%')[0])
+    except ValueError:
+        return 'lan'
+    if ip.is_loopback:
+        return 'local'
+    if ip.version == 4 and ip in ipaddress.ip_network('100.64.0.0/10'):
+        return 'tailscale'
+    if ip.version == 6 and ip in ipaddress.ip_network('fd7a:115c:a1e0::/48'):
+        return 'tailscale'
+    return 'lan'
+
+
+def make_handler(backend, index_path, app_dir=None, users=None, public=None):
+    public = public or PublicLink()
     class Handler(BaseHTTPRequestHandler):
         server_version = 'RobotDashboard/1.0'
 
@@ -105,6 +149,7 @@ def make_handler(backend, index_path, app_dir=None, users=None):
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-store')
             self.send_header('Access-Control-Allow-Origin', '*')
+            self._security_headers()
             self.end_headers()
             self.wfile.write(body)
 
@@ -115,6 +160,24 @@ def make_handler(backend, index_path, app_dir=None, users=None):
             if n > MAX_BODY:
                 raise ValueError('body too large')
             return json.loads(self.rfile.read(n) or b'{}')
+
+        def _security_headers(self):
+            for k, v in SECURITY_HEADERS:
+                self.send_header(k, v)
+            if (self.headers.get('X-Forwarded-Proto') or '').lower() == 'https':
+                self.send_header('Strict-Transport-Security', 'max-age=31536000')
+
+        def _client(self):
+            """(real client address, came over the public link?). Only a proxy on this machine
+            (tailscaled for Funnel / serve) may set X-Forwarded-For: anyone else could fake it."""
+            addr = self.client_address[0] if self.client_address else ''
+            xff = self.headers.get('X-Forwarded-For')
+            if addr in LOOPBACK and xff:
+                real = xff.split(',')[0].strip()
+                is_public = bool(self.headers.get('Tailscale-Funnel-Request')) or (
+                    public.url() is not None and link_kind(real) != 'tailscale')
+                return real, is_public
+            return addr, False
 
         def do_OPTIONS(self):                    # CORS preflight from the APK
             self.send_response(204)
@@ -144,6 +207,10 @@ def make_handler(backend, index_path, app_dir=None, users=None):
         def _guard(self, method, path, body=None):
             """Sets self.user; returns True if the request may go on (else the error is already sent)."""
             self.user = None
+            if users is None and path.startswith('/api/') and path != '/api/ping' and self._client()[1]:
+                self._send(403, {'error': 'This robot is on a public link: logins are required '
+                                          '(dashboard parameter require_login must be true).'})
+                return False
             if users is None or not path.startswith('/api/'):
                 return True
             need = required_role(method, path, body)
@@ -160,11 +227,12 @@ def make_handler(backend, index_path, app_dir=None, users=None):
             return True
 
         def _auth_post(self, path, body):
-            addr = self.client_address[0] if self.client_address else ''
+            addr, is_public = self._client()
             if path == '/api/auth/login':
-                return users.login(body.get('username'), body.get('password'), addr)
+                return users.login(body.get('username'), body.get('password'), addr, public=is_public)
             if path == '/api/auth/signup':
-                r = users.signup(body.get('username'), body.get('password'), body.get('name', ''))
+                r = users.signup(body.get('username'), body.get('password'), body.get('name', ''),
+                                 addr=addr, public=is_public)
                 r['message'] = ('Welcome! You are the first user, so you are the admin.' if r['token'] else
                                 'Account created. An admin has to approve it before you can log in.')
                 return r
@@ -186,6 +254,13 @@ def make_handler(backend, index_path, app_dir=None, users=None):
                 users.admin_delete(self.user['username'], str(body.get('username', '')))
                 return {'ok': True}
             return None
+
+        def _net(self):
+            """What the app shows: how this phone reaches the robot, and whether the robot is public."""
+            addr, is_public = self._client()
+            return {'via': 'public' if is_public else link_kind(addr), 'public': public.url() is not None,
+                    'public_url': public.url() if public.url() not in (None, 'public') else None,
+                    'https': (self.headers.get('X-Forwarded-Proto') or '').lower() == 'https'}
 
         def _optional(self, name, *args):
             fn = getattr(backend, name, None)
@@ -228,14 +303,14 @@ def make_handler(backend, index_path, app_dir=None, users=None):
                     fn = getattr(backend, 'ping', None)
                     if fn is None:
                         return self._send(404, {'error': 'ping not supported by this backend'})
-                    return self._send(200, dict(fn(), auth=users is not None,
+                    return self._send(200, dict(fn(), auth=users is not None, net=self._net(),
                                                 setup_needed=bool(users and users.setup_needed())))
                 if url.path == '/api/telemetry':
                     return self._optional('get_telemetry', int(q.get('since', ['0'])[0]))
                 if url.path == '/api/test':
                     return self._optional('test_status', int(q.get('since', ['0'])[0]))
                 if url.path == '/api/state':
-                    return self._send(200, backend.get_state())
+                    return self._send(200, dict(backend.get_state(), net=self._net()))
                 if url.path == '/api/camera.jpg':
                     fn = getattr(backend, 'camera_jpeg', None)
                     jpg = fn() if fn else None
@@ -297,9 +372,10 @@ def make_handler(backend, index_path, app_dir=None, users=None):
 
 
 class DashboardServer:
-    def __init__(self, backend, host='0.0.0.0', port=8080, users=None):
+    def __init__(self, backend, host='0.0.0.0', port=8080, users=None, public_flag=None):
         self.httpd = ThreadingHTTPServer((host, port),
-                                         make_handler(backend, _find_index_html(), _find_app_dir(), users))
+                                         make_handler(backend, _find_index_html(), _find_app_dir(), users,
+                                                      PublicLink(public_flag)))
         self.httpd.daemon_threads = True
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
 

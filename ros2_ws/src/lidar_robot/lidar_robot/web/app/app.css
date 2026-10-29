@@ -597,3 +597,19 @@ body.tab-me .m-hint, body.tab-go .m-hint, body.tab-lab .m-hint { display: none; 
   border-radius: var(--r-m); font-size: 14px; border-color: rgba(255,159,46,.55); }
 .m-vis b { font-family: var(--display); }
 @media (max-width: 420px) { .cam:not(.big) { width: 56vw; } .cam:not(.big) .cam-fps { display: none; } .cam-act { flex: 1; } }
+
+/* ---------- Phase 1: remote control (public link warning, joystick link lock) ---------- */
+.tag-public { flex: none; font: 700 11px/1 var(--ui); letter-spacing: .04em; text-transform: uppercase; color: #fff;
+  background: var(--red); border-radius: 999px; padding: 4px 7px; }
+.warn-card { border: 2px solid var(--red); }
+.warn-card .g-h { color: var(--red); }
+.warn-card p { margin: 6px 12px; font-size: 14px; line-height: 1.4; }
+.warn-card code { display: block; margin: 6px 12px 10px; padding: 8px 10px; border-radius: var(--r-s);
+  background: var(--surface-3); font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.joy-wrap { position: relative; }
+.joy-wrap.locked canvas { opacity: .35; filter: grayscale(1); }
+.joy-lock { position: absolute; inset: 18% 8%; margin: 0; display: grid; place-content: center; gap: 4px; text-align: center;
+  font-size: 13px; line-height: 1.3; padding: 10px; border-radius: var(--r-m); background: var(--card-solid);
+  border: 1px solid rgba(255,159,46,.6); pointer-events: none; }
+.joy-lock b { font-family: var(--display); color: var(--orange); }
+.joy-lock span { color: var(--dim); }

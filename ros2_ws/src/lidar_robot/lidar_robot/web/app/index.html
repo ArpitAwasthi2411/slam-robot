@@ -48,9 +48,9 @@
     <ul id="c-list" class="c-list" aria-label="Robots"></ul>
 
     <form id="c-manual" class="c-manual">
-      <label for="c-addr">Address (same Wi‑Fi, robot Wi‑Fi or Tailscale name)</label>
+      <label for="c-addr">Address (Wi‑Fi address, Tailscale name / 100.x address, or public https link)</label>
       <div class="row gap">
-        <input id="c-addr" inputmode="url" autocomplete="off" spellcheck="false" placeholder="10.42.0.1 or slam-robot">
+        <input id="c-addr" inputmode="url" autocomplete="off" spellcheck="false" placeholder="10.42.0.1, slam-robot or https://…ts.net" aria-label="Robot address">
         <button class="btn" type="submit">Connect</button>
       </div>
     </form>
@@ -58,7 +58,8 @@
       <summary>How do I connect?</summary>
       <p><b>Robot Wi‑Fi.</b> Join <b>SLAM-Robot</b>, then Find robot (10.42.0.1).</p>
       <p><b>Same Wi‑Fi / hotspot.</b> Robot and phone on one network, then Find robot.</p>
-      <p><b>From anywhere (internet).</b> Tailscale on the robot and on this phone, same account. Type <code>slam-robot</code> above. Works on any Wi‑Fi or mobile data.</p>
+      <p><b>From anywhere (internet).</b> Tailscale on the robot and on this phone, same account. Type <code>slam-robot</code> (or its 100.x address) above. Works on any Wi‑Fi or mobile data.</p>
+      <p><b>No Tailscale on this phone.</b> If the robot team turned on the public link, type the full <code>https://….ts.net</code> address they give you. You still need an account.</p>
     </details>
     <div class="c-voice"><span class="mic-ic"></span>Voice commands ready</div>
   </div>
@@ -108,6 +109,7 @@
       <button id="t-robot" class="pill glass" aria-label="Connection and robot health">
         <span id="t-dot" class="dot"></span>
         <span class="t-name" id="t-host">robot</span>
+        <span id="t-public" class="tag-public" hidden title="Reachable from the internet (Tailscale Funnel): see Me">Public</span>
         <span class="t-link" id="t-link">–</span>
       </button>
       <div class="t-right">
@@ -166,7 +168,8 @@
 
     <!-- drive cockpit (Drive tab) -->
     <div id="cockpit" class="cockpit">
-      <div class="joy-wrap"><canvas id="joy" width="240" height="240" aria-label="Joystick"></canvas></div>
+      <div class="joy-wrap"><canvas id="joy" width="240" height="240" aria-label="Joystick"></canvas>
+        <p id="joy-lock" class="joy-lock" hidden role="status"><b>Driving by hand paused</b><span></span>STOP still works. Or send it to a place.</p></div>
       <div class="speed glass" aria-label="Top speed">
         <span class="speed-v" id="d-speed-out">60%</span>
         <input id="d-speed" type="range" min="20" max="100" value="60" aria-label="Top speed" orient="vertical">
@@ -338,6 +341,13 @@
 
     <!-- Me: account, appearance, robot, people (admin) -->
     <div class="panel" id="p-me" role="tabpanel" aria-labelledby="tab-me" hidden>
+      <section class="group warn-card" id="me-public" hidden role="alert">
+        <div class="g-h">This robot is public</div>
+        <p>Anyone on the internet can open <b id="me-public-url">–</b> (Tailscale Funnel). Accounts and passwords
+        still protect it, but turn it off when you are done:</p>
+        <code>sudo bash ~/slam-robot/scripts/setup_tailscale.sh funnel off</code>
+        <p class="muted">Phones with the Tailscale app don't need it: they use the private path.</p>
+      </section>
       <div class="me-card"><span class="avatar" id="me-ava">?</span><span class="grow"><b id="me-name">–</b><small id="me-user">–</small></span><span class="role" id="me-role">–</span></div>
 
       <section class="group" data-min="admin" id="people-box">

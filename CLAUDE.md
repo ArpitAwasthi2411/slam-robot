@@ -82,6 +82,8 @@ Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2
 odometry, ultrasonics, navigator driving, app.
 
 Done in code, NOT yet verified on the robot:
+- remote control from another network: Tailscale auth key/boot, optional Funnel with login limits, app path tag +
+  slow-link joystick pause, hotspot-first Wi-Fi (`docs/STEPS_remote_control.md`)
 - ESP32-S3 firmware v2.6 + UART link to the Pi (pins 47/8 ↔ Pi 10/8): ODM/US verified on the Pi; IMU not detected yet
 - Camera Module 3 + YOLO people avoidance + app camera card (APK Pathik-12)
 - accounts/roles + redesigned app (latest APK **Pathik-12**, release v1.0.12)
@@ -103,6 +105,9 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-29: Phase 1 remote control: setup_tailscale.sh (TS_AUTHKEY from ~/robot.env, boot, status, funnel on/off
+  + ~/maps/.public_url flag), auth per-address/public limits, dashboard `net` info (lan/tailscale/public), app PUBLIC
+  tag + Me warning + joystick pause >600 ms, setup_wifi.sh hotspot-first timer + fallback. docs/STEPS_remote_control.md.
 - 2026-10-29: Phase 0 repo review (docs/REVIEW_2026-10.md): NaN drive commands blocked at HTTP, dashboard and
   bridge; "stop" ends exploration; auto-home/explain crash fixes; setup_ports.sh UART mode; serial_probe 4970
   ticks; S3/classic pin tables fixed in hardware/README + sensors + classic wiring; README/roadmap/deploy/

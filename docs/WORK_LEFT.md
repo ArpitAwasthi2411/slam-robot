@@ -64,6 +64,9 @@ Ordered by value for the thesis, the demo and the applications.
   Physical MANUAL / AUTO / E-STOP switch on the transmitter (one more GPIO + firmware + bridge mode).
   Prompt: *"Do task A9 from docs/WORK_LEFT.md: RC CH5 mode switch in the S3 firmware and bridge."*
 
+- [x] **A11. Remote control from another network** (done 29 Oct: Tailscale auth key + boot, optional Funnel
+  with login limits, app remembers robots by name/IP/URL and shows the path, joystick pauses on a slow link;
+  `docs/STEPS_remote_control.md`). Robot check: B11.
 - [x] **A10. Docs clean-up** (done 29 Oct: docs/REVIEW_2026-10.md)
   README status checklist, `docs/roadmap.md` (still says "no login"), APK number (Pathik-11 vs 12) and
   current-status lines in CLAUDE.md, one up-to-date architecture diagram in the README.
@@ -80,6 +83,7 @@ Ordered by value for the thesis, the demo and the applications.
 - [ ] **B7.** Map the full floor, label places and rooms with contents, try "take me to the room with the 3D printer".
 - [ ] **B8.** Install the latest APK; MCP test: Claude sends the robot to a room.
 - [ ] **B9.** Record the demo video (mapping, a spoken/typed Hinglish command, driving to a room, stopping for a person) → portfolio, ROSCon, IndiaAI.
+- [ ] **B11.** Remote control: robot on phone A's hotspot, phone B on mobile data (`docs/STEPS_remote_control.md`).
 - [ ] **B10.** Docker on the Pi (make the GHCR package public first), `scripts/pathik.sh install`.
 
 ## C. Team

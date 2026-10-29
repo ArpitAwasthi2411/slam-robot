@@ -423,6 +423,8 @@ def main():
     ap.add_argument('--demo-users', action='store_true',
                     help='create admin/admin123, operator/operator123, staff/staff123 if missing')
     ap.add_argument('--no-login', action='store_true', help='no accounts at all (old behaviour)')
+    ap.add_argument('--public', metavar='URL', help='pretend Tailscale Funnel is on with this https URL '
+                    '(shows the app\'s public-link warning)')
     args = ap.parse_args()
     users = None if args.no_login else UserStore(args.users)
     if users is not None and args.demo_users:
@@ -430,7 +432,14 @@ def main():
             if name not in users.users:
                 users.signup(name, name + '123', name.capitalize())
                 users.admin_update('admin', name, role=role, status='active')
-    srv = DashboardServer(SimBackend(explore=args.explore), host='0.0.0.0', port=args.port, users=users)
+    flag = None
+    if args.public:
+        import tempfile
+        fd, flag = tempfile.mkstemp(prefix='pathik-public-')
+        os.write(fd, args.public.encode())
+        os.close(fd)
+    srv = DashboardServer(SimBackend(explore=args.explore), host='0.0.0.0', port=args.port, users=users,
+                          public_flag=flag)
     srv.start()
     print(f'Simulated robot dashboard: http://localhost:{args.port}   (Ctrl+C to quit)')
     if users is not None and users.setup_needed():
