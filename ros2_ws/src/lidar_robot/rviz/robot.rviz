@@ -58,6 +58,23 @@ Visualization Manager:
         Value: /scan
       Use Fixed Frame: true
       Value: true
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Alpha: 0.8
+      Description File: ""
+      Description Source: Topic
+      Description Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+      Collision Enabled: false
     - Class: rviz_default_plugins/TF
       Name: TF
       Enabled: true

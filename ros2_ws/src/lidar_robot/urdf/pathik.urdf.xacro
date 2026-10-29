@@ -1,0 +1,153 @@
+<?xml version="1.0"?>
+<!-- Pathik robot model (Phase 6). robot_state_publisher publishes the fixed frames from this file; they are the
+     same names and offsets the launch used to publish with static_transform_publisher, so nothing downstream
+     (Cartographer, the bridge, the navigator, the vision node) changes.
+     base_link = the middle of the drive axle, at axle height; x forward, y left, z up.
+     Every number comes in as a xacro arg from bringup.launch.py (launch args + config/robot_params.yaml).
+     Kept to xacro:arg / xacro:property / ${...} only, so lidar_robot/urdf_model.py can render it without xacro. -->
+<robot name="pathik" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="laser_x" default="-0.13"/>
+  <xacro:arg name="laser_y" default="0.0"/>
+  <xacro:arg name="laser_z" default="0.10"/>
+  <xacro:arg name="laser_yaw" default="0.0"/>
+  <xacro:arg name="us_x" default="0.07"/>
+  <xacro:arg name="us_y" default="0.12"/>
+  <xacro:arg name="us_side_deg" default="30"/>
+  <xacro:arg name="us_z" default="0.06"/>
+  <xacro:arg name="imu_x" default="0.0"/>
+  <xacro:arg name="imu_y" default="0.0"/>
+  <xacro:arg name="imu_z" default="0.05"/>
+  <xacro:arg name="camera_x" default="0.05"/>
+  <xacro:arg name="camera_y" default="0.0"/>
+  <xacro:arg name="camera_z" default="0.20"/>
+  <xacro:arg name="footprint_front" default="0.07"/>
+  <xacro:arg name="footprint_rear" default="0.37"/>
+  <xacro:arg name="footprint_half_width" default="0.21"/>
+  <xacro:arg name="wheel_radius" default="0.0625"/>
+  <xacro:arg name="wheel_separation" default="0.30"/>
+
+  <xacro:property name="front" value="$(arg footprint_front)"/>
+  <xacro:property name="rear" value="$(arg footprint_rear)"/>
+  <xacro:property name="half_w" value="$(arg footprint_half_width)"/>
+  <xacro:property name="wheel_r" value="$(arg wheel_radius)"/>
+  <xacro:property name="wheel_sep" value="$(arg wheel_separation)"/>
+  <xacro:property name="body_h" value="0.12"/>
+  <xacro:property name="caster_r" value="0.025"/>
+  <xacro:property name="side" value="${$(arg us_side_deg) * pi / 180.0}"/>
+
+  <material name="pathik_magenta"><color rgba="0.91 0.25 0.49 1"/></material>
+  <material name="dark"><color rgba="0.12 0.12 0.14 1"/></material>
+  <material name="orange"><color rgba="1.0 0.62 0.18 1"/></material>
+  <material name="teal"><color rgba="0.18 0.89 0.78 1"/></material>
+
+  <!-- body: the rectangle the navigator plans with (footprint_front / _rear / _half_width) -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="${(front - rear) / 2.0} 0 ${body_h / 2.0 - wheel_r + 0.03}" rpy="0 0 0"/>
+      <geometry><box size="${front + rear} ${2.0 * half_w} ${body_h}"/></geometry>
+      <material name="pathik_magenta"/>
+    </visual>
+    <collision>
+      <origin xyz="${(front - rear) / 2.0} 0 ${body_h / 2.0 - wheel_r + 0.03}" rpy="0 0 0"/>
+      <geometry><box size="${front + rear} ${2.0 * half_w} ${body_h}"/></geometry>
+    </collision>
+  </link>
+
+  <!-- drive wheels on the axle (fixed here: no joint_states needed; odometry comes from the bridge) -->
+  <link name="left_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="${pi / 2.0} 0 0"/>
+      <geometry><cylinder radius="${wheel_r}" length="0.03"/></geometry>
+      <material name="dark"/>
+    </visual>
+  </link>
+  <joint name="left_wheel_joint" type="fixed">
+    <parent link="base_link"/><child link="left_wheel_link"/>
+    <origin xyz="0 ${wheel_sep / 2.0} 0" rpy="0 0 0"/>
+  </joint>
+  <link name="right_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="${pi / 2.0} 0 0"/>
+      <geometry><cylinder radius="${wheel_r}" length="0.03"/></geometry>
+      <material name="dark"/>
+    </visual>
+  </link>
+  <joint name="right_wheel_joint" type="fixed">
+    <parent link="base_link"/><child link="right_wheel_link"/>
+    <origin xyz="0 ${-wheel_sep / 2.0} 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- rear caster -->
+  <link name="caster_link">
+    <visual>
+      <geometry><sphere radius="${caster_r}"/></geometry>
+      <material name="dark"/>
+    </visual>
+  </link>
+  <joint name="caster_joint" type="fixed">
+    <parent link="base_link"/><child link="caster_link"/>
+    <origin xyz="${-rear + 0.06} 0 ${caster_r - wheel_r}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- RPLiDAR A1 -->
+  <link name="laser">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.035" length="0.04"/></geometry>
+      <material name="dark"/>
+    </visual>
+  </link>
+  <joint name="laser_joint" type="fixed">
+    <parent link="base_link"/><child link="laser"/>
+    <origin xyz="$(arg laser_x) $(arg laser_y) $(arg laser_z)" rpy="0 0 $(arg laser_yaw)"/>
+  </joint>
+
+  <!-- Camera Module 3 Wide (camera_link: x forward like ROS; camera_optical_frame: OpenCV z forward) -->
+  <link name="camera_link">
+    <visual>
+      <geometry><box size="0.012 0.025 0.024"/></geometry>
+      <material name="dark"/>
+    </visual>
+  </link>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/><child link="camera_link"/>
+    <origin xyz="$(arg camera_x) $(arg camera_y) $(arg camera_z)" rpy="0 0 0"/>
+  </joint>
+  <link name="camera_optical_frame"/>
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/><child link="camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="${-pi / 2.0} 0 ${-pi / 2.0}"/>
+  </joint>
+
+  <!-- MPU-6050 (chip X forward, Z up) -->
+  <link name="imu_link">
+    <visual><geometry><box size="0.02 0.016 0.003"/></geometry><material name="teal"/></visual>
+  </link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/><child link="imu_link"/>
+    <origin xyz="$(arg imu_x) $(arg imu_y) $(arg imu_z)" rpy="0 0 0"/>
+  </joint>
+
+  <!-- HC-SR04 ultrasonics: centre straight ahead, left/right angled +-us_side_deg outwards -->
+  <link name="us_center">
+    <visual><geometry><box size="0.015 0.045 0.02"/></geometry><material name="orange"/></visual>
+  </link>
+  <joint name="us_center_joint" type="fixed">
+    <parent link="base_link"/><child link="us_center"/>
+    <origin xyz="$(arg us_x) 0.0 $(arg us_z)" rpy="0 0 0"/>
+  </joint>
+  <link name="us_left">
+    <visual><geometry><box size="0.015 0.045 0.02"/></geometry><material name="orange"/></visual>
+  </link>
+  <joint name="us_left_joint" type="fixed">
+    <parent link="base_link"/><child link="us_left"/>
+    <origin xyz="$(arg us_x) $(arg us_y) $(arg us_z)" rpy="0 0 ${side}"/>
+  </joint>
+  <link name="us_right">
+    <visual><geometry><box size="0.015 0.045 0.02"/></geometry><material name="orange"/></visual>
+  </link>
+  <joint name="us_right_joint" type="fixed">
+    <parent link="base_link"/><child link="us_right"/>
+    <origin xyz="$(arg us_x) ${-$(arg us_y)} $(arg us_z)" rpy="0 0 ${-side}"/>
+  </joint>
+</robot>

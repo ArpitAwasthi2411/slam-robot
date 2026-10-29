@@ -54,7 +54,9 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 - ROS package `ros2_ws/src/lidar_robot` (ament_python). Nodes: `esp32_bridge` (odom/TF/imu/ultrasonic, link-drop
   counters), `navigator` (`navigator_core.py`: A* `planner.py`, `follower.py`, missions, places/rooms, schedules,
   battery/dock, explain, exploration, error recovery `recovery.py`), `dashboard` (`dashboard_server.py`, HTTP :8080, auth). Launch:
-  `bringup.launch.py esp32_port:= lidar_port:= slam_mode:=mapping|localization map:=`. Cartographer 2D.
+  `bringup.launch.py esp32_port:= lidar_port:= slam_mode:=mapping|localization map:= vision:= voice:= urdf:=`.
+  Cartographer 2D. Fixed frames from `urdf/pathik.urdf.xacro` (robot_state_publisher; `urdf_model.py` renders it
+  without xacro too), checked against the params by `test_urdf.py`.
 - Config: `config/robot_params.yaml`. Users: `~/maps/users.json` (`auth.py`, roles staff < operator < admin).
 - App: `lidar_robot/web/app/` (served at `/app/`, bundled in the Android WebView APK `android/`); demo mode `demo.js`.
   v3 layout (Phase 2): Home · Send · Map · Drive · Operate (staff: Home · Send · Map · Me), STOP in the tab bar.
@@ -87,6 +89,7 @@ Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2
 odometry, ultrasonics, navigator driving, app.
 
 Done in code, NOT yet verified on the robot:
+- URDF model (urdf/pathik.urdf.xacro) + robot_state_publisher instead of the static TFs (same frames; urdf:=false)
 - voice: push-to-talk (GPIO17 pin 11 / app), Groq Whisper + Vosk, Piper TTS, announcements (voice_node.py)
 - front docking on the ArUco marker (docking.py, marker_pose.py, vision /vision/dock_marker, firmware D docking mode)
 - LLM error recovery (fixed menu, validation, rules fallback, app card, eval: rules 6/6 vs none 1/6 in sim)
@@ -115,6 +118,9 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-29: Phase 6 URDF: pathik.urdf.xacro (base box from the footprint, wheels, caster, laser, camera + optical,
+  imu_link, us_*), robot_state_publisher in bringup (urdf:=false keeps static TFs), urdf_model.py fallback renderer,
+  RViz RobotModel, test_urdf.py (frames/offsets vs launch defaults + params, same as real xacro).
 - 2026-10-29: Phase 5 voice: voice.py (WAV prep, Groq Whisper multipart, Vosk EN/HI, fallback, PushToTalk, GpioButton),
   voice_node (GPIO17 + /api/voice), speech.py Piper/espeak queue + rate limit + volume + Hindi voice, "Going to X",
   spoken numbers match places, setup_voice.sh, STEPS_voice.md, WAV fixtures; docker ttyAMA0/gpiochip rules.
