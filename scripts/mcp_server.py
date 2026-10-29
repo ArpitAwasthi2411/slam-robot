@@ -82,6 +82,8 @@ def status():
         'mission': m and {'text': m.get('text'), 'stops': m.get('stops'), 'next_stop': m.get('next_stop')},
         'queued': len((n.get('missions') or {}).get('queue') or []),
         'waiting_for_ok': n.get('confirm'), 'last_failure': n.get('last_failure'),
+        'recovery': (lambda r: r and {k: r.get(k) for k in ('id', 'status', 'what_happened', 'doing', 'why', 'source', 'ask')})(
+            n.get('recovery')),
     }
 
 
@@ -120,6 +122,10 @@ TOOLS = [
     ('go_home', 'Drive back home.', {}, lambda a: nav({'type': 'go_home', 'replace': True})),
     ('charge', 'Drive to the charging dock and back onto it.', {}, lambda a: nav({'type': 'go_dock', 'replace': True})),
     ('confirm_ok', 'Press OK for a "wait for OK" stop.', {}, lambda a: nav({'type': 'confirm'})),
+    ('answer_robot', 'Answer the robot when robot_status shows recovery.status "asking" (it could not reach a stop): '
+                     'choice is one of retry, wait, skip, home, dock, cancel.',
+     {'choice': {'type': 'string', 'enum': ['retry', 'wait', 'skip', 'home', 'dock', 'cancel']}, 'id': {'type': 'integer'}},
+     lambda a: nav({'type': 'recovery_answer', 'choice': a['choice'], 'id': a.get('id')})),
     ('schedule', 'Run a task every day (or on days 0=Mon..6=Sun) at HH:MM robot time. task_text is a command.',
      {'at': {'type': 'string'}, 'task_text': {'type': 'string'}, 'days': {'type': 'array', 'items': {'type': 'integer'}},
       'name': {'type': 'string'}},
@@ -128,7 +134,7 @@ TOOLS = [
     ('mission_stats', 'Evaluation numbers: success rate, times, distance, replans, recent missions.',
      {'n': {'type': 'integer'}}, lambda a: nav({'type': 'mission_log', 'n': int(a.get('n') or 20)})),
 ]
-REQUIRED = {'go_to': ['name'], 'go_to_thing': ['thing'], 'command': ['text'], 'find_thing': ['thing'],
+REQUIRED = {'go_to': ['name'], 'go_to_thing': ['thing'], 'command': ['text'], 'find_thing': ['thing'], 'answer_robot': ['choice'],
             'schedule': ['at', 'task_text']}
 
 

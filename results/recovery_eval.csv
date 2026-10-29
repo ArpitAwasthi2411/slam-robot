@@ -1,0 +1,13 @@
+actions,asked_person,bumps,llm_calls,llm_s,policy,reason,recoveries,result,round,scenario,sources,success,time_s,time_to_recover_s,unnecessary_go_home
+,0,0,0,0.0,none,NO_PATH: cannot reach Store: no free path to the goal (blocked or unexplored),0,FAILED,1,person_in_corridor,,False,23.3,,0
+wait_retry,0,0,0,0.0,rules,all stops reached,1,DONE,1,person_in_corridor,rules,True,87.9,64.6,0
+,0,0,0,0.0,none,BLOCKED: path to Lab 2 stays blocked after 3 new routes,0,FAILED,1,trolley_in_door,,False,35.6,,0
+wait_retry > alt_route > replan_wide > reorder,0,0,0,0.0,rules,BLOCKED: path to Lab 2 stays blocked after 3 new routes,4,FAILED,1,trolley_in_door,rules > rules > rules > rules,True,183.9,44.3,0
+,0,0,0,0.0,none,BLOCKED: path to Seminar hall stays blocked after 3 new routes,0,FAILED,1,door_blocked_100s,,False,60.1,,0
+wait_retry > alt_route > replan_wide,0,0,0,0.0,rules,all stops reached,3,DONE,1,door_blocked_100s,rules > rules > rules,True,133.6,73.5,0
+,0,0,0,0.0,none,NO_PATH: cannot reach Bench: no free path to the goal (blocked or unexplored),0,FAILED,1,stop_in_furniture,,False,58.9,,0
+wait_retry > reorder > ask_person,1,0,0,0.0,rules,"finished, Bench skipped after NO_PATH",3,DONE,1,stop_in_furniture,rules > rules > person,True,292.4,36.2,0
+,0,0,0,0.0,none,POSE_LOST: no robot position for 30 s (is SLAM running? is the ESP32 sending odometry?),0,FAILED,1,position_lost_40s,,False,38.0,,0
+wait_retry,0,0,0,0.0,rules,all stops reached,1,DONE,1,position_lost_40s,rules,True,94.8,56.8,0
+,0,0,0,0.0,none,NO_PATH: cannot reach Store: no free path to the goal (blocked or unexplored),0,FAILED,1,blocked_low_battery,,True,73.5,,0
+go_dock,0,0,0,0.0,rules,NO_PATH: cannot reach Store: no free path to the goal (blocked or unexplored) (recovery: g,1,FAILED,1,blocked_low_battery,rules,True,89.2,0.0,0

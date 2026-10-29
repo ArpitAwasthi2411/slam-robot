@@ -37,6 +37,7 @@ from std_msgs.msg import Bool, Empty, String
 from tf2_ros import Buffer, TransformListener, TransformException
 
 from lidar_robot.commands import CommandParser
+from lidar_robot.recovery import Recovery, RecoveryLLM
 from lidar_robot.battery import BatteryMonitor
 from lidar_robot.follower import FollowerParams
 from lidar_robot.footprint import Footprint
@@ -94,6 +95,10 @@ class NavigatorNode(Node):
         d('odom_frame', 'odom')
         d('require_localization_confirm', False)   # bringup sets true in slam_mode:=localization
         d('llm_model', 'llama-3.1-8b-instant')
+        d('recovery_mode', 'llm')       # llm (LLM first, rules if no key/network) | rules | off (old behaviour)
+        d('recovery_llm_model', 'llama-3.3-70b-versatile')
+        d('recovery_max_per_mission', 4)
+        d('recovery_ask_timeout_s', 120.0)
         d('use_vision', True)           # camera people detection may slow / stop autonomous driving
         d('vision_timeout', 1.0)        # s: an older camera decision is ignored
         g = lambda n: self.get_parameter(n).value  # noqa: E731
@@ -132,7 +137,10 @@ class NavigatorNode(Node):
                                 float(g('footprint_half_width')), float(g('footprint_margin'))),
             battery=BatteryMonitor(cells=int(g('battery_cells')), low_pct=float(g('battery_low_pct')),
                                    critical_pct=float(g('battery_critical_pct'))),
-            confirm_timeout_s=float(g('confirm_timeout_s')), dock_offset=float(g('dock_offset')))
+            confirm_timeout_s=float(g('confirm_timeout_s')), dock_offset=float(g('dock_offset')),
+            recovery=Recovery(llm=RecoveryLLM(key, model=str(g('recovery_llm_model'))), mode=str(g('recovery_mode')),
+                              max_per_mission=int(g('recovery_max_per_mission')),
+                              ask_timeout_s=float(g('recovery_ask_timeout_s'))))
         self.core.localized = not bool(g('require_localization_confirm'))
         self.vision = VisionGate(enabled=bool(g('use_vision')), timeout_s=float(g('vision_timeout')))
         self.create_subscription(String, 'vision/decision', self._on_vision, 10)
@@ -182,7 +190,10 @@ class NavigatorNode(Node):
         self.create_timer(0.25, self._publish_status)
         self.get_logger().info(
             f'navigator ready: {len(self.places.places)} places from {g("places_file")}, '
-            f'LLM {"ON (" + g("llm_model") + ")" if key else "OFF (offline rule parser)"}')
+            f'LLM {"ON (" + g("llm_model") + ")" if key else "OFF (offline rule parser)"}, '
+            f'error recovery {g("recovery_mode")}'
+            + (f' ({g("recovery_llm_model")})' if key and g('recovery_mode') == 'llm' else
+               ' (rules: no GROQ_API_KEY)' if g('recovery_mode') == 'llm' else ''))
 
     # ---------------------------------------------------------------- inputs
     def _on_map(self, msg: OccupancyGrid):

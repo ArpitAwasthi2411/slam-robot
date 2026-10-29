@@ -79,6 +79,11 @@ navigator:
     max_replans: 3
     pose_timeout: 1.5            # s: odometry older than this = position lost (1.0 tripped on short CPU stalls)
     llm_model: llama-3.1-8b-instant   # used only if GROQ_API_KEY is set and there is internet
+    # error recovery (docs/recovery.md): when a step fails, pick one safe action from a fixed menu
+    recovery_mode: llm                # llm (rules if no key / no internet) | rules | off
+    recovery_llm_model: llama-3.3-70b-versatile
+    recovery_max_per_mission: 4
+    recovery_ask_timeout_s: 120.0     # "ask a person": the rules decide if nobody answers in the app
 
 vision:
   ros__parameters:

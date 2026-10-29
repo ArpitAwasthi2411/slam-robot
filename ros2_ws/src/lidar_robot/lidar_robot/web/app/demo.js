@@ -159,11 +159,79 @@ function finish(m, state, msg) {
 }
 function cancelAll(why) {
   let n = 0;
+  if (N.rec && ['deciding', 'running', 'asking'].includes(N.rec.status)) recResolve(why, 'failed');
   if (N.active) { finish(N.active, 'CANCELED', why); N.active = null; n++; }
   N.queue.forEach(m => { finish(m, 'CANCELED', why); n++; }); N.queue = [];
   N.path = []; N.state = 'IDLE'; N.message = why; return n;
 }
+// ---------------------------------------------------------------- error recovery (same menu and card as recovery.py)
+const REC_WHAT = { BLOCKED: 'The way to {p} stayed blocked.', NO_PATH: "I couldn't find a free route to {p}.",
+  GOAL_IN_OBSTACLE: '{p} is inside or too close to an obstacle on the map.' };
+const REC_OPTS = { retry: 'Try again', wait: 'Wait 1 min, then try', skip: 'Skip this stop', home: 'Go home', dock: 'Go and charge', cancel: 'Cancel the mission' };
+let recId = 0;
+N.rec = null; N.recHist = [];
+function startRecovery(code, text) {
+  const m = N.active; if (!m || !REC_WHAT[code]) return false;
+  if (N.recHist.filter(h => h.mission === m.id).length >= 3) return false;
+  if (N.rec && ['deciding', 'running', 'asking'].includes(N.rec.status)) recResolve('failed_again', 'failed');
+  const place = m.stops[m.next].label;
+  N.rec = { id: ++recId, t: Date.now() / 1000, code, place, mission: m.id, what_happened: REC_WHAT[code].replace('{p}', place),
+    doing: 'Deciding what to do…', why: '', source: 'rules', status: 'deciding', action: null, params: {}, note: 'demo robot: the safety rules decide (no language model in the demo)',
+    outcome: null, left_s: null, ask: null, _at: now() + 1.2, _until: null, _text: text };
+  N.state = 'RECOVERING'; N.message = `${code} at ${place}: deciding what to do`; N.path = [];
+  log(`${place}: ${text} -> recovering (rules)`, 'warn');
+  return true;
+}
+function recResolve(outcome, status = 'done') {
+  const r = N.rec; if (!r || ['done', 'failed'].includes(r.status)) return;
+  r.outcome = outcome; r.status = status; r.recovered_s = +(Date.now() / 1000 - r.t).toFixed(1);
+  N.recHist.unshift({ ...r }); N.recHist.length = Math.min(N.recHist.length, 20);
+}
+function recApply(action, params, why) {
+  const r = N.rec, m = N.active, t = now();
+  r.action = action; r.params = params; r.why = why;
+  const doing = { wait_retry: `Waiting ${params.wait_s} s, then trying ${r.place} again.`, skip_stop: `Skipping ${r.place} and carrying on with the next stop.`,
+    ask_person: 'Waiting for someone to choose in the app.', go_home: 'Giving up this mission and going home.', go_dock: 'Giving up this mission and going to charge.' }[action];
+  r.doing = doing; log(`recovery (${r.source}): ${doing}`, 'warn');
+  if (action === 'wait_retry') { r.status = 'running'; r._until = t + params.wait_s; return; }
+  if (action === 'ask_person') {
+    const more = m && m.stops.length - m.next > 1;
+    r.status = 'asking'; r._until = t + 120;
+    r.ask = { question: params.question || `I can't get to ${r.place}. What should I do?`,
+      options: Object.entries(REC_OPTS).filter(([k]) => k !== 'skip' || more).map(([id, label]) => ({ id, label, primary: id === 'retry' })) };
+    return;
+  }
+  if (action === 'skip_stop') { recResolve('skipped'); N.state = 'DWELL'; N.dwellUntil = t; return; }
+  if (action === 'go_home' || action === 'go_dock') {
+    recResolve('gave_up_' + action.slice(3));
+    finish(m, 'FAILED', `${r.code}: ${r._text} (recovery: ${action})`); N.active = null; N.path = [];
+    if (action === 'go_home') enqueue([{ label: 'home', ...places.home }], 2, 'recovery', 'home'); else goDock(2, 'recovery');
+    N.state = 'IDLE'; N.message = doing;
+  }
+}
+function recTick(t) {
+  const r = N.rec, m = N.active;
+  if (!m) { recResolve('mission gone', 'failed'); N.state = 'IDLE'; return [0, 0]; }
+  if (r.status === 'deciding') {
+    if (t < r._at) return [0, 0];
+    const more = m.stops.length - m.next > 1, tries = N.recHist.filter(h => h.mission === m.id).length;
+    if (r.code === 'GOAL_IN_OBSTACLE') recApply(more ? 'skip_stop' : 'ask_person', {}, `rule ${r.code}: the stop cannot be reached`);
+    else if (tries === 0) recApply('wait_retry', { wait_s: r.code === 'BLOCKED' ? 8 : 10 }, `rule ${r.code} step 1: people and trolleys usually move`);
+    else recApply('ask_person', {}, `rule ${r.code} step 2: ask a person`);
+    return [0, 0];
+  }
+  if (r.status === 'asking') {
+    if (t > r._until) { r.why = 'nobody answered in the app'; recApply('go_home', {}, r.why); }
+    else N.message = 'waiting for an answer in the app';
+    return [0, 0];
+  }
+  if (r.status === 'running' && r._until && t < r._until) { N.message = r.doing; return [0, 0]; }
+  N.state = 'PLANNING'; N.message = `trying ${r.place} again`; N.path = [];
+  return [0, 0];
+}
 function fail(code, text) {
+  if (startRecovery(code, text)) return;
+  if (N.rec && ['deciding', 'running', 'asking'].includes(N.rec.status)) recResolve('failed', 'failed');
   const m = N.active; if (!m) return;
   finish(m, 'FAILED', `${code}: ${text}`); N.active = null; N.path = [];
   N.last_failure = { code, text, mission: summary(m), t: Date.now() / 1000 };
@@ -201,6 +269,7 @@ function navStep(t, dt) {
     return [0, 0];
   }
   if (N.state === 'DWELL') { if (t >= N.dwellUntil) advance(t); return [0, 0]; }
+  if (N.state === 'RECOVERING') return recTick(t);
   if (!N.active) {
     if (!N.queue.length) { if (N.docked) { N.state = 'CHARGING'; N.message = `on the dock, charging (${Math.round(N.bat)} %)`; } else if (N.state !== 'IDLE') { N.state = 'IDLE'; } return [0, 0]; }
     N.active = N.queue.shift(); N.active.state = 'ACTIVE'; N.path = [];
@@ -218,6 +287,10 @@ function navStep(t, dt) {
     if (!r.path) { fail(r.error.includes('inside') ? 'GOAL_IN_OBSTACLE' : 'NO_PATH', `cannot reach ${st.label}: ${r.error}`); return [0, 0]; }
     N.path = r.path; N.idx = 0; m.planned += plen(r.path); N.state = 'DRIVING'; N.message = `driving to ${st.label}`;
     log(`route to ${st.label}: ${plen(r.path).toFixed(1)} m`);
+  }
+  // a trolley parks in the Seminar hall door the first time Pathik goes there (shows error recovery)
+  if (st.label === 'Seminar hall' && !N.trolleyDone && R.x > 10.6 && R.y > 3.6 && R.y < 4.95) {
+    N.trolleyDone = true; fail('BLOCKED', 'a trolley stays in the Seminar hall door'); return [0, 0];
   }
   // pure pursuit
   const P = N.path;
@@ -239,6 +312,7 @@ function navStep(t, dt) {
 function arrive(t) {
   const m = N.active, st = m.stops[m.next];
   N.path = []; log(`arrived at ${st.label}`);
+  if (N.rec && N.rec.status === 'running' && N.rec.mission === m.id) { recResolve('recovered'); log(`recovered: reached ${st.label}`); }
   if (st.dock) { N.dockRev = true; log('at the dock: reversing onto the contacts'); return [0, 0]; }
   if (st.confirm) { N.state = 'CONFIRM'; N.message = `at ${st.label}: waiting for OK`; N.confirmUntil = t + 300; log(`waiting for OK at ${st.label}`); return [0, 0]; }
   N.state = 'DWELL'; N.message = `at ${st.label}`; N.dwellUntil = t + (m.next < m.stops.length - 1 ? 2 : 0) + (st.wait_s || 0);
@@ -295,6 +369,7 @@ function explain() {
   let a;
   if (R.estop) a = 'The emergency stop is pressed. Release it, then press Resume.';
   else if (R.hold && (N.active || N.queue.length)) a = 'I was stopped by the e-stop earlier. My tasks are paused until someone presses Resume.';
+  else if (N.rec && ['deciding', 'running', 'asking'].includes(N.rec.status)) a = `${N.rec.what_happened} ${N.rec.doing} (decided by my safety rules)`;
   else if (N.state === 'CONFIRM') a = `I'm at ${goal} and waiting for someone to press OK before I continue.`;
   else if (N.state === 'DOCKING') a = 'I am moving onto the charging dock.';
   else if (N.state === 'CHARGING') a = `I'm charging on the dock (${Math.round(N.bat)} %).`;
@@ -327,6 +402,17 @@ function navReq(q) {
     case 'goto_room': { let room; if (q.thing) { const h = findThing(q.thing); if (!h.length) throw new Error(`no room has "${q.thing}" in its contents list`); room = h[0][1]; } else room = places.rooms.find(r => norm(r.name) === norm(q.name)); if (!room) throw new Error(`no room called "${q.name}"`); return enqueue([roomTarget(room)], q.priority || 1, 'dashboard', room.name); }
     case 'go_home': return enqueue([{ label: 'home', ...places.home }], q.priority || 1, 'dashboard', 'home', q.replace);
     case 'go_dock': if (q.replace) cancelAll('going to charge'); return goDock(q.priority || 1, 'dashboard');
+    case 'recovery_answer': {
+      const r = N.rec;
+      if (!r || r.status !== 'asking') throw new Error('nothing is waiting for an answer');
+      if (q.id != null && +q.id !== r.id) throw new Error('that question was already answered');
+      if (!REC_OPTS[q.choice]) throw new Error('unknown choice');
+      r.source = 'person'; r.why = `${q.by || 'someone'} chose "${REC_OPTS[q.choice]}" in the app`; log(r.why);
+      if (q.choice === 'cancel') { recResolve('canceled_by_person'); const m = N.active; if (m) { finish(m, 'CANCELED', 'canceled from the app'); N.active = null; } N.state = 'IDLE'; N.message = 'mission canceled from the app'; return { ok: true, canceled: true }; }
+      const act = { retry: ['wait_retry', { wait_s: 3 }], wait: ['wait_retry', { wait_s: 60 }], skip: ['skip_stop', {}], home: ['go_home', {}], dock: ['go_dock', {}] }[q.choice];
+      recApply(act[0], act[1], r.why);
+      return { ok: true, action: act[0] };
+    }
     case 'cancel': { const n = cancelAll('canceled'); log(`canceled ${n} mission(s)`); return { ok: true, canceled: n }; }
     case 'resume': if (R.estop) throw new Error('release the e-stop first'); R.hold = false; N.state = 'IDLE'; N.message = 'resumed'; log('missions resumed'); return { ok: true };
     case 'confirm_localization': return { ok: true };
@@ -411,6 +497,8 @@ function navStatus() {
     battery: { v: +(9.9 + 2.7 * pct / 100).toFixed(2), pct, a: N.docked ? -1.5 : (Math.abs(R.v) > 0.01 ? 1.6 : 0.45), charging: N.docked, level: N.docked ? 'charging' : pct < 12 ? 'critical' : pct < 25 ? 'low' : 'ok', src: 'demo' },
     confirm: N.state === 'CONFIRM' && st ? { label: st.label, left_s: Math.max(0, Math.round(N.confirmUntil - now())) } : null,
     schedules: schedSummary(), log_stats: stats(),
+    recovery: N.rec ? Object.fromEntries(Object.entries({ ...N.rec, left_s: N.rec._until && ['running', 'asking'].includes(N.rec.status) ? Math.max(0, Math.round(N.rec._until - now())) : null })
+      .filter(([k]) => !k.startsWith('_'))) : null, recovery_mode: 'rules',
   };
 }
 function demoVision() {                      // a person walks towards the robot and away again (20 s)
@@ -449,7 +537,7 @@ const USERS = {
   'dr.mehta': { name: 'Dr. Mehta', role: 'staff', status: 'pending', pw: 'mehta123', created: 1729300000 },
 };
 const STAFF_NAV = new Set(['goto_place', 'goto_room', 'command', 'preview', 'cancel', 'resume', 'go_home', 'go_dock',
-  'confirm', 'explain', 'find', 'search', 'schedule_list', 'mission_log']);
+  'confirm', 'explain', 'find', 'search', 'schedule_list', 'mission_log', 'recovery_answer']);
 function needRole(p, body) {
   if (['/api/ping', '/api/auth/login', '/api/auth/signup'].includes(p)) return null;
   if (p.startsWith('/api/users')) return 'admin';

@@ -13,7 +13,8 @@ Deadlines: ROSCon India proposal **8 Nov** · IndiaAI Fellowship **30 Nov** · t
 
 Ordered by value for the thesis, the demo and the applications.
 
-- [ ] **A1. LLM error recovery (thesis novelty #1, not started)**
+- [x] **A1. LLM error recovery (thesis novelty #1)**: done 29 Oct (`docs/recovery.md`, `tools/eval_recovery.py`,
+  rules 6/6 vs none 1/6 in simulation). Left: run the eval with the Groq key (LLM column), try on the robot (B13).
   When a mission fails (`last_failure`, reason codes like NO_PATH, BLOCKED, GOAL_IN_OBSTACLE), send the failure
   + context to the LLM, let it choose from a fixed menu of safe actions (retry after N s, try another route,
   skip stop, reorder queue, ask a person via the app, go home), validate the choice, execute, log it, and show
@@ -84,6 +85,7 @@ Ordered by value for the thesis, the demo and the applications.
 - [ ] **B7.** Map the full floor, label places and rooms with contents, try "take me to the room with the 3D printer".
 - [ ] **B8.** Install the latest APK; MCP test: Claude sends the robot to a room.
 - [ ] **B9.** Record the demo video (mapping, a spoken/typed Hinglish command, driving to a room, stopping for a person) → portfolio, ROSCon, IndiaAI.
+- [ ] **B13.** Error recovery on the robot: stand in the corridor, block a door, ask-a-person flow (`docs/STEPS_next_run.md`, Phase 3); run `tools/eval_recovery.py` with the Groq key.
 - [ ] **B12.** Try the redesigned app on a phone with each role (`docs/STEPS_next_run.md`, Phase 2).
 - [ ] **B11.** Remote control: robot on phone A's hotspot, phone B on mobile data (`docs/STEPS_remote_control.md`).
 - [ ] **B10.** Docker on the Pi (make the GHCR package public first), `scripts/pathik.sh install`.

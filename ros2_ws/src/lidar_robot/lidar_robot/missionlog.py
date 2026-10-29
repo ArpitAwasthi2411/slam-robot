@@ -3,7 +3,8 @@
 ~/maps/missions.jsonl, fields per mission:
   id, text, source, priority, stops, started, ended, duration_s, result (DONE/FAILED/CANCELED),
   reason, distance_m (driven), planned_m (first route to each stop), straight_m (straight lines),
-  replans, blocked_s, estops, bumps, skipped, min_gap_m (closest the body came to anything)
+  replans, blocked_s, estops, bumps, skipped, min_gap_m (closest the body came to anything),
+  recoveries (list of {code, place, action, params, source, reason, t}: error-recovery decisions)
 
 stats() gives the numbers for the project report: success rate, average time, path efficiency
 (planned / driven), replans and bumps per mission.
@@ -41,7 +42,7 @@ class MissionLog:
                 'id': m.id, 'text': m.text, 'source': m.source, 'priority': m.priority, 'by': getattr(m, 'by', ''),
                 'stops': [s.label for s in m.stops], 'started': round(self.clock(), 1),
                 'distance_m': 0.0, 'planned_m': 0.0, 'straight_m': 0.0, 'replans': 0, 'blocked_s': 0.0,
-                'estops': 0, 'bumps': 0, 'skipped': 0, 'min_gap_m': None, '_planned_stops': set(),
+                'estops': 0, 'bumps': 0, 'skipped': 0, 'min_gap_m': None, 'recoveries': [], '_planned_stops': set(),
                 '_from': None}
         return r
 
@@ -137,4 +138,7 @@ class MissionLog:
             'estops': sum(r.get('estops', 0) for r in rows),
             'min_gap_m': min([r['min_gap_m'] for r in rows if r.get('min_gap_m') is not None], default=None),
             'failure_reasons': reasons,
+            'recoveries': sum(len(r.get('recoveries') or []) for r in rows),
+            'missions_with_recovery': len([r for r in rows if r.get('recoveries')]),
+            'recovered': len([r for r in done if r.get('recoveries')]),
         }

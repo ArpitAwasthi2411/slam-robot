@@ -22,6 +22,8 @@ class Stop:
     wait_s: float = 0.0             # extra wait at this stop ("wait 2 minutes")
     confirm: bool = False           # wait here until someone presses OK ("wait for a signature")
     dock: bool = False              # approach point of the charging dock: reverse onto it on arrival
+    margin: float = 0.0             # recovery "replan_wide": keep this much more distance from obstacles
+    via: bool = False               # recovery "alt_route": a detour waypoint (no dwell, no announcement)
 
 
 @dataclass
