@@ -30,7 +30,8 @@ Ordered by value for the thesis, the demo and the applications.
   docking. `set_dock` stores the marker ID. Keep the interface Neelaksh's `detect(frame) → {found, x_m, y_m, z_m, yaw_deg}`.
   Prompt: *"Do task A2 from docs/WORK_LEFT.md: forward ArUco docking (navigator, vision, firmware docking mode, tests, docs)."*
 
-- [ ] **A3. Voice on the robot**
+- [x] **A3. Voice on the robot**: done 29 Oct (`docs/STEPS_voice.md`: GPIO17 push-to-talk + app button, Groq Whisper /
+  Vosk, Piper TTS, announcements). Left: wire the button, run setup_voice.sh, try it (B15); Rashi's Vosk vs Whisper table.
   Push-to-talk button on a free ESP32 GPIO (8 or 47) or a Pi GPIO → record from the USB mic → speech-to-text
   (Groq Whisper, Vosk offline fallback) → existing CommandParser → answer spoken with Piper TTS
   (English + Hindi) replacing espeak in `speech.py`. Wake the app's mic button to the same path.
@@ -89,6 +90,7 @@ Ordered by value for the thesis, the demo and the applications.
 - [ ] **B9.** Record the demo video (mapping, a spoken/typed Hinglish command, driving to a room, stopping for a person) → portfolio, ROSCon, IndiaAI.
 - [ ] **B13.** Error recovery on the robot: stand in the corridor, block a door, ask-a-person flow (`docs/STEPS_next_run.md`, Phase 3); run `tools/eval_recovery.py` with the Groq key.
 - [ ] **B14.** Front docking on the real dock: print the marker (`tools/marker_webcam.py --print`), measure, run `docs/STEPS_next_run.md` Phase 4.
+- [ ] **B15.** Voice: button on pin 11/9, `scripts/setup_voice.sh`, then the checks in `docs/STEPS_voice.md`.
 - [ ] **B12.** Try the redesigned app on a phone with each role (`docs/STEPS_next_run.md`, Phase 2).
 - [ ] **B11.** Remote control: robot on phone A's hotspot, phone B on mobile data (`docs/STEPS_remote_control.md`).
 - [ ] **B10.** Docker on the Pi (make the GHCR package public first), `scripts/pathik.sh install`.

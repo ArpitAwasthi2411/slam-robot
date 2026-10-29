@@ -314,6 +314,8 @@ def required_role(method, path, body=None):
         return 'staff' if (body or {}).get('on', True) else 'operator'
     if path == '/api/nav':
         return 'staff' if (body or {}).get('type') in STAFF_NAV else 'operator'
+    if path == '/api/voice':
+        return 'staff'         # "talk to the robot": the robot's own microphone, like the voice button on it
     return 'operator'          # driving, goals, maps, relocalize, ESP32 tuning, tests
 
 

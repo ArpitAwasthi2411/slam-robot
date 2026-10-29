@@ -526,6 +526,23 @@ function navStatus() {
       .filter(([k]) => !k.startsWith('_'))) : null, recovery_mode: 'rules',
   };
 }
+// voice (demo): holding "talk to the robot" pretends the robot's microphone heard a sample command
+const VO = { listening: false, thinking: false, heard: '', reply: '', n: 0 };
+const VO_SAMPLES = ['go to the water cooler', 'where is the 3D printer', 'come back home'];
+function voiceDemo(action) {
+  if (action === 'listen') { VO.listening = true; VO.t0 = now(); return { ok: true }; }
+  if (action === 'stop' && VO.listening) {
+    VO.listening = false; VO.thinking = true;
+    setTimeout(() => {
+      const text = VO_SAMPLES[VO.n++ % VO_SAMPLES.length];
+      let r; try { r = navReq({ type: 'command', text }); } catch (e) { r = { ok: false, error: e.message }; }
+      VO.heard = text; VO.thinking = false;
+      VO.reply = r.ok === false ? `Sorry: ${r.error}` : (r.answer || r.status || (r.interpretation && r.interpretation.reply) || 'OK.');
+      log(`voice: heard "${text}"`);
+    }, 900);
+  }
+  return { ok: true };
+}
 function demoVision() {                      // a person walks towards the robot and away again (20 s)
   const ph = (now() % 20) / 20, d = +(0.6 + 2.6 * Math.abs(1 - 2 * ph)).toFixed(2), b = +(6 * Math.sin(ph * 6.28)).toFixed(1);
   const approaching = ph < 0.5, p = { id: 1, bearing_deg: b, distance_m: d, approaching, moving_away: !approaching };
@@ -550,6 +567,8 @@ function state() {
     nav: navStatus(), places: { map: places.map, home: places.home, dock: places.dock, places: places.places, rooms: places.rooms, version: places.version },
     tune: { ...tune }, fw: '2.4-demo', telemetry: false, turns: 0, sep: 0.3, test_running: false, autosave: {}, slam_mode: 'localization',
     vision: demoVision(), camera: true,
+    voice: { ok: true, mic: true, button: true, stt: 'demo', listening: VO.listening, thinking: VO.thinking,
+             last_heard: VO.heard, last_reply: VO.reply, message: 'Demo: hold the button, the demo robot "hears" a sample command.' },
   };
 }
 
@@ -569,6 +588,7 @@ function needRole(p, body) {
   if (['/api/state', '/api/map', '/api/auth/me', '/api/auth/logout', '/api/auth/password'].includes(p)) return 'staff';
   if (p === '/api/estop') return (body || {}).on === false ? 'operator' : 'staff';
   if (p === '/api/nav') return STAFF_NAV.has((body || {}).type) ? 'staff' : 'operator';
+  if (p === '/api/voice') return 'staff';
   return 'operator';
 }
 const pub = (n, u) => ({ username: n, name: u.name, role: u.role, status: u.status, created: u.created, last_login: u.last_login || null });
@@ -645,6 +665,7 @@ window.PathikDemo = {
     if (p === '/api/cmd') { R.teleop = { v: Math.max(-0.3, Math.min(0.3, +body.v || 0)), w: Math.max(-1.2, Math.min(1.2, +body.w || 0)), t: now() }; return { ok: true }; }
     if (p === '/api/estop') { const on = body.on !== false; if (on && !R.estop) { R.hold = true; if (N.active) { N.active.state = 'QUEUED'; N.queue.unshift(N.active); N.active = null; N.path = []; } log('E-stop engaged, missions paused', 'warn'); } if (!on && R.estop) { N.state = 'WAITING'; N.message = 'E-stop released: press Resume to continue missions'; } R.estop = on; return { ok: true }; }
     if (p === '/api/nav') { try { return navReq(body || {}); } catch (e) { return { ok: false, error: e.message }; } }
+    if (p === '/api/voice') return voiceDemo((body || {}).action);
     if (p === '/api/goal') return navReq({ type: 'goto_pose', ...body });
     if (p === '/api/cancel') return navReq({ type: 'cancel' });
     if (p === '/api/relocalize') { R.x = +body.x; R.y = +body.y; R.yaw = +(body.yaw || 0); return { ok: true }; }

@@ -102,7 +102,13 @@ class NavigatorNode(Node):
         d('front_cone_deg', 25.0)
         d('dwell_s', 3.0)
         d('speech', True)                  # speak through a speaker on the Pi (needs espeak-ng)
-        d('speech_voice', 'en-in')
+        d('speech_voice', 'en-in')        # espeak voice (fallback when Piper is not installed)
+        d('speech_engine', 'auto')         # auto (Piper, else espeak) | piper | espeak
+        d('speech_volume', 1.0)            # 0 .. 1.5
+        d('speech_voice_en', '')           # Piper voice .onnx ('' = first ~/piper/voices/en_*.onnx)
+        d('speech_voice_hi', '')           # Hindi voice ('' = first ~/piper/voices/hi_*.onnx)
+        d('speech_max_per_min', 8)         # rate limit (questions to people, battery always get through)
+        d('speech_device', '')             # ALSA output device ('' = default)
         d('auto_return_s', 0.0)
         d('max_replans', 3)
         d('pose_timeout', 1.0)          # wheel odometry (odom->base_link) older than this = position lost
@@ -132,10 +138,16 @@ class NavigatorNode(Node):
         self.planner_params = PlannerParams(robot_radius=float(g('robot_radius')),
                                             soft_radius=float(g('soft_radius')),
                                             allow_unknown=bool(g('allow_unknown')))
-        self.speaker = Speaker(enabled=bool(self.get_parameter('speech').value),
-                               voice=str(self.get_parameter('speech_voice').value))
+        self.speaker = Speaker(enabled=bool(g('speech')), voice=str(g('speech_voice')), engine=str(g('speech_engine')),
+                               volume=float(g('speech_volume')), voice_en=str(g('speech_voice_en')),
+                               voice_hi=str(g('speech_voice_hi')), max_per_min=int(g('speech_max_per_min')),
+                               audio_device=str(g('speech_device')))
         if self.speaker.enabled and not self.speaker.available:
-            self.get_logger().info('robot voice off: install espeak-ng and connect a speaker to enable it')
+            self.get_logger().info('robot voice off: run scripts/setup_voice.sh (Piper) or install espeak-ng, '
+                                   'and connect a speaker')
+        else:
+            self.get_logger().info(f'robot voice: {self.speaker.engine}, volume {self.speaker.volume:.1f}')
+        self.create_subscription(String, 'speech/say', self._on_say, 10)
         self.core = NavigatorCore(
             self.places,
             self.planner_params,
@@ -324,6 +336,14 @@ class NavigatorNode(Node):
             self.core.handle({'type': 'goto_pose', 'x': msg.pose.position.x, 'y': msg.pose.position.y,
                               'yaw': yaw_from_quaternion(o.x, o.y, o.z, o.w), 'label': 'RViz goal',
                               'source': 'rviz'}, self._pose())
+
+    def _on_say(self, msg: String):
+        """Other nodes (voice replies) speak through this one speaker."""
+        try:
+            d = json.loads(msg.data)
+        except ValueError:
+            d = {'text': msg.data}
+        self.speaker.say(str(d.get('text', ''))[:300], key=d.get('key') or None, gap_s=float(d.get('gap_s', 0.5)))
 
     def _on_request(self, msg: String):
         try:
