@@ -95,7 +95,18 @@ HTTP, the dashboard forwards `POST /api/nav` with the same JSON.
 {"type": "add_place", "name": "Water cooler", "here": true}
 {"type": "delete_place", "name": "Lab 3"}   {"type": "set_home", "here": true}
 {"type": "search", "q": "hod"}
+// routes, patrols and drawn paths (app map tools)
+{"type": "goto_poses", "waypoints": [{"x": 1, "y": 2}, {"x": 3, "y": 2, "label": "door"}], "repeat": -1}  // -1 = patrol
+{"type": "check_path", "points": [[0, 0], [1, 0.5], [2, 0.5]]}      // drawn path: length, ETA, too-close parts
+{"type": "follow_path", "points": [[0, 0], [1, 0.5], [2, 0.5]], "repeat": 0, "allow_close": false}
+// exploration (docs/exploration.md) and path-follower tuning (Tuning Lab)
+{"type": "explore_start", "speed": 0.18, "turn_speed": 0.45, "scan_spin": true}   {"type": "explore_stop"}
+{"type": "get_tune"}   {"type": "tune", "follower": {"lookahead": 0.5}, "save": true}
+// rooms, dock, schedules, "wait for OK", explain, mission log: see "v2.4: tasks people actually ask for" below
 ```
+The full list with every field is at the top of `lidar_robot/navigator_core.py`; which role may send which
+type is `STAFF_NAV` in `lidar_robot/auth.py` (staff: go/call/stop/ask, operator: everything else).
+
 Status (4 Hz, `/navigator/status`): state, message, goal, remaining route, distance, ETA, missions
 (active, queue, history), recent events, hold, localized.
 

@@ -19,7 +19,7 @@ import time
 
 import serial
 
-TICKS_PER_REV = 4740
+TICKS_PER_REV = 4970          # firmware TICKS_PER_REV (S3 v2.6 / classic v2.4), measured with --push
 WHEEL_D_MM = 125.0
 MM_PER_TICK = math.pi * WHEEL_D_MM / TICKS_PER_REV
 
@@ -160,7 +160,7 @@ def cmd_calibrate(s):
     if pwm_min is None:
         print('Wheels never moved: check motor power / driver enable pins.')
         return
-    print('Put these in firmware/robot_esp32/robot_esp32.ino:')
+    print('Put these in firmware/robot_esp32s3/robot_esp32s3.ino (classic board: robot_esp32_classic):')
     print(f'  #define PWM_MIN              {max(10, pwm_min - 5)}.0f')
     print(f'  #define MAX_WHEEL_SPEED_MMS  {min(abs(top[1]), abs(top[2])):.0f}.0f   (speed at MAX_PWM={top[0]})')
     if abs(top[1] - top[2]) / max(abs(top[1]), abs(top[2]), 1) > 0.1:
@@ -243,7 +243,7 @@ def cmd_rc(s, secs):
     for name, lo, mid, hi in (('steering', smin, smid, smax), ('throttle', tmin, tmid, tmax)):
         if hi - mid < 150 or mid - lo < 150:
             print(f'  WARNING: {name} range looks small: did you sweep the stick fully both ways?')
-    print('\nPut these in firmware/robot_esp32/robot_esp32.ino (RC CALIBRATION) and re-flash:\n')
+    print('\nPut these in firmware/robot_esp32s3/robot_esp32s3.ino (classic board: robot_esp32_classic) (RC CALIBRATION) and re-flash:\n')
     print(f'#define STEERING_MIN     {smin}')
     print(f'#define STEERING_CENTER  {smid}')
     print(f'#define STEERING_MAX     {smax}')

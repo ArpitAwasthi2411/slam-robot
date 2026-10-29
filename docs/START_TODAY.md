@@ -5,7 +5,7 @@ the phone → **E** checks → **F** tune → **G** let it map by itself.
 Section **N** at the end compares all the ways to connect.
 
 What you need: laptop with Arduino IDE, ethernet cable, the project zip `slam-robot.zip`,
-the APK `Pathik-4.apk`, robot battery charged, the RC transmitter.
+the latest Pathik APK (GitHub → Releases), robot battery charged, the RC transmitter.
 
 ---
 
@@ -94,7 +94,7 @@ For those 5 minutes the Pi borrows your phone's internet:
    10.42.0.1. It comes back by itself at every boot.
 
 **Every day from now on:**
-1. Install `Pathik-4.apk` on the phone (once; allow "install unknown apps").
+1. Install the latest Pathik APK on the phone (once; allow "install unknown apps").
 2. Robot ON, wait ~1 minute.
 3. Phone → Wi-Fi → join **SLAM-Robot** (password `robot1234`). Android may say "no internet":
    tap **stay connected / keep**, otherwise it jumps back to mobile data or another Wi-Fi.

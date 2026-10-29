@@ -68,7 +68,8 @@ def explain(core):
         lf = core.last_failure
         g = (lf.get('mission') or {}).get('stops', [goal])
         g = g[min(len(g) - 1, (lf.get('mission') or {}).get('next_stop', 0))] if g else goal
-        parts.append(FAIL_TEXT.get(lf['code'], lf['text']).format(goal=g))
+        tpl = FAIL_TEXT.get(lf['code'])
+        parts.append(tpl.format(goal=g) if tpl else lf['text'])    # raw text may contain braces
     else:
         parts.append("I'm not doing anything right now: no tasks are queued.")
 

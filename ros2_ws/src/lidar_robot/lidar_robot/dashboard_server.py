@@ -32,6 +32,7 @@ both implement this interface.
 """
 import gzip
 import json
+import math
 import mimetypes
 import os
 import threading
@@ -41,6 +42,17 @@ from urllib.parse import urlparse, parse_qs
 from lidar_robot.auth import AuthError, at_least, required_role
 
 MAX_BODY = 4096
+
+
+def _num(body, key, default=None):
+    """A finite float from the JSON body (NaN/inf would reach the motors as garbage)."""
+    v = body.get(key, default)
+    if v is None:
+        raise KeyError(key)
+    v = float(v)
+    if not math.isfinite(v):
+        raise ValueError(f'{key} must be a finite number')
+    return v
 
 
 def _find_index_html():
@@ -252,11 +264,11 @@ def make_handler(backend, index_path, app_dir=None, users=None):
                 if self.user and url.path == '/api/nav':
                     body['by'] = self.user['username']
                 if url.path == '/api/cmd':
-                    backend.command(float(body.get('v', 0.0)), float(body.get('w', 0.0)))
+                    backend.command(_num(body, 'v', 0.0), _num(body, 'w', 0.0))
                 elif url.path == '/api/estop':
                     backend.set_estop(bool(body.get('on', True)))
                 elif url.path == '/api/goal':
-                    backend.send_goal(float(body['x']), float(body['y']), float(body.get('yaw', 0.0)))
+                    backend.send_goal(_num(body, 'x'), _num(body, 'y'), _num(body, 'yaw', 0.0))
                 elif url.path == '/api/cancel':
                     backend.cancel_goal()
                 elif url.path == '/api/nav':

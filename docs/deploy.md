@@ -10,9 +10,12 @@ cd ~/slam-robot && ./scripts/setup_laptop_link.sh enx006f0000324d
 After this, unplugging the cable no longer loses `169.254.1.1`. Use `ssh arpit@169.254.1.2`
 (not `robot.local`, mDNS is unreliable on a direct cable).
 
-## 1. Flash firmware v2 to the ESP32
+## 1. Flash the ESP32 firmware
 
-Arduino IDE → open `firmware/robot_esp32/robot_esp32.ino`.
+Arduino IDE → open `firmware/robot_esp32s3/robot_esp32s3.ino` (ESP32-S3, v2.6; the robot's board, linked to the
+Pi by the GPIO UART: see [STEPS_esp32s3_lab.md](STEPS_esp32s3_lab.md)) or
+`firmware/robot_esp32_classic/robot_esp32_classic.ino` (classic ESP32, v2.4, USB).
+`firmware/robot_esp32/` is the old v2.2 sketch, kept for reference only.
 
 | Tools menu | ESP32-S3 | Classic ESP32 |
 |---|---|---|

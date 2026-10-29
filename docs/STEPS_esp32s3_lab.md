@@ -1,6 +1,6 @@
 # Lab day: move to the ESP32-S3 and bring Pathik up again (every step)
 
-What you need on the laptop: `slam-robot.zip`, Arduino IDE 2, `Pathik-11.apk` on the phone,
+What you need on the laptop: `slam-robot.zip`, Arduino IDE 2, the latest `Pathik-N.apk` (GitHub → Releases) on the phone,
 the multimeter. Wiring list: `hardware/CONNECTIONS_esp32s3.md` (every wire, both ends).
 
 Do it in order. Every **Check** has to pass before moving on.
@@ -143,7 +143,7 @@ journalctl -u robot -f                           # look for "Connected to ESP32 
 
 ## 7. App: install, first account, drive
 
-1. Phone: install **Pathik-11.apk** (allow "install unknown apps").
+1. Phone: install the latest **Pathik-N.apk** from GitHub → Releases (allow "install unknown apps").
 2. Phone on the same network (robot Wi-Fi, phone hotspot or Tailscale), open the app → it finds the robot
    (or type `169.254.1.2`/the Pi's Wi-Fi IP).
 3. First time it shows **"Set up this robot"** → create **your** account: that one is the **admin**.

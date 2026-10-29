@@ -76,7 +76,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**.
 
-**Last updated: 2026-10-28**
+**Last updated: 2026-10-29**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -84,7 +84,7 @@ odometry, ultrasonics, navigator driving, app.
 Done in code, NOT yet verified on the robot:
 - ESP32-S3 firmware v2.6 + UART link to the Pi (pins 47/8 ↔ Pi 10/8): ODM/US verified on the Pi; IMU not detected yet
 - Camera Module 3 + YOLO people avoidance + app camera card (APK Pathik-12)
-- accounts/roles + redesigned app (latest APK **Pathik-11**, release v1.0.11)
+- accounts/roles + redesigned app (latest APK **Pathik-12**, release v1.0.12)
 - link-drop diagnostics (v2.4.2), battery divider, docking, schedules, rooms + LLM on the real floor
 - Docker deployment, MCP server against the real robot
 
@@ -102,6 +102,11 @@ Open problems / TODO (priority order):
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-10-29: Phase 0 repo review (docs/REVIEW_2026-10.md): NaN drive commands blocked at HTTP, dashboard and
+  bridge; "stop" ends exploration; auto-home/explain crash fixes; setup_ports.sh UART mode; serial_probe 4970
+  ticks; S3/classic pin tables fixed in hardware/README + sensors + classic wiring; README/roadmap/deploy/
+  calibration/navigation docs updated; MCP end-to-end test. 126 tests. docs/STEPS_next_run.md started.
 
 - 2026-10-28 (night): no Ubuntu 22.04 raspi kernel has imx708 (checked 1108/1110 debs): setup_imx708_driver.sh
   builds imx708 + dw9807-vcm (rpi-5.15.y) with DKMS + imx708.dtbo (compile-tested vs 1108 headers);

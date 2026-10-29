@@ -7,7 +7,8 @@ Good odometry is what makes the map and the goal controller work. Do these in or
 ```bash
 python3 tools/serial_probe.py --calibrate
 ```
-Copy the two suggested values into `firmware/robot_esp32/robot_esp32.ino`:
+Copy the two suggested values into the sketch you flash (`firmware/robot_esp32s3/robot_esp32s3.ino`, or
+`firmware/robot_esp32_classic/robot_esp32_classic.ino` on a classic board):
 `PWM_MIN` (where the wheel starts turning) and `MAX_WHEEL_SPEED_MMS` (speed at `MAX_PWM`). Re-flash.
 
 Verify: `--vel 200 200` → both wheels report 180–220 mm/s. If they oscillate, lower `KP`.
