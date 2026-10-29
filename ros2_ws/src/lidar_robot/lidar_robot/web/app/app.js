@@ -219,7 +219,7 @@ const shortAddr = base => (base || '').replace(/^https?:\/\//, '');
 const S = {
   st: null, gen: 0, fails: 0, lastOk: 0, robot: null,
   map: null, mapVer: -1, mapImg: null,
-  tab: 'drive', lab: 'health', user: null, lastMap: null,
+  tab: 'home', lab: null, user: null, lastMap: null,
 };
 const ROLE_RANK = { staff: 0, operator: 1, admin: 2 };
 const can = need => !!S.user && (ROLE_RANK[S.user.role] ?? -1) >= ROLE_RANK[need];
@@ -251,12 +251,13 @@ function enterMain(user, pending = 0) {
   document.body.classList.remove('role-staff', 'role-operator', 'role-admin');
   document.body.classList.add('role-' + user.role);
   const staff = user.role === 'staff';
-  $('#tab-go-t').textContent = staff ? 'Home' : 'Go';
-  document.querySelector('.tabs').style.setProperty('--ntabs', staff ? 3 : 5);
-  S.tab = staff ? 'go' : (S.tab && S.tab !== 'me' ? S.tab : 'drive');
+  // staff: Home · Send · Map · Me; operator/admin: Home · Send · Map · Drive · Operate (the robot-team area)
+  $('#tab-more-t').textContent = staff ? 'Me' : 'Operate';
+  $('#main').style.setProperty('--ntabs', staff ? 4 : 5);      // + the STOP slot in the middle of the tab bar
+  S.tab = 'home'; S.lab = null;
   renderMe(pending);
   $('#connect').hidden = true; $('#auth').hidden = true; $('#main').hidden = false;
-  if (BASE === DEMO) toast(`Demo robot as ${user.role}. ${staff ? 'Try Home → “take me to the 3D printer”.' : 'Try Go → “take me to the 3D printer”.'}`);
+  if (BASE === DEMO) toast(`Demo robot as ${user.role}. Try Send → “take me to the 3D printer”.`);
   else if (!user.legacy) toast(`Welcome, ${user.name || user.username}`);
   S.gen++; S.fails = 0; S.mapVer = -1; S.mapImg = null; S.st = null;
   const g = S.gen;
@@ -350,7 +351,7 @@ async function pollState(g) {
       onLinkLost();
     }
     // fast on local Wi-Fi; slower over mobile data (high delay) or when the app is in the background
-    const busy = joy.active || S.tab === 'lab';
+    const busy = joy.active || (S.tab === 'more' && !!S.lab);
     const every = document.hidden ? 2000 : busy ? 140 : (S.rtt > 150 ? 400 : 140);
     await sleep(S.fails ? Math.min(2000, 250 * S.fails) : every);
   }
@@ -507,8 +508,9 @@ function onState(st) {
   renderVision(st);
   renderExplore(st);
   renderMapStats(st);
-  if (S.tab === 'go') renderGo(st);
-  if (S.tab === 'lab') { if (S.lab === 'health') renderStatus(st); labOnState(st); }
+  if (S.tab === 'home' || S.tab === 'send') renderGo(st);
+  renderHome(st);
+  if (S.tab === 'more' && S.lab) { if (S.lab === 'health') renderStatus(st); labOnState(st); }
   mapDirty = true;
 }
 function renderBattery(b) {
@@ -558,25 +560,56 @@ function onLinkLost() {
     banner.classList.add('link'); banner.hidden = false;
   }
   $('#t-dot').className = 'dot bad';
-  if (S.fails >= 3) { $('#t-mode').textContent = 'Offline'; $('#t-mode').className = 'chip glass'; $('#t-link').textContent = 'reconnecting…'; }
+  if (S.fails >= 3) { $('#t-mode').textContent = 'Offline'; $('#t-mode').className = 'chip glass'; $('#t-link').textContent = 'reconnecting…'; if (S.st) renderHome(S.st); }
 }
 
-// ------------------------------------------------------------------ tabs & sheet
+// ------------------------------------------------------------------ tabs, pages & sheet
+// Home / Send / Operate (Me for staff) are pages over the map; Map shows the map with a sheet; Drive the joystick.
+const TABS = ['home', 'send', 'map', 'drive', 'more'];
 function setTab(tab) {
-  if (!can('operator') && (tab === 'drive' || tab === 'lab')) tab = 'go';
+  if (!TABS.includes(tab)) tab = 'home';
+  if (!can('operator') && tab === 'drive') tab = 'map';
+  const changed = S.tab !== tab;
   S.tab = tab;
   $$('.tab').forEach(t => { const on = t.dataset.tab === tab; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
-  ['go', 'map', 'lab', 'me'].forEach(n => { $('#p-' + n).hidden = n !== tab; });
-  ['drive', 'go', 'map', 'lab', 'me'].forEach(n => document.body.classList.toggle('tab-' + n, n === tab));
-  if (tab === 'me') { renderMe(); if (can('admin')) loadPeople(); }
-  const sheet = $('#sheet');
-  sheet.scrollTop = 0;
-  if (tab !== 'drive' && T.tool === 'draw') setTool('draw');
-  if (tab === 'lab') labEnter(); else telemetry(false);
+  ['home', 'send', 'more'].forEach(n => { $('#p-' + n).hidden = n !== tab; });
+  TABS.forEach(n => document.body.classList.toggle('tab-' + n, n === tab));
+  if (tab === 'more') { renderMe(); if (can('admin')) loadPeople(); if (S.lab) labEnter(); else lab_set(null); }
+  else telemetry(false);
+  if (changed) { const p = $('#p-' + tab); if (p) p.scrollTop = 0; $('#sheet').scrollTop = 0; }
+  if (tab !== 'drive' && tab !== 'map' && T.tool) setTool(T.tool);      // tools live on the map
   if (S.st) onState(S.st);
   setTimeout(resize, 260);
 }
-$$('.tab').forEach(t => t.onclick = () => { haptic(8); setTab(t.dataset.tab); });
+$$('.tab').forEach(t => t.onclick = () => {
+  haptic(8);
+  if (t.dataset.tab === 'more' && S.tab === 'more' && S.lab) lab_set(null);   // tap Operate again: back to its list
+  setTab(t.dataset.tab);
+});
+// Map tab: tap the handle to shrink the sheet to a strip (more map) or grow it back
+$('#sheet-grip').onclick = () => {
+  const min = !document.body.classList.contains('sheet-min');
+  document.body.classList.toggle('sheet-min', min);
+  $('#sheet-grip').setAttribute('aria-expanded', !min);
+  haptic(8); setTimeout(resize, 240);
+};
+// the alert stack (link lost, OK?, why, camera) pushes pages and map overlays down instead of covering them
+if (window.ResizeObserver) {
+  new ResizeObserver(() => {
+    document.documentElement.style.setProperty('--alerts-h', `${Math.ceil($('#alerts').getBoundingClientRect().height) || 0}px`);
+  }).observe($('#alerts'));
+}
+// Android back button (the APK asks this first): close a dialog, a sub-page, then go Home; false = leave the app
+window.__pathikBack = () => {
+  const dlg = $$('.action').filter(d => !d.hidden).pop();
+  if (dlg) { if (dlg.id === 'action') closeAction(); else { const c = $('[data-cancel], button[type=button], [data-v="0"]', dlg); if (c) c.click(); else dlg.remove(); } return true; }
+  if ($('#main').hidden) { if (!$('#auth').hidden) { disconnect(); return true; } return false; }
+  if (CAM.big) { CAM.big = false; $('#cam').classList.remove('big'); return true; }
+  if (T.tool) { setTool(T.tool); return true; }
+  if (S.tab === 'more' && S.lab) { lab_set(null); return true; }
+  if (S.tab !== 'home') { setTab('home'); return true; }
+  return false;
+};
 
 // ------------------------------------------------------------------ map
 const cv = $('#map'), cx = cv.getContext('2d');
@@ -621,7 +654,7 @@ function drawMap() {
   const pose = st && st.pose;
   if (view.follow && pose) {
     // keep the robot in the middle of the part of the map that isn't covered by the sheet
-    const covered = (S.tab === 'drive' ? 0 : ($('#sheet').offsetHeight || 0)) * 0.5;
+    const covered = (S.tab === 'map' && window.innerWidth < 820 ? ($('#sheet').offsetHeight || 0) : 0) * 0.5;
     view.x = pose.x; view.y = pose.y - covered / view.scale;
   }
   cx.setTransform(1, 0, 0, 1, 0, 0);
@@ -834,7 +867,7 @@ function setTool(tool) {
   T.drag = null;
   if (T.tool !== 'route') { T.route = []; }
   if (T.tool !== 'draw') closePath();
-  if (T.tool && S.tab !== 'drive' && S.tab !== 'map') setTab('drive');
+  if (T.tool && S.tab !== 'drive' && S.tab !== 'map') setTab('map');
   $$('.tool[data-tool]').forEach(b => { const on = b.dataset.tool === T.tool; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
   renderMode(); mapDirty = true;
 }
@@ -1309,31 +1342,46 @@ function renderGo(st, force) {
   // places list (re-render only when something changed)
   const pl = (st.places && st.places.places) || [], home = st.places && st.places.home;
   const dist = p => pose ? Math.hypot(p.x - pose.x, p.y - pose.y) : null;
-  const key = JSON.stringify([pl.map(p => p.name), !!home, placeFilter, pose ? [Math.round(pose.x * 2), Math.round(pose.y * 2)] : 0]);
+  const key = JSON.stringify([pl.map(p => p.name), !!home, placeFilter, pose ? [Math.round(pose.x * 2), Math.round(pose.y * 2)] : 0, placeRoute]);
   if (!force && key === lastPlacesKey) return;
   lastPlacesKey = key;
   const match = p => !placeFilter || p.name.toLowerCase().includes(placeFilter) || (p.aliases || []).some(a => a.toLowerCase().includes(placeFilter));
   const rows = [];
   if (home && (!placeFilter || 'home'.includes(placeFilter))) rows.push({ name: 'Home', home: true, d: dist(home) });
   pl.filter(match).map(p => ({ ...p, d: dist(p) })).sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9)).forEach(p => rows.push(p));
+  const op = can('operator');
   $('#g-places').innerHTML = rows.length ? rows.map((p, i) => `
-    <li class="${p.home ? 'home' : ''}"><span class="p-name">${esc(p.name)}<span class="p-sub">${fin(p.d) ? `${fmt(p.d, 1)} m away` : '–'}</span></span>
-      <span class="p-act"><button class="btn small" data-i="${i}" data-a="route">Route</button>
-      <button class="btn small grad" data-i="${i}" data-a="go">Go</button></span></li>`).join('')
-    : `<li class="empty">${pl.length ? 'No place matches that search.' : 'No places yet. Drive somewhere and tap “Save place here”, or long‑press the map.'}</li>`;
+    <li class="${p.home ? 'home' : ''}"><span class="p-name">${esc(p.name)}<span class="p-sub">${p.home ? 'home · ' : ''}${fin(p.d) ? `${fmt(p.d, 1)} m away` : 'distance unknown'}</span></span>
+      <span class="p-act"><button class="btn small" data-i="${i}" data-a="route" aria-label="Preview the route to ${esc(p.name)}">Route</button>
+      <button class="btn small grad" data-i="${i}" data-a="go" aria-label="Send Pathik to ${esc(p.name)}">Go</button></span>
+      ${placeRoute && placeRoute.name === p.name ? `<span class="p-route">${placeRoute.error ? `<span class="muted">${esc(placeRoute.error)}</span>`
+        : `<b>${fmt(placeRoute.length, 1)} m</b> about <b>${secs(placeRoute.eta_s)}</b>`}<button class="btn small ghost" data-i="${i}" data-a="show">Show on map</button>
+        ${op && !p.home ? `<button class="btn small ghost danger" data-i="${i}" data-a="delete">Delete place</button>` : ''}</span>` : ''}</li>`).join('')
+    : `<li class="empty">${pl.length ? 'No place matches that search. Try a room or a thing in it.' : `No places yet. ${op ? 'Drive somewhere and tap “Save here”, or long‑press the map.' : 'Ask the robot team (an operator) to save some.'}`}</li>`;
   $$('#g-places button').forEach(b => b.onclick = async () => {
     const p = rows[+b.dataset.i];
     try {
       if (b.dataset.a === 'go') {
         await nav(p.home ? { type: 'go_home' } : { type: 'goto_place', name: p.name });
         toast(`Going to ${p.name}`); haptic(20); setFollow(true);
-      } else {
-        const r = await nav(p.home ? { type: 'preview', x: home.x, y: home.y, label: 'home' } : { type: 'preview', name: p.name });
-        toast(`${p.name}: ${fmt(r.length, 1)} m, about ${secs(r.eta_s)}`);
+      } else if (b.dataset.a === 'route') {
+        try {
+          const r = await nav(p.home ? { type: 'preview', x: home.x, y: home.y, label: 'home' } : { type: 'preview', name: p.name });
+          placeRoute = { name: p.name, length: r.length, eta_s: r.eta_s };
+        } catch (e) { placeRoute = { name: p.name, error: e.message }; }
+        renderGo(S.st, true);
+      } else if (b.dataset.a === 'show') {
+        setFollow(false);
+        const t = p.home ? home : p; view.x = (t.x + (pose ? pose.x : t.x)) / 2; view.y = (t.y + (pose ? pose.y : t.y)) / 2;
+        setTab('map');
+      } else if (b.dataset.a === 'delete') {
+        if (!await confirmBox(`Delete ${p.name}?`, 'The saved place goes. Rooms, schedules and the map stay.', 'Delete')) return;
+        await nav({ type: 'delete_place', name: p.name }); placeRoute = null; toast(`${p.name} deleted`);
       }
     } catch (e) { toast(e.message, true); }
   });
 }
+let placeRoute = null;
 // ---- rooms: "this room contains that"
 let lastRoomsKey = '';
 function renderRooms(st, force) {
@@ -1350,7 +1398,7 @@ function renderRooms(st, force) {
       <span class="row gap">${can('operator') ? `<button class="btn small" data-r="${i}" data-a="edit">Edit</button>` : ''}<button class="btn small grad" data-r="${i}" data-a="go">Go</button></span></div>
       ${(r.contents || []).length ? `<div class="things">${r.contents.map(t => `<span class="${hit(t) ? 'hit' : ''}">${esc(t)}</span>`).join('')}</div>`
         : '<span class="r-sub">Nothing listed yet. Edit to add what is in this room.</span>'}</li>`).join('')
-    : `<li class="empty">${rooms.length ? 'No room has that.' : 'No rooms yet. Map tab or Drive tab → Room tool, drag a box over a room, then list what is in it. Then say “take me to the 3D printer”.'}</li>`;
+    : `<li class="empty">${rooms.length ? 'No room has that.' : (can('operator') ? 'No rooms yet. Map tab → Room tool, drag a box over a room, then list what is in it. Then say “take me to the 3D printer”.' : 'No rooms yet. The robot team (an operator) adds them on the map.')}</li>`;
   $$('#g-rooms button').forEach(b => b.onclick = async () => {
     const r = shown[+b.dataset.r];
     if (b.dataset.a === 'go') {
@@ -1571,7 +1619,7 @@ function renderStatus(st) {
     : '<li><time></time><span class="muted">Nothing yet.</span></li>';
 }
 $('#s-disconnect').onclick = disconnect;
-$('#t-robot').onclick = () => { if (can('operator')) { setTab('lab'); lab_set('health'); } else setTab('me'); };
+$('#t-robot').onclick = () => { S.lab = can('operator') ? 'health' : null; setTab('more'); };
 
 // ------------------------------------------------------------------ Tuning Lab
 const WHEEL_LABELS = { kp: 'Proportional gain, Kp', ki: 'Integral gain, Ki', pwm_min: 'Start‑up PWM', max_mms: 'Top wheel speed', accel: 'Acceleration ramp' };
@@ -1584,19 +1632,27 @@ const STEP = { kp: 0.01, ki: 0.01, pwm_min: 1, max_mms: 5, accel: 25, max_linear
 const lab = { wheelRanges: null, wheel: {}, wheelEdit: 0, wheelDirty: false, follow: {}, followRanges: null, followDirty: false,
   live: false, seq: 0, samples: [], frozen: null, test: 'straight', testResult: null, telemT: null };
 
-$$('[data-lab]').forEach(b => b.onclick = () => { haptic(8); lab_set(b.dataset.lab); });
+// Operate area: a list (hub) of the robot-team tools; each opens as a sub-page with a back button
+const SUBS = ['health', 'wheels', 'path', 'tests', 'log', 'people'];
+$$('[data-sub]').forEach(b => b.onclick = () => { haptic(8); S.lab = b.dataset.sub; labEnter(); });
+$$('[data-back]').forEach(b => b.onclick = () => { haptic(8); lab_set(null); });
 function lab_set(which) {
+  if (which === 'people' ? !can('admin') : which && !can('operator')) which = null;
+  const was = S.lab;
   S.lab = which;
-  $$('[data-lab]').forEach(x => { const on = x.dataset.lab === which; x.classList.toggle('on', on); x.setAttribute('aria-selected', on); });
-  ['health', 'wheels', 'path', 'tests', 'log'].forEach(n => { $('#lab-' + n).hidden = n !== which; });
+  $('#more-hub').hidden = !!which;
+  SUBS.forEach(n => { $('#lab-' + n).hidden = n !== which; });
+  if (was !== which) $('#p-more').scrollTop = 0;
   if (which === 'log') loadLog();
   if (which === 'health' && S.st) renderStatus(S.st);
   if (which === 'path') loadFollower();
+  if (which === 'people') loadPeople();
   if (which !== 'wheels') telemetry(false); else if ($('#w-live').checked) telemetry(true);
+  if (which && S.st) labOnState(S.st);
   setTimeout(resize, 30);
 }
 async function labEnter() {
-  if (!lab.wheelRanges) {
+  if (!lab.wheelRanges && S.lab === 'wheels') {
     try { const p = await get('/api/ping'); lab.wheelRanges = p.wheel_ranges; } catch (e) { /* retry next time */ }
   }
   lab_set(S.lab);
@@ -1918,6 +1974,90 @@ function renderWhere(st) {
   $('#g-where').textContent = where;
   $('#sm-where').textContent = where + (n.goal ? `. Heading to ${n.goal.label}.` : '.');
 }
+// ------------------------------------------------------------------ Home: one calm status card + what it is doing
+const LIGHT = { auto: 'auto', wait: 'wait', estop: 'bad', rc: 'wait', '': 'ok' };
+function renderHome(st) {
+  const n = st.nav || {}, b = n.battery || {}, mode = $('#t-mode');
+  const offline = S.fails >= 3;
+  $('#h-state').textContent = offline ? 'out of reach' : mode.textContent.replace(/ · why\?$/, '').toLowerCase();
+  const cls = (mode.className.match(/\b(auto|wait|estop|rc)\b/) || [''])[0];
+  $('#h-light').className = 'hs-light ' + (offline || !st.bridge_alive ? 'bad' : LIGHT[cls]);
+  let sub = '';
+  if (offline) sub = 'Reconnecting… The robot carries on with its job by itself.';
+  else if (st.estop) sub = 'STOP is pressed. Motors are locked.';
+  else if (n.goal && fin(n.distance)) sub = `${n.goal.label}: ${fmt(n.distance, 1)} m, about ${secs(n.eta_s)}`;
+  else if (n.message) sub = n.message;
+  $('#h-sub').textContent = sub;
+  const pct = fin(b.pct) ? b.pct : null;
+  $('#h-bat').textContent = pct == null ? 'no sensor' : `${pct}%${b.charging ? ' ⚡' : ''}`;
+  const bar = $('#h-bat-bar');
+  bar.style.width = `${pct == null ? 0 : clamp(pct, 2, 100)}%`; bar.className = b.level === 'low' || b.level === 'critical' ? b.level : '';
+  $('#h-link').textContent = offline ? 'lost' : fin(S.rtt) ? `${Math.round(S.rtt)} ms` : '–';
+  $('#h-link-sub').textContent = netType(BASE, st.net);
+  $('#h-room').textContent = n.room || (st.pose ? 'on the map' : 'unknown');
+  $('#h-room-sub').textContent = st.pose ? `${fmt(st.pose.x, 1)}, ${fmt(st.pose.y, 1)} m` : 'waiting for position';
+  renderRecovery(n.recovery);
+  renderDocking(n.docking, n.state);
+  const busy = !$('#g-mission').hidden;
+  $('#h-idle').hidden = busy || offline;
+  // camera summary (the card itself opens from the chip or the Camera button)
+  const v = st.vision, vc = $('#h-vis-card');
+  vc.hidden = !v && !st.camera && BASE !== DEMO;
+  if (!vc.hidden) {
+    const act = v ? v.action : 'UNKNOWN', tag = $('#h-vis-tag');
+    tag.textContent = v ? (VIS_TXT[act] || act) : 'Camera off'; tag.className = 'pill-tag ' + (VIS_CLS[act] || '');
+    $('#h-vis').textContent = !v ? 'The camera program is not running on the robot.' : !v.camera_ok ? (v.camera_error || 'No picture from the camera.')
+      : `${(v.people || []).length ? `${v.people.length} person${v.people.length > 1 ? 's' : ''} in view. ` : 'Nobody in view. '}${v.reason || ''}`;
+  }
+  // robot voice (Phase 5: push-to-talk on the robot); shown once the robot reports it
+  const vo = st.voice, voc = $('#h-voice-card');
+  voc.hidden = !vo;
+  if (vo) {
+    $('#h-voice-tag').textContent = vo.listening ? 'Listening' : vo.speaking ? 'Speaking' : vo.ok === false ? 'Off' : 'Ready';
+    $('#h-voice-tag').className = 'pill-tag ' + (vo.listening ? 'slow' : vo.ok === false ? '' : 'go');
+    $('#h-voice').textContent = vo.last_heard ? `Heard: “${vo.last_heard}”${vo.last_reply ? ` → “${vo.last_reply}”` : ''}` : (vo.message || 'Press the button on the robot and speak.');
+  }
+}
+// LLM error recovery (Phase 3): what happened, what the robot decided, and a question when it needs a person
+function renderRecovery(r) {
+  const box = $('#h-recovery');
+  if (!r || (r.status === 'done' && Date.now() / 1000 - (r.t || 0) > 120)) { box.hidden = true; box.dataset.key = ''; return; }
+  const key = JSON.stringify([r.id, r.status, r.doing, r.left_s == null ? null : Math.round(r.left_s)]);
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  const src = r.source === 'llm' ? 'Decided by the language model' : 'Decided by the safety rules';
+  const ask = r.status === 'asking' && r.ask;
+  box.innerHTML = `
+    <div class="rc-h"><b class="title-s">${ask ? 'Pathik needs your help' : r.status === 'failed' ? 'Could not recover' : r.status === 'done' ? 'Recovered' : 'Recovering'}</b>
+      <span class="pill-tag ${r.source === 'llm' ? 'go' : ''}">${esc(src)}</span></div>
+    <dl><div><dt>What happened</dt><dd>${esc(r.what_happened || r.code || '')}</dd></div>
+      <div><dt>What I'm doing</dt><dd>${esc(r.doing || '')}${fin(r.left_s) && r.left_s > 0 ? ` <span class="muted">(${secs(r.left_s)})</span>` : ''}</dd></div>
+      ${r.why ? `<div><dt>Why</dt><dd class="muted small">${esc(r.why)}</dd></div>` : ''}</dl>
+    ${ask ? `<p>${esc(r.ask.question || '')}</p><div class="rc-act">${(r.ask.options || []).map(o => `<button class="btn ${o.primary ? 'primary' : ''}" data-rc="${esc(o.id)}">${esc(o.label)}</button>`).join('')}</div>` : ''}`;
+  box.hidden = false;
+  if (ask) haptic(60);
+  $$('[data-rc]', box).forEach(b => b.onclick = async () => {
+    haptic(20);
+    try { await nav({ type: 'recovery_answer', id: r.id, choice: b.dataset.rc }); toast('Thanks, carrying on'); box.dataset.key = ''; }
+    catch (e) { toast(e.message, true); }
+  });
+}
+// front docking with the camera marker (Phase 4): one step bar
+const DOCK_STEPS = [['predock', 'In front'], ['align', 'Find marker'], ['creep', 'Creep in'], ['contact', 'Contact'], ['charging', 'Charging']];
+function renderDocking(d, state) {
+  const box = $('#h-docking');
+  if (!d || !d.phase || d.phase === 'off') { box.hidden = true; return; }
+  const idx = DOCK_STEPS.findIndex(s => s[0] === d.phase), failed = d.phase === 'failed', back = d.phase === 'backoff';
+  const m = d.marker || {};
+  box.innerHTML = `
+    <div class="row between"><b class="title-s">${failed ? 'Docking failed' : back ? 'Backing off to try again' : d.phase === 'charging' ? 'Docked and charging' : 'Docking'}</b>
+      <span class="pill-tag">${fin(d.try) ? `try ${d.try} of ${d.tries || '?'}` : esc(state || '')}</span></div>
+    <ol class="dock-steps">${DOCK_STEPS.map(([k, l], i) => `<li class="${failed && i === Math.max(0, d.last_step ?? idx) ? 'fail' : i < idx ? 'done' : i === idx ? 'now' : ''}">${l}</li>`).join('')}</ol>
+    <p class="muted small">${esc(d.message || '')}${m.found ? ` Marker ${fmt(m.z_m ?? m.x_m, 2)} m ahead, ${fmt((m.y_m || 0) * 100, 1)} cm to the side, ${fmt(m.yaw_deg, 1)}°.` : d.phase === 'align' ? ' Looking for the marker…' : ''}</p>`;
+  box.hidden = false;
+}
+$('#h-send').onclick = () => { haptic(10); setTab('send'); setTimeout(() => $('#g-cmd-in').focus(), 280); };
+$('#q-cam').onclick = () => { haptic(8); setCam(true); };
 $('#q-home').onclick = async () => { haptic(15); try { await nav({ type: 'go_home', replace: true }); toast('Coming back'); setFollow(true); } catch (e) { toast(e.message, true); } };
 $('#q-why').onclick = () => { haptic(10); explainNow(true); };
 $('#q-charge').onclick = () => $('#g-charge').click();
@@ -1944,7 +2084,10 @@ function renderPublic(net) {
   box.hidden = !on;
   if (on) $('#me-public-url').textContent = net.public_url || 'a public https address';
 }
-function setPendingBadge(n) { const b = $('#tab-me-badge'); b.textContent = n; b.hidden = !n || !can('admin'); }
+function setPendingBadge(n) {
+  ['#tab-me-badge', '#hub-people-badge'].forEach(id => { const b = $(id); b.textContent = n; b.hidden = !n || !can('admin'); });
+  $('#hub-people').textContent = n && can('admin') ? `${n} waiting for approval` : 'Approve sign-ups, roles, passwords';
+}
 $$('[data-theme-pick]').forEach(b => b.onclick = () => { haptic(8); applyTheme(b.dataset.themePick); });
 $$('.theme-toggle').forEach(b => b.onclick = () => {
   haptic(8); applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
