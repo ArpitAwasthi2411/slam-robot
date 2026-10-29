@@ -31,6 +31,8 @@ services:
     device_cgroup_rules:
       - 'c 188:* rmw'                       # /dev/ttyUSB*  (CP210x / CH340: ESP32, RPLiDAR)
       - 'c 166:* rmw'                       # /dev/ttyACM*  (ESP32-S3 native USB)
+      - 'c 204:* rmw'                       # /dev/ttyAMA0  (ESP32-S3 on the Pi's GPIO UART, v2.6+)
+      - 'c 254:* rmw'                       # /dev/gpiochip* (push-to-talk button, voice node)
       - 'c 116:* rmw'                       # /dev/snd/*    (speaker for the robot's voice)
       - 'c 81:* rmw'                        # /dev/video*   (camera, later)
       - 'c 226:* rmw'                       # /dev/dri/*

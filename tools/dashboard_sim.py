@@ -336,6 +336,17 @@ class SimBackend:
         return {'ok': True, 'robot': 'slam-robot (simulator)', 'api': 2, 'fw': '2.3-sim',
                 'host': 'simulator', 'nav_mode': 'planner', 'wheel_ranges': ranges_for_app(WHEEL_RANGES)}
 
+    def voice_control(self, body):
+        """The simulator has no microphone: {"action": "stop", "text": "go to lab 3"} pretends it heard that."""
+        text = str((body or {}).get('text') or '')
+        if body.get('action') == 'listen' or not text:
+            return {'ok': True, 'note': 'simulator: no microphone; send "text" with action "stop" to pretend'}
+        from lidar_robot.voice import reply_text
+        with self.lock:
+            r = self.nav.handle({'type': 'command', 'text': text, 'by': 'voice'}, (self.x, self.y, self.yaw))
+        self.voice_last = {'last_heard': text, 'last_reply': reply_text(r)}
+        return {'ok': True, 'heard': text, 'reply': self.voice_last['last_reply']}
+
     def esp_command(self, req):
         op = req.get('op')
         with self.lock:
@@ -396,6 +407,9 @@ class SimBackend:
                 'sensors': {'us': list(self.us), 'imu_ok': True, 'yaw_source': 'gyro', 'us_mounts': US_MOUNTS,
                             'bumper': False, 'bumps': self.bumps},
                 'nav': self.nav.status(),
+                'voice': dict({'ok': False, 'mic': False, 'button': False, 'stt': 'none',
+                               'message': 'simulator: no microphone (POST /api/voice {"action": "stop", "text": "..."} pretends)'},
+                              **getattr(self, 'voice_last', {})),
                 'places': self.places.summary(),
                 'tune': dict(self.tune), 'fw': '2.3-sim', 'telemetry': self.telemetry_on,
                 'turns': round(self.odom_turns, 3), 'sep': SEP, 'test_running': bool(self.tests.result.get('running')),

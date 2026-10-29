@@ -352,6 +352,8 @@ def make_handler(backend, index_path, app_dir=None, users=None, public=None):
                     return self._send(200, {'ok': True, 'saved': backend.save_map(str(body.get('name', 'map')))})
                 elif url.path == '/api/relocalize':
                     return self._optional('relocalize', body)
+                elif url.path == '/api/voice':                  # {"action": "listen" | "stop"}: robot's mic
+                    return self._optional('voice_control', body)
                 elif url.path == '/api/esp':
                     return self._optional('esp_command', body)
                 elif url.path == '/api/test':

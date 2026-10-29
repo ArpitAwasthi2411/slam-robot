@@ -41,6 +41,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
   2 × BTS7960, MPU-6050, 3 × HC-SR04 (ECHO via BSS138 shifter), mushroom e-stop (NC → driver EN, NO → GPIO 42),
   FlySky RC, 3S Li-ion 11.1 V 7.5 Ah, XL4015 5 V buck, battery divider 100k/22k → GPIO 1.
 - New (Oct 26): Camera Module 3 Wide (CSI), USB sound card + lapel mic + USB-powered speaker.
+  Push-to-talk button: Pi pin 11 (GPIO17) ↔ pin 9 (GND).
 - Every wire: `hardware/CONNECTIONS_esp32s3.md`. Classic pins: `hardware/wiring_classic_esp32.md`.
 - Footprint (base_link = axle): front 0.07, rear 0.37, half-width 0.21, margin 0.04 m: **not measured yet**.
 
@@ -65,6 +66,8 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
   Docker (`Dockerfile`, `deploy/pi/docker-compose.yml`, `scripts/pathik.sh`) is built by CI but not installed on the Pi.
 - CI: `robot-image.yml` (tests → image → ghcr.io/arpitawasthi2411/slam-robot), `android.yml` (APK release),
   `firmware.yml` (S3 + classic on cores 2.0.17 and 3.0.7).
+- Voice on the robot: `voice_node.py` (push-to-talk → arecord → `voice.py` Groq Whisper / Vosk → navigator command →
+  reply via `/speech/say`), `speech.py` Speaker (Piper / espeak), `scripts/setup_voice.sh`, `docs/STEPS_voice.md`.
 - Vision on the robot: `vision_node.py` (Camera Module 3 via libcamera/GStreamer subprocess, YOLO11n NCNN ~4 Hz,
   LiDAR distance per person) -> `/vision/decision` + `/vision/image/compressed`; rules + `VisionGate` in
   `vision_rules.py`; navigator slows/stops (`use_vision`), app camera card (`/api/camera.jpg`). Setup:
@@ -84,6 +87,7 @@ Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2
 odometry, ultrasonics, navigator driving, app.
 
 Done in code, NOT yet verified on the robot:
+- voice: push-to-talk (GPIO17 pin 11 / app), Groq Whisper + Vosk, Piper TTS, announcements (voice_node.py)
 - front docking on the ArUco marker (docking.py, marker_pose.py, vision /vision/dock_marker, firmware D docking mode)
 - LLM error recovery (fixed menu, validation, rules fallback, app card, eval: rules 6/6 vs none 1/6 in sim)
 - redesigned app (v3 layout, every feature kept: docs/APP_FEATURES.md); next APK build after the merge
@@ -100,7 +104,7 @@ Open problems / TODO (priority order):
 1. Lab bring-up on the S3 (`docs/STEPS_esp32s3_lab.md`), then the drive test with `link_doctor.sh --watch`
    (ESP32 used to drop/reconnect while driving: power noise suspected; capacitors planned).
 2. Measure the footprint + wheel separation; tune with the app's Spin / Straight line tests.
-3. Groq key + audio on the Pi; voice node (push-to-talk, Whisper/Vosk from Rashi, Piper TTS).
+3. Voice done in code (`docs/STEPS_voice.md`): wire the GPIO17 button, run `scripts/setup_voice.sh`, add the Groq key.
 4. Camera + people avoidance done in code (`docs/STEPS_camera.md`): run the two setup scripts on the Pi, tune stop_m/slow_m.
 5. Front docking with the ArUco marker done in code (`docs/docking.md`, firmware v2.7 `D` mode): measure
    `dock_contact_dist_m` + the camera mount, calibrate the camera, try on Yogit's dock.
@@ -111,6 +115,9 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-29: Phase 5 voice: voice.py (WAV prep, Groq Whisper multipart, Vosk EN/HI, fallback, PushToTalk, GpioButton),
+  voice_node (GPIO17 + /api/voice), speech.py Piper/espeak queue + rate limit + volume + Hindi voice, "Going to X",
+  spoken numbers match places, setup_voice.sh, STEPS_voice.md, WAV fixtures; docker ttyAMA0/gpiochip rules.
 - 2026-10-29: Phase 4 front docking: docking.py (align/creep<=5 cm/s/contact/backoff+retry, map-fused heading),
   marker_pose.py detect() (ArUco, 4.5 + 4.7+ APIs, best-reprojection PnP), vision node marker topic, firmware S3 v2.7 /
   classic v2.5 (D docking mode, I2C scan, IMU retries), bridge /dock_mode, sim + demo front dock, marker_webcam.py.

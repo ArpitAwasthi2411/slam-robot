@@ -143,6 +143,11 @@ The ESP32 on-board RGB LED (GPIO 48) needs no wire.
 | A4 | Speaker USB **power** plug | 5 V bus / buck USB output, **not** the Pi | the Pi's USB budget is 1.2 A total |
 | K1 | Camera Module 3 Wide ribbon | Pi **CAMERA** CSI connector (between HDMI and audio jack) | Pi **OFF** while connecting. Blue tab faces the USB/Ethernet ports. Lift the latch, push in, close the latch |
 | N1 | Ethernet cable | laptop | Pi 169.254.1.2 / laptop 169.254.1.1 |
+| B1 | Push-to-talk button (momentary, normally open), leg 1 | Pi header **pin 11** (GPIO17) | voice node, internal pull-up: no resistor needed. Hold while speaking |
+| B2 | Push-to-talk button, leg 2 | Pi header **pin 9** (GND) | |
+
+Pi header pins in use: 6 / 8 / 10 = ESP32 UART (GND, TXD = GPIO14, RXD = GPIO15: **never** reuse 14/15),
+9 / 11 = push-to-talk button. Everything else on the Pi header is free.
 
 ## 10. Pins left free (don't use)
 0, 3, 45, 46 (boot straps) · 19, 20 (USB) · 26–32 (flash) · 33–37 (PSRAM) · 43, 44 (UART0 / on-board USB-UART chip) · 38/48 (LED).

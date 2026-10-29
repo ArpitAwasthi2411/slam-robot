@@ -27,10 +27,19 @@ STOPWORDS = {'the', 'a', 'an', 'to', 'of', 'room', 'please', 'go', 'take', 'me',
              'in', 'near', 'by', 'for', 'and', 'then', 'robot', 'my', 'our', 'this', 'that'}
 
 
+# Speech-to-text writes numbers as words ("lab three"); places are typed with digits ("Lab 3").
+NUMBER_WORDS = {w: str(i) for i, w in enumerate(
+    'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen '
+    'seventeen eighteen nineteen twenty'.split())}
+NUMBER_WORDS.update({'thirty': '30', 'forty': '40', 'fifty': '50',
+                     'teen': '3', 'char': '4', 'paanch': '5', 'panch': '5', 'chhe': '6', 'saat': '7', 'aath': '8',
+                     'nau': '9', 'das': '10'})            # Hinglish (not "ek"/"do": common English/Hindi words)
+
+
 def normalize(text):
     text = text.lower().replace('&', ' and ')
     text = re.sub(r'[^a-z0-9 ]+', ' ', text)
-    return ' '.join(text.split())
+    return ' '.join(NUMBER_WORDS.get(w, w) for w in text.split())
 
 
 def tokens(text):

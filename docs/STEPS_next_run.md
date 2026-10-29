@@ -116,3 +116,14 @@ Checks:
 6. Send a mission while docked: it backs straight off (30 cm) before turning.
 Without the robot: `python3 tools/dashboard_sim.py --demo-users` → Charge, or the app's demo; laptop webcam:
 `python3 tools/marker_webcam.py`.
+
+## Phase 5: voice (docs/STEPS_voice.md)
+
+What changed:
+- Push-to-talk on the robot: a button on Pi pin 11 / 9, or the app's "Talk to the robot". It records from the
+  USB sound card, turns speech into text (Groq Whisper with the key, offline Vosk without), runs it as a
+  command and answers with a natural offline voice (Piper; espeak if Piper is missing).
+- The robot announces going to / arrived / docking / low battery / recovery decisions.
+
+Set up: wire the button, then `sudo bash ~/slam-robot/scripts/setup_voice.sh`, then `... setup_voice.sh test`.
+Checks: the five in `docs/STEPS_voice.md` § 5 (button, app button, offline, Hindi, silence).

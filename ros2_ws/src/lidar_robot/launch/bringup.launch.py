@@ -26,6 +26,7 @@ Arguments
   imu_x/imu_y/imu_z            MPU-6050 position (orientation: chip X forward, Z up)
   vision        true        camera people detection (vision node); the navigator slows / stops for people
   camera        auto        auto | libcamera (Camera Module 3) | /dev/videoN (USB webcam)
+  voice         true        push-to-talk voice commands (voice node: GPIO17 button / app, USB mic, Whisper/Vosk)
 """
 import os
 
@@ -52,6 +53,7 @@ def _setup(context):
     nav_mode = cfg('nav_mode')
     places = os.path.expanduser(cfg('places'))
     vision = _truthy(cfg('vision'))
+    voice = _truthy(cfg('voice'))
 
     if slam and slam_mode == 'localization':
         if not map_file or not os.path.isfile(map_file):
@@ -81,7 +83,7 @@ def _setup(context):
 
     actions = actions_ports + [LogInfo(msg=f'[bringup] odom={use_odom} slam={slam} slam_mode={slam_mode} '
                            f'map={map_file or "-"} nav_mode={nav_mode} dashboard={cfg("dashboard")} '
-                           f'vision={vision} camera={cfg("camera")}')]
+                           f'vision={vision} camera={cfg("camera")} voice={voice}')]
 
     actions.append(Node(
         package='tf2_ros', executable='static_transform_publisher', name='base_to_laser',
@@ -150,6 +152,10 @@ def _setup(context):
             package='lidar_robot', executable='vision', name='vision', output='screen',
             parameters=[params, {'camera': cfg('camera'), 'laser_yaw': float(cfg('laser_yaw'))}]))
 
+    if voice:
+        actions.append(Node(package='lidar_robot', executable='voice', name='voice', output='screen',
+                            parameters=[params]))
+
     if _truthy(cfg('dashboard')):
         actions.append(Node(
             package='lidar_robot', executable='dashboard', name='dashboard', output='screen',
@@ -168,7 +174,7 @@ def generate_launch_description():
         ('laser_x', '-0.13'), ('laser_y', '0.0'), ('laser_z', '0.10'), ('laser_yaw', '0.0'),
         ('us_x', '0.07'), ('us_y', '0.12'), ('us_side_deg', '30'), ('us_z', '0.06'),
         ('imu_x', '0.0'), ('imu_y', '0.0'), ('imu_z', '0.05'),
-        ('vision', 'true'), ('camera', 'auto'),
+        ('vision', 'true'), ('camera', 'auto'), ('voice', 'true'),
     ]
     return LaunchDescription(
         [DeclareLaunchArgument(n, default_value=d) for n, d in args] + [OpaqueFunction(function=_setup)])

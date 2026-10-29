@@ -33,6 +33,7 @@ setup(
             'dashboard = lidar_robot.dashboard:main',
             'navigator = lidar_robot.navigator:main',
             'vision = lidar_robot.vision_node:main',
+            'voice = lidar_robot.voice_node:main',
         ],
     },
 )

@@ -2023,7 +2023,9 @@ function renderHome(st) {
   if (vo) {
     $('#h-voice-tag').textContent = vo.listening ? 'Listening' : vo.speaking ? 'Speaking' : vo.ok === false ? 'Off' : 'Ready';
     $('#h-voice-tag').className = 'pill-tag ' + (vo.listening ? 'slow' : vo.ok === false ? '' : 'go');
-    $('#h-voice').textContent = vo.last_heard ? `Heard: “${vo.last_heard}”${vo.last_reply ? ` → “${vo.last_reply}”` : ''}` : (vo.message || 'Press the button on the robot and speak.');
+    $('#h-voice').textContent = vo.listening ? 'Listening… speak now, near the robot.' : vo.thinking ? 'Understanding…'
+      : vo.last_heard ? `Heard: “${vo.last_heard}”${vo.last_reply ? ` → “${vo.last_reply}”` : ''}` : (vo.message || 'Press the button on the robot and speak.');
+    $('#h-talk').hidden = !vo.mic;
   }
 }
 // LLM error recovery (Phase 3): what happened, what the robot decided, and a question when it needs a person
@@ -2067,6 +2069,14 @@ function renderDocking(d, state) {
     <p class="muted small">${esc(d.message || '')}${m.found ? ` Marker ${fmt(m.z_m ?? m.x_m, 2)} m ahead, ${fmt((m.y_m || 0) * 100, 1)} cm to the side, ${fmt(m.yaw_deg, 1)}°.` : d.phase === 'align' ? ' Looking for the marker…' : ''}</p>`;
   box.hidden = false;
 }
+// "talk to the robot": push-to-talk on the robot's own microphone (for people standing next to it)
+(() => {
+  const b = $('#h-talk');
+  const go = async action => { try { await post('/api/voice', { action }); } catch (e) { toast(e.message, true); } };
+  b.addEventListener('pointerdown', e => { e.preventDefault(); haptic(20); b.classList.add('on'); go('listen'); });
+  const up = () => { if (b.classList.contains('on')) { b.classList.remove('on'); go('stop'); } };
+  b.addEventListener('pointerup', up); b.addEventListener('pointerleave', up); b.addEventListener('pointercancel', up);
+})();
 $('#h-send').onclick = () => { haptic(10); setTab('send'); setTimeout(() => $('#g-cmd-in').focus(), 280); };
 $('#q-cam').onclick = () => { haptic(8); setCam(true); };
 $('#q-home').onclick = async () => { haptic(15); try { await nav({ type: 'go_home', replace: true }); toast('Coming back'); setFollow(true); } catch (e) { toast(e.message, true); } };

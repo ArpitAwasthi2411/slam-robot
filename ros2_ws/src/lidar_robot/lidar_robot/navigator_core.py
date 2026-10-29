@@ -804,6 +804,12 @@ class NavigatorCore:
                 self._set(WAITING, f'no route to {stop.label} yet ({self.planner.last_error}), retrying')
             return 0.0, 0.0
         m.attempts = 0
+        key = (m.id, m.next_stop, m.round)
+        if key != getattr(self, '_announced', None):           # "Going to Lab 3." once per stop, not per replan
+            self._announced = key
+            if not (stop.via or m.source in ('explore',) or stop.label in ('map goal', 'drawn path', 'map point')
+                    or stop.label.startswith('point ') or stop.dock):
+                self.say_queue.append(('going', f'Going to {stop.label}.'))
         self.follower.set_path(path, stop.yaw, tight=bool(bad))
         self.tight_spots = bad[:20]
         if bad:

@@ -111,6 +111,9 @@ class DashboardNode(Node):
         self.vision, self.vision_t, self.camera, self.camera_t = None, 0.0, None, 0.0
         self.create_subscription(String, 'vision/decision', self._on_vision, 10)
         self.create_subscription(CompressedImage, 'vision/image/compressed', self._on_camera, 2)
+        self.voice, self.voice_t = None, 0.0
+        self.create_subscription(String, 'voice/status', self._on_voice, 10)
+        self.voice_pub = self.create_publisher(String, 'voice/control', 10)
         self.write_state_cli = None
         try:                                # Cartographer service to save a .pbstream (optional)
             from cartographer_ros_msgs.srv import WriteState
@@ -262,6 +265,22 @@ class DashboardNode(Node):
     def _on_camera(self, msg):
         self.camera, self.camera_t = bytes(msg.data), time.monotonic()
 
+    def _on_voice(self, msg):
+        try:
+            self.voice, self.voice_t = json.loads(msg.data), time.monotonic()
+        except ValueError:
+            pass
+
+    def voice_control(self, body):
+        action = str((body or {}).get('action', 'listen'))
+        if action not in ('listen', 'stop'):
+            return {'ok': False, 'error': 'action must be listen or stop'}
+        if not self.voice or time.monotonic() - self.voice_t > 5.0:
+            return {'ok': False, 'error': 'the voice node is not running on the robot (voice:=true, scripts/setup_voice.sh)'}
+        self.voice_pub.publish(String(data=json.dumps({'action': action, 'by': (body or {}).get('by', ''),
+                                                       'max_s': float((body or {}).get('max_s', 8.0))})))
+        return {'ok': True}
+
     def camera_jpeg(self):
         return self.camera if time.monotonic() - self.camera_t < 2.0 else None
 
@@ -301,6 +320,7 @@ class DashboardNode(Node):
             'places': self.places,
             'vision': self.vision if time.monotonic() - self.vision_t < 2.0 else None,
             'camera': time.monotonic() - self.camera_t < 2.0,
+            'voice': self.voice if time.monotonic() - self.voice_t < 5.0 else None,
         }
 
     # ------------------------------------------------------------ mobile app / Tuning Lab

@@ -96,6 +96,14 @@ navigator:
     recovery_llm_model: llama-3.3-70b-versatile
     recovery_max_per_mission: 4
     recovery_ask_timeout_s: 120.0     # "ask a person": the rules decide if nobody answers in the app
+    # robot voice (docs/STEPS_voice.md): Piper offline TTS (scripts/setup_voice.sh), espeak-ng as fallback
+    speech: true
+    speech_engine: auto               # auto | piper | espeak
+    speech_volume: 1.0                # 0 .. 1.5
+    speech_voice_en: ''               # '' = first ~/piper/voices/en_*.onnx
+    speech_voice_hi: ''               # '' = first ~/piper/voices/hi_*.onnx (used for Devanagari text)
+    speech_max_per_min: 8             # announcements per minute (questions / battery always get through)
+    speech_device: ''                 # ALSA output ('' = default; e.g. plughw:CARD=Device,DEV=0)
 
 vision:
   ros__parameters:
@@ -121,3 +129,17 @@ vision:
     marker_size_m: 0.08          # black square side, without the white border
     marker_rate: 10.0
     camera_calib: ''             # '' = built-in Camera Module 3 Wide defaults; or the path of a measured YAML
+
+voice:
+  ros__parameters:
+    button_gpio: 17              # BCM: header pin 11, button to GND (pin 9). NOT 14/15 (ESP32 UART)
+    button_chip: gpiochip0
+    mic_device: ''               # ALSA input ('' = default; USB card e.g. plughw:CARD=Device,DEV=0, see arecord -L)
+    speaker_device: ''           # for the "listening" beep
+    max_record_s: 8.0
+    stt_model: whisper-large-v3-turbo   # Groq Whisper (GROQ_API_KEY)
+    stt_language: ''             # '' = auto (English / Hindi / Hinglish), or en / hi
+    vosk_en: ~/models/vosk/en    # offline fallback, made by scripts/setup_voice.sh
+    vosk_hi: ~/models/vosk/hi
+    beep: true
+

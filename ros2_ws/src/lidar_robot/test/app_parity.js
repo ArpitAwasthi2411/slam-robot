@@ -176,6 +176,16 @@ async function runRecovery(browser) {
   check(dockCard, 'docking: progress card on Home');
   const docked = await p.waitForFunction(() => /Docked and charging/.test(document.querySelector('#h-docking').textContent), null, { timeout: 120000 }).then(() => true, () => false);
   check(docked, 'docking: the demo robot docks nose-first and the card says so');
+  // voice: hold "talk to the robot" -> the demo robot hears a sample command and answers
+  check(await visible(p, '#h-voice-card') && await visible(p, '#h-talk'), 'voice: robot voice card with the talk button');
+  await p.locator('#h-talk').scrollIntoViewIfNeeded();
+  const tb = await p.locator('#h-talk').boundingBox();
+  await p.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2);
+  await p.mouse.down(); await p.waitForTimeout(700);
+  check(/Listening/.test(await p.textContent('#h-voice')), 'voice: listening while held');
+  await p.mouse.up();
+  const heard = await p.waitForFunction(() => /Heard:/.test(document.querySelector('#h-voice').textContent), null, { timeout: 8000 }).then(() => true, () => false);
+  check(heard, 'voice: what it heard and its reply are shown');
   check(errs.length === 0, `recovery: page errors ${errs.join(' | ')}`);
   await ctx.close();
 }

@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-${ROS_DISTRO}-cartographer-ros \
         ros-${ROS_DISTRO}-tf2-ros-py \
         python3-serial python3-numpy python3-pytest \
-        espeak-ng alsa-utils \
+        espeak-ng alsa-utils python3-libgpiod python3-opencv python3-yaml \
         git \
     && rm -rf /var/lib/apt/lists/*
 
