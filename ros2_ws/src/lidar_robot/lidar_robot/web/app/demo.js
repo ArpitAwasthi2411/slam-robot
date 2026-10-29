@@ -437,6 +437,7 @@ function navReq(q) {
     case 'cancel': { const n = cancelAll('canceled'); log(`canceled ${n} mission(s)`); return { ok: true, canceled: n }; }
     case 'resume': if (R.estop) throw new Error('release the e-stop first'); R.hold = false; N.state = 'IDLE'; N.message = 'resumed'; log('missions resumed'); return { ok: true };
     case 'confirm_localization': return { ok: true };
+    case 'button_settings': if ('enabled' in q) { N.buttonOn = !!q.enabled; log(`robot voice button turned ${N.buttonOn ? 'on' : 'off'}`); } return { ok: true, button: navStatus().button };
     case 'confirm': if (N.state !== 'CONFIRM') return { ok: false, error: 'nothing is waiting for OK' }; log('OK received'); advance(now()); return { ok: true };
     case 'explain': return explain();
     case 'find': return find(q.q || '');
@@ -519,6 +520,9 @@ function navStatus() {
     confirm: N.state === 'CONFIRM' && st ? { label: st.label, left_s: Math.max(0, Math.round(N.confirmUntil - now())) } : null,
     schedules: schedSummary(), log_stats: stats(),
     dock_direction: 'front',
+    button: { enabled: N.buttonOn !== false, at_home: !m && !N.queue.length && Math.hypot(R.x - places.home.x, R.y - places.home.y) < 0.6,
+              message: N.buttonOn === false ? 'turned off in the app' : (!m && !N.queue.length && Math.hypot(R.x - places.home.x, R.y - places.home.y) < 0.6) ? 'ready: takes trips from here' : 'stop and OK only (trips start from the home spot)' },
+    network: { ok: true, down_s: null, went_home: false },
     docking: N.dockIn ? { phase: N.dockIn.phase, try: N.dockIn.try, tries: 3, message: N.message, marker: N.dockIn.marker || null }
       : (m && st && st.dock) ? { phase: 'predock', try: null, tries: 3, message: 'driving to the front of the dock', marker: null }
       : (N.docked && N.state === 'CHARGING') ? { phase: 'charging', try: null, tries: 3, message: `on the dock, ${pct} %`, marker: null } : null,

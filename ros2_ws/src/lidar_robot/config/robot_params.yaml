@@ -88,6 +88,14 @@ navigator:
     camera_z: 0.20
     dwell_s: 3.0                 # wait at each intermediate stop (s)
     auto_return_s: 0.0           # >0: drive home after this many idle seconds
+    # voice button ON the robot (no login): anywhere it can stop the robot, give the OK at a "wait for OK"
+    # stop and answer questions; trips only start from the home spot / dock, at normal priority
+    button_enabled: true         # admins can also switch it off in the app (Operate)
+    button_home_radius: 0.6      # m from Home or the dock that counts as "at home"
+    button_gap_s: 30.0           # at most one voice trip from the button per this many seconds
+    # network lost: accepted trips are finished, then the robot waits at home (where the button works)
+    offline_home_s: 120.0        # s without network and nothing to do -> go home (0 = never)
+    network_check_s: 10.0        # how often the Wi-Fi/hotspot gateway is pinged
     max_replans: 3
     pose_timeout: 1.5            # s: odometry older than this = position lost (1.0 tripped on short CPU stalls)
     llm_model: llama-3.1-8b-instant   # used only if GROQ_API_KEY is set and there is internet

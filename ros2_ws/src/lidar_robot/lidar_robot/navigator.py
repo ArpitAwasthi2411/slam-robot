@@ -49,6 +49,7 @@ from lidar_robot.goal_logic import front_clearance_from_scan
 from lidar_robot.speech import Speaker
 from lidar_robot.kinematics import compose_2d, yaw_from_quaternion
 from lidar_robot.navigator_core import NavigatorCore
+from lidar_robot.netcheck import network_ok
 from lidar_robot.places import PlaceStore
 from lidar_robot.planner import GridMap, Planner, PlannerParams
 from lidar_robot.sensors import to_world
@@ -110,6 +111,11 @@ class NavigatorNode(Node):
         d('speech_max_per_min', 8)         # rate limit (questions to people, battery always get through)
         d('speech_device', '')             # ALSA output device ('' = default)
         d('auto_return_s', 0.0)
+        d('button_enabled', True)          # voice button on the robot (admins can switch it off in the app)
+        d('button_home_radius', 0.6)       # m: trips from the button only start this close to Home / the dock
+        d('button_gap_s', 30.0)            # one voice trip from the button per this many seconds
+        d('offline_home_s', 120.0)         # no network this long and nothing to do -> wait at home (0 = never)
+        d('network_check_s', 10.0)
         d('max_replans', 3)
         d('pose_timeout', 1.0)          # wheel odometry (odom->base_link) older than this = position lost
         d('map_tf_timeout', 10.0)       # SLAM's map->odom correction may lag this much (it changes slowly)
@@ -172,7 +178,9 @@ class NavigatorNode(Node):
                                    cam_x=float(g('camera_x')), cam_y=float(g('camera_y')), cam_z=float(g('camera_z'))),
             recovery=Recovery(llm=RecoveryLLM(key, model=str(g('recovery_llm_model'))), mode=str(g('recovery_mode')),
                               max_per_mission=int(g('recovery_max_per_mission')),
-                              ask_timeout_s=float(g('recovery_ask_timeout_s'))))
+                              ask_timeout_s=float(g('recovery_ask_timeout_s'))),
+            button_enabled=bool(g('button_enabled')), button_home_radius=float(g('button_home_radius')),
+            button_gap_s=float(g('button_gap_s')), offline_home_s=float(g('offline_home_s')))
         self.core.localized = not bool(g('require_localization_confirm'))
         self.vision = VisionGate(enabled=bool(g('use_vision')), timeout_s=float(g('vision_timeout')))
         self.create_subscription(String, 'vision/decision', self._on_vision, 10)
@@ -222,12 +230,22 @@ class NavigatorNode(Node):
         self.dt = 1.0 / float(g('rate'))
         self.create_timer(self.dt, self._tick)
         self.create_timer(0.25, self._publish_status)
+        # network watch in a thread (one ping every network_check_s; never blocks the control loop)
+        self._net_period = max(2.0, float(g('network_check_s')))
+        threading.Thread(target=self._watch_network, daemon=True).start()
         self.get_logger().info(
             f'navigator ready: {len(self.places.places)} places from {g("places_file")}, '
             f'LLM {"ON (" + g("llm_model") + ")" if key else "OFF (offline rule parser)"}, '
             f'error recovery {g("recovery_mode")}'
             + (f' ({g("recovery_llm_model")})' if key and g('recovery_mode') == 'llm' else
                ' (rules: no GROQ_API_KEY)' if g('recovery_mode') == 'llm' else ''))
+
+    def _watch_network(self):
+        while rclpy.ok():
+            ok = network_ok()
+            with self.core_lock:
+                self.core.set_network(ok)
+            time.sleep(self._net_period)
 
     # ---------------------------------------------------------------- inputs
     def _on_map(self, msg: OccupancyGrid):

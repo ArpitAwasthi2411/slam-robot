@@ -61,6 +61,29 @@ Settings in `config/robot_params.yaml`:
   `max_record_s`, `stt_language` (`''` auto, or `en` / `hi`).
 - `navigator:`: `speech_engine`, `speech_volume`, `speech_voice_en` / `_hi`, `speech_max_per_min`, `speech_device`.
 
+## 4b. Who can use the button on the robot (no login)
+
+The button on the robot has no login, so the robot limits what it can do:
+
+| Where the robot is | What the button can do |
+|---|---|
+| **At its home spot** (≤ 0.6 m from Home or on the dock), idle, position known | everything a staff login can say: go to a place or room, go home, go and charge, stop, questions, at **normal priority** (saying "urgent" never interrupts anyone) |
+| **Anywhere else** | **stop**, the **OK** at a "wait for OK" stop, and questions ("where are you", "why did you stop"). Trips are refused: *"I take voice trips only at my home spot. Please use the Pathik app."* |
+| **Busy** (a trip from the app is running or queued) | stop / OK / questions only: *"I'm busy with another task. Please use the Pathik app."* |
+
+- One voice trip from the button per 30 s (`button_gap_s`).
+- Logged as `robot button` in the mission log.
+- Operators/admins can turn the button off: app → Me → Robot → **Voice button on the robot** (remembered after a restart).
+- "Talk to the robot" in the **app** is different: it uses the robot's microphone but the command belongs to the
+  logged-in user, so it works anywhere, like typing the command.
+
+**When the network goes away** (the robot can't reach the hotspot/Wi-Fi gateway): the network only gives orders,
+it doesn't drive. The robot **finishes every trip it already accepted** (and scheduled trips). With nothing left
+to do and still no network for 2 minutes (`offline_home_s`), it says *"I've lost my connection, so I'm going
+back home"*, drives home and waits there, where the button works. When the network is back, the app's event list
+shows how long it was offline and what happened. A laptop-cable-only session (no network since start) never
+triggers this. Settings: `button_*`, `offline_home_s`, `network_check_s` in `config/robot_params.yaml` (navigator).
+
 ## 5. Check
 1. Hold the button, say "go to Lab 3", let go. Beep → the app's Home voice card shows "Heard: go to Lab 3 →
    Going to Lab 3." → the robot says it and drives.

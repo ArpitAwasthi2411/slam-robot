@@ -2006,6 +2006,7 @@ function renderHome(st) {
   $('#h-room-sub').textContent = st.pose ? `${fmt(st.pose.x, 1)}, ${fmt(st.pose.y, 1)} m` : 'waiting for position';
   renderRecovery(n.recovery);
   renderDocking(n.docking, n.state);
+  renderButton(n.button);
   const busy = !$('#g-mission').hidden;
   $('#h-idle').hidden = busy || offline;
   // camera summary (the card itself opens from the chip or the Camera button)
@@ -2097,6 +2098,20 @@ function renderMe(pending) {
   $('#me-pass').hidden = $('#me-out').hidden = !!u.legacy;
   if (pending !== undefined) setPendingBadge(pending);
 }
+// The push-to-talk button ON the robot has no login: trips start only at the home spot (the robot enforces it).
+function renderButton(b) {
+  const row = $('#me-btn-row'); if (!row) return;
+  row.hidden = !b;
+  if (!b) return;
+  $('#me-btn').textContent = b.enabled ? `On · ${b.message}` : 'Off · nobody can give voice commands at the robot';
+  const sw = $('#me-btn-on');
+  if (document.activeElement !== sw) sw.checked = !!b.enabled;
+}
+$('#me-btn-on').onchange = async e => {
+  const on = e.target.checked;
+  try { await nav({ type: 'button_settings', enabled: on }); toast(on ? 'Voice button on' : 'Voice button off'); }
+  catch (err) { e.target.checked = !on; toast(err.message, true); }
+};
 // Funnel on: the robot answers on a public https URL. Logins protect it, but it should be off after use.
 function renderPublic(net) {
   const on = !!(net && net.public);

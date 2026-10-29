@@ -119,6 +119,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-30: robot voice button policy (navigator_core `_button_command`): trips only from the home spot/dock,
+  normal priority, 1 per 30 s; stop/OK/questions anywhere; admin switch (app Me → Robot, `button_settings`,
+  saved in button.json). Network loss (`netcheck.py`, gateway ping every 10 s): accepted trips are finished,
+  then idle + offline 2 min -> go home and wait (`offline_home_s`); "connection back" event lists what happened.
+  voice_node tags button vs app recordings (app = the logged-in user). Tests: test_button_offline.py (16).
+
 - 2026-10-29: wrap-up of phases 0-6: README feature list/layout/status, docs/KEYS.md (every key + account and its
   ~/robot.env line), final PR summary with robot tests and what still needs hardware.
 - 2026-10-29: Phase 6 URDF: pathik.urdf.xacro (base box from the footprint, wheels, caster, laser, camera + optical,

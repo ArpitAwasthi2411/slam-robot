@@ -42,6 +42,7 @@ Failure reason codes (for logs, the dashboard and LLM error recovery):
   NO_MAP, NO_PATH, GOAL_IN_OBSTACLE, OUTSIDE_MAP, START_BLOCKED, BLOCKED, POSE_LOST, ESTOP, UNKNOWN_PLACE,
   DOCK_NO_CONTACT, DOCK_NO_MARKER
 """
+import json
 import math
 import os
 import time
@@ -91,7 +92,8 @@ class NavigatorCore:
                  dwell_s=3.0, auto_return_s=0.0, max_replans=3, plan_retry_s=2.0, max_plan_attempts=3,
                  clock=time.monotonic, tuning_path=None, footprint=None, data_dir=None, battery=None,
                  localtime=time.localtime, confirm_timeout_s=300.0, dock_offset=0.55, recovery=None,
-                 dock_front=True, dock_params=None, dock_without_marker=False):
+                 dock_front=True, dock_params=None, dock_without_marker=False,
+                 button_enabled=True, button_home_radius=0.6, button_gap_s=30.0, offline_home_s=120.0):
         self.places = places
         self.planner = Planner(planner_params or PlannerParams())
         self.follower = PathFollower(follower_params or FollowerParams())
@@ -151,6 +153,20 @@ class NavigatorCore:
         self.localtime = localtime
         self.rec = recovery or Recovery(mode='off')      # error recovery (off unless the node/sim turns it on)
         self.rec.clock = clock
+        # the push-to-talk button ON the robot: no login, so it only starts trips from the home spot
+        self.button_enabled = button_enabled
+        self.button_home_radius = button_home_radius
+        self.button_gap_s = button_gap_s
+        self._button_last = -1e9
+        self._button_file = os.path.join(data_dir, 'button.json') if data_dir else None
+        self._load_button()
+        # network loss: finish what was accepted, then wait at home (where the button works)
+        self.offline_home_s = offline_home_s          # 0 = never go home because of the network
+        self.net_ok = None                            # None until the node reports
+        self._net_was_up = False
+        self._net_down_since = None
+        self._offline_went_home = False
+        self._offline_notes = []
 
     # ---------------------------------------------------------------- inputs
     def set_map(self, grid):
@@ -280,7 +296,16 @@ class NavigatorCore:
                 r['mission'] = m.summary()
                 return r
             if t == 'command':
+                if req.get('source') == 'button':
+                    return self._button_command(req.get('text', ''), pose)
                 return self._command(req.get('text', ''), dry_run=bool(req.get('dry_run')))
+            if t == 'button_settings':
+                if 'enabled' in req:
+                    self.button_enabled = bool(req['enabled'])
+                    self._save_button()
+                    self._log(f'robot voice button turned {"on" if self.button_enabled else "off"}'
+                              + (f' by {self._req_by}' if self._req_by else ''))
+                return {'ok': True, 'button': self._button_status(pose)}
             if t == 'preview':
                 return self._preview(req, pose)
             if t == 'cancel':
@@ -464,7 +489,7 @@ class NavigatorCore:
             if not (math.isfinite(st.x) and math.isfinite(st.y)) or (st.yaw is not None and not math.isfinite(st.yaw)):
                 raise ValueError('goal coordinates must be finite numbers')
         m = Mission(stops, max(0, min(3, int(priority))), source, text)
-        m.by = getattr(self, '_req_by', '') if source not in ('schedule', 'explore', 'battery') else ''
+        m.by = getattr(self, '_req_by', '') if source not in ('schedule', 'explore', 'battery', 'offline-home', 'auto-home') else ''
         preempt = self.queue.add(m)
         if preempt:
             self.queue.preempt()
@@ -510,8 +535,8 @@ class NavigatorCore:
             raise ValueError('home is not set (use "Set home here")')
         return self._enqueue([Stop('home', h['x'], h['y'], h.get('yaw'))], priority, source, 'home')
 
-    def _command(self, text, dry_run=False):
-        c = self.parser.parse(text)
+    def _command(self, text, dry_run=False, parsed=None, source='command'):
+        c = parsed or self.parser.parse(text)
         res = {'ok': True, 'interpretation': c}
         if dry_run:                              # the app shows the plan as a timeline before sending it
             res['plan'] = self._plan_summary(c)
@@ -525,7 +550,7 @@ class NavigatorCore:
             self.follower.clear()
             self._set(IDLE, 'stopped by command')
         elif c['intent'] == 'return_home':
-            res.update(self._go_home(c['priority'], 'command'))
+            res.update(self._go_home(c['priority'], source))
         elif c['intent'] == 'navigate':
             stops = []
             for st in c.get('steps') or [{'place': n, 'wait_s': 0.0} for n in c['targets']]:
@@ -536,14 +561,14 @@ class NavigatorCore:
             h = self.places.home
             if c.get('then_home') and h:
                 stops.append(Stop('home', h['x'], h['y'], h.get('yaw')))
-            res.update(self._enqueue(stops, c['priority'], 'command', text))
+            res.update(self._enqueue(stops, c['priority'], source, text))
         elif c['intent'] == 'status':
             res['status'] = self.status()['message']
             b = self.battery.info()
             if b['pct'] is not None:
                 res['status'] += f' · battery {b["pct"]} %' + (' (charging)' if b['charging'] else '')
         elif c['intent'] == 'dock':
-            res.update(self._go_dock(c['priority'], 'command'))
+            res.update(self._go_dock(c['priority'], source))
         elif c['intent'] == 'explain':
             r = explain(self)
             res['answer'] = r['answer']
@@ -557,8 +582,130 @@ class NavigatorCore:
                 self.handle({'type': 'confirm'})
             else:
                 res['interpretation']['reply'] = 'Nothing is waiting for an OK.' 
-        self._log(f'command "{text}" -> {c["intent"]} {c["targets"]} via {c["source"]}')
+        self._log(f'command "{text}" -> {c["intent"]} {c["targets"]} via {c["source"]}'
+                  + (' (robot button)' if source == 'button' else ''))
         return res
+
+    # ---------------------------------------------------------------- the voice button on the robot
+    def _at_home(self, pose):
+        """Standing still at the home spot (or on the dock), position known, nothing running."""
+        if pose is None or not self.localized or self.estopped or self.hold:
+            return False
+        if self.queue.active or self.queue.queue or self.explore.get('active') or self.rec.busy():
+            return False
+        if self.docked:
+            return True
+        for spot in (self.places.home, self.places.dock):
+            if spot and math.hypot(pose[0] - spot['x'], pose[1] - spot['y']) <= self.button_home_radius:
+                return True
+        return False
+
+    def _button_status(self, pose=None):
+        pose = pose or self._pose
+        at_home = self._at_home(pose)
+        if not self.button_enabled:
+            why = 'turned off in the app'
+        elif not (self.places.home or self.places.dock):
+            why = 'set Home first'
+        elif at_home:
+            why = 'ready: takes trips from here'
+        else:
+            why = 'stop and OK only (trips start from the home spot)'
+        return {'enabled': self.button_enabled, 'at_home': at_home, 'message': why}
+
+    def _button_command(self, text, pose):
+        """Spoken through the button on the robot (no login). Anywhere: stop, OK at a 'wait for OK' stop,
+        questions. Trips: only from the home spot, normal priority, one per button_gap_s."""
+        def refuse(reply):
+            self._log(f'robot button: "{text}" refused ({reply})')
+            return {'ok': True, 'refused': True, 'interpretation': {'intent': 'refused', 'targets': [],
+                                                                     'reply': reply, 'source': 'policy'}}
+        if not self.button_enabled:
+            return refuse("My voice button is turned off. Please use the Pathik app.")
+        c = self.parser.parse(text)
+        intent = c['intent']
+        if intent == 'stop':                                   # safety: always
+            return self._command(text, parsed=c, source='button')
+        if intent == 'confirm':
+            if self.state == CONFIRM:
+                return self._command(text, parsed=c, source='button')
+            return refuse('Nothing is waiting for an OK.')
+        if intent in ('status', 'explain', 'find', 'unknown'):  # answers only, nothing moves
+            return self._command(text, parsed=c, source='button')
+        # navigate / return_home / dock: starts the robot moving
+        if not self._at_home(pose):
+            busy = self.queue.active or self.queue.queue
+            return refuse("I'm busy with another task. Please use the Pathik app." if busy else
+                          "I take voice trips only at my home spot. Please use the Pathik app.")
+        now = self.clock()
+        if now - self._button_last < self.button_gap_s:
+            return refuse(f'Please wait {self.button_gap_s - (now - self._button_last):.0f} seconds '
+                          'before the next voice trip.')
+        c = dict(c, priority=min(int(c.get('priority', 1)), 1))   # never urgent, never pre-empts
+        self._req_by = 'robot button'
+        res = self._command(text, parsed=c, source='button')
+        if res.get('ok') is not False and res.get('mission'):
+            self._button_last = now
+            if self.net_ok is False:
+                self._offline_notes.append(f'took "{text}" from the robot button')
+        return res
+
+    def _load_button(self):
+        if self._button_file and os.path.exists(self._button_file):
+            try:
+                with open(self._button_file) as f:
+                    self.button_enabled = bool(json.load(f).get('enabled', self.button_enabled))
+            except (OSError, ValueError):
+                pass
+
+    def _save_button(self):
+        if self._button_file:
+            try:
+                with open(self._button_file, 'w') as f:
+                    json.dump({'enabled': self.button_enabled}, f)
+            except OSError:
+                pass
+
+    # ---------------------------------------------------------------- network loss
+    def set_network(self, ok):
+        """From the node every ~10 s: can people reach the robot (Wi-Fi/hotspot gateway answers)?"""
+        now = self.clock()
+        if ok:
+            if self.net_ok is False and self._net_was_up and self._net_down_since is not None:
+                mins = (now - self._net_down_since) / 60.0
+                notes = '; '.join(self._offline_notes) if self._offline_notes else 'nothing new'
+                self._log(f'connection back after {mins:.1f} min. While offline: {notes}')
+            self._net_was_up = True
+            self._net_down_since = None
+            self._offline_went_home = False
+            self._offline_notes = []
+        elif self.net_ok is not False:
+            self._net_down_since = now
+            if self._net_was_up:
+                self._log('connection lost: finishing the trips already accepted, then waiting at home', 'warn')
+        self.net_ok = bool(ok)
+
+    def _maybe_offline_home(self, pose, now):
+        """Called when idle: the network gives orders, it doesn't drive. Accepted trips are already done;
+        with no network and nothing to do, wait at home, where the voice button works."""
+        if not self.offline_home_s or self.net_ok is not False or not self._net_was_up:
+            return False
+        if self._offline_went_home or self._net_down_since is None or self.estopped or self.hold:
+            return False
+        if now - self._net_down_since < self.offline_home_s or self._at_home(pose):
+            return False
+        if not (self.places.home or self.places.dock):
+            return False
+        self._offline_went_home = True
+        try:
+            self._go_home(0, 'offline-home')
+            self._offline_notes.append('drove home')
+            self._log('no connection and nothing to do: going home to wait (the voice button works there)', 'warn')
+            self.say_queue.append(('offline_home', "I've lost my connection, so I'm going back home."))
+            return True
+        except ValueError as e:
+            self._log(f'offline: could not go home: {e}', 'warn')
+            return False
 
     def _plan_summary(self, c):
         steps = []
@@ -654,7 +801,8 @@ class NavigatorCore:
                 self._set(CHARGING, 'on the dock' + (f', charging ({b["pct"]} %)' if b['charging'] else
                                                      (f' ({b["pct"]} %)' if b['pct'] is not None else '')))
                 return 0.0, 0.0
-            self._maybe_auto_home(pose, now)
+            if not self._maybe_offline_home(pose, now):
+                self._maybe_auto_home(pose, now)
             if self.state not in (IDLE,):
                 self._set(IDLE, self.message if self.state == WAITING else 'idle')
             return 0.0, 0.0
@@ -1373,6 +1521,11 @@ class NavigatorCore:
             'log_stats': self.mlog.stats(),
             'recovery': self.rec.public(), 'recovery_mode': self.rec.mode,
             'docking': self._docking_status(m), 'dock_direction': 'front' if self.dock_front else 'reverse',
+            'button': self._button_status(pose),
+            'network': {'ok': self.net_ok,
+                        'down_s': (None if self._net_down_since is None or self.net_ok is not False
+                                   else round(self.clock() - self._net_down_since)),
+                        'went_home': self._offline_went_home},
         }
 
     def _docking_status(self, m):

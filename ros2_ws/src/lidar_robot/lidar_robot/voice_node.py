@@ -122,6 +122,8 @@ class VoiceNode(Node):
         self.button = GpioButton(int(g('button_gpio')), str(g('button_chip')))
         if self.button.error:
             self.get_logger().warn(f'push-to-talk button off: {self.button.error} (the app button still works)')
+        self._next_src = ('button', 'robot button')     # who pressed: the robot's button, or an app login
+        self._src = self._next_src
         self.state = {'listening': False, 'thinking': False, 'message': '', 'last_heard': '', 'last_reply': ''}
         self.lock = threading.Lock()
         self.create_timer(0.02, self._poll_button)
@@ -133,6 +135,8 @@ class VoiceNode(Node):
     # ------------------------------------------------------------ inputs
     def _poll_button(self):
         v = self.button.read()
+        if v and not self.ptt.recording:
+            self._next_src = ('button', 'robot button')   # pressed on the robot itself: no login
         if v is not None:
             self.ptt.update(v, time.monotonic())
         elif self.ptt.recording:
@@ -145,6 +149,8 @@ class VoiceNode(Node):
             c = {'action': msg.data.strip()}
         now = time.monotonic()
         if c.get('action') == 'listen':
+            # from the app: the dashboard already checked the login, so this is that user's command
+            self._next_src = ('app', str(c.get('by') or 'app')[:32])
             self.ptt.press(now, float(c.get('max_s') or 8.0))
         elif c.get('action') == 'stop':
             self.ptt.release(now)
@@ -161,6 +167,8 @@ class VoiceNode(Node):
 
     # ------------------------------------------------------------ record -> understand -> act
     def _start(self):
+        self._src = self._next_src
+        self._next_src = ('button', 'robot button')
         if self.beep:
             beep(self.speaker_device)
         ok = self.mic.start()
@@ -191,7 +199,11 @@ class VoiceNode(Node):
         rid = uuid.uuid4().hex[:8]
         ev = [threading.Event(), None]
         self._waiting[rid] = ev
-        self.req_pub.publish(String(data=json.dumps({'type': 'command', 'text': text, 'by': 'voice', 'req_id': rid})))
+        kind, who = self._src
+        req = {'type': 'command', 'text': text, 'by': who, 'req_id': rid}
+        if kind == 'button':
+            req['source'] = 'button'          # the navigator applies the home-spot rules to these
+        self.req_pub.publish(String(data=json.dumps(req)))
         ev[0].wait(6.0)
         self._waiting.pop(rid, None)
         return ev[1]
