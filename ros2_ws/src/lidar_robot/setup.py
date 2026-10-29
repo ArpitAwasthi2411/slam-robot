@@ -15,6 +15,7 @@ setup(
         ('share/' + package_name + '/launch', glob('launch/*.py')),
         ('share/' + package_name + '/config', glob('config/*')),
         ('share/' + package_name + '/rviz', glob('rviz/*.rviz')),
+        ('share/' + package_name + '/urdf', glob('urdf/*')),
         ('share/' + package_name + '/web', [f for f in glob('lidar_robot/web/*') if os.path.isfile(f)]),
         ('share/' + package_name + '/web/app', [f for f in glob('lidar_robot/web/app/*') if os.path.isfile(f)]),
     ],

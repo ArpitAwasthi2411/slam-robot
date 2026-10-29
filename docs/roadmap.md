@@ -10,7 +10,7 @@
 4. **Save maps every session** with the dashboard; commit the good ones to `maps/`.
 
 ## Soon (navigation)
-5. **URDF + robot_state_publisher** instead of the static TF: one file with footprint, wheel
+5. ~~URDF + robot_state_publisher~~ **done (Phase 6)**: `urdf/pathik.urdf.xacro` instead of the static TF: one file with footprint, wheel
    and LiDAR positions, and a proper robot model in RViz.
 6. ~~Path planning~~ **done in v0.3** without Nav2: the `navigator` node (A*, path following,
    replanning, places, missions, localization mode); see [navigation.md](navigation.md).

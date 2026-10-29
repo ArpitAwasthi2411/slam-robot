@@ -26,6 +26,8 @@ Arguments
   imu_x/imu_y/imu_z            MPU-6050 position (orientation: chip X forward, Z up)
   vision        true        camera people detection (vision node); the navigator slows / stops for people
   camera        auto        auto | libcamera (Camera Module 3) | /dev/videoN (USB webcam)
+  urdf          true        robot model (urdf/pathik.urdf.xacro) + robot_state_publisher for the fixed frames;
+                            false = the old static_transform_publishers (same frames)
   voice         true        push-to-talk voice commands (voice node: GPIO17 button / app, USB mic, Whisper/Vosk)
 """
 import os
@@ -85,25 +87,39 @@ def _setup(context):
                            f'map={map_file or "-"} nav_mode={nav_mode} dashboard={cfg("dashboard")} '
                            f'vision={vision} camera={cfg("camera")} voice={voice}')]
 
-    actions.append(Node(
-        package='tf2_ros', executable='static_transform_publisher', name='base_to_laser',
-        arguments=['--x', cfg('laser_x'), '--y', cfg('laser_y'), '--z', cfg('laser_z'),
-                   '--yaw', cfg('laser_yaw'), '--pitch', '0', '--roll', '0',
-                   '--frame-id', 'base_link', '--child-frame-id', 'laser']))
-
-    sd = cfg('us_side_deg')
-    import math as _m
-    side = str(_m.radians(float(sd)))
-    for name, y, yaw in (('us_center', '0.0', '0.0'), ('us_left', cfg('us_y'), side),
-                         ('us_right', '-' + cfg('us_y'), '-' + side)):
+    # fixed frames (laser, camera, imu_link, us_*, wheels): the URDF model + robot_state_publisher; same frame
+    # names and offsets as the static publishers before (urdf:=false brings those back)
+    model_args = {n: cfg(n) for n in ('laser_x', 'laser_y', 'laser_z', 'laser_yaw', 'us_x', 'us_y', 'us_side_deg',
+                                      'us_z', 'imu_x', 'imu_y', 'imu_z')}
+    if _truthy(cfg('urdf')):
+        import yaml
+        from lidar_robot.urdf_model import launch_args_from_params, render
+        with open(params) as f:
+            model_args.update(launch_args_from_params(yaml.safe_load(f)))
+        description = render(os.path.join(share, 'urdf', 'pathik.urdf.xacro'), model_args)
+        actions.append(Node(package='robot_state_publisher', executable='robot_state_publisher',
+                            name='robot_state_publisher', output='screen',
+                            parameters=[{'robot_description': description, 'publish_frequency': 10.0}]))
+    else:
         actions.append(Node(
-            package='tf2_ros', executable='static_transform_publisher', name=f'base_to_{name}',
-            arguments=['--x', cfg('us_x'), '--y', y, '--z', cfg('us_z'), '--yaw', yaw,
-                       '--pitch', '0', '--roll', '0', '--frame-id', 'base_link', '--child-frame-id', name]))
-    actions.append(Node(
-        package='tf2_ros', executable='static_transform_publisher', name='base_to_imu',
-        arguments=['--x', cfg('imu_x'), '--y', cfg('imu_y'), '--z', cfg('imu_z'), '--yaw', '0',
-                   '--pitch', '0', '--roll', '0', '--frame-id', 'base_link', '--child-frame-id', 'imu_link']))
+            package='tf2_ros', executable='static_transform_publisher', name='base_to_laser',
+            arguments=['--x', cfg('laser_x'), '--y', cfg('laser_y'), '--z', cfg('laser_z'),
+                       '--yaw', cfg('laser_yaw'), '--pitch', '0', '--roll', '0',
+                       '--frame-id', 'base_link', '--child-frame-id', 'laser']))
+
+        sd = cfg('us_side_deg')
+        import math as _m
+        side = str(_m.radians(float(sd)))
+        for name, y, yaw in (('us_center', '0.0', '0.0'), ('us_left', cfg('us_y'), side),
+                             ('us_right', '-' + cfg('us_y'), '-' + side)):
+            actions.append(Node(
+                package='tf2_ros', executable='static_transform_publisher', name=f'base_to_{name}',
+                arguments=['--x', cfg('us_x'), '--y', y, '--z', cfg('us_z'), '--yaw', yaw,
+                           '--pitch', '0', '--roll', '0', '--frame-id', 'base_link', '--child-frame-id', name]))
+        actions.append(Node(
+            package='tf2_ros', executable='static_transform_publisher', name='base_to_imu',
+            arguments=['--x', cfg('imu_x'), '--y', cfg('imu_y'), '--z', cfg('imu_z'), '--yaw', '0',
+                       '--pitch', '0', '--roll', '0', '--frame-id', 'base_link', '--child-frame-id', 'imu_link']))
 
     actions.append(Node(
         package='sllidar_ros2', executable='sllidar_node', name='sllidar_node', output='screen',
@@ -174,7 +190,7 @@ def generate_launch_description():
         ('laser_x', '-0.13'), ('laser_y', '0.0'), ('laser_z', '0.10'), ('laser_yaw', '0.0'),
         ('us_x', '0.07'), ('us_y', '0.12'), ('us_side_deg', '30'), ('us_z', '0.06'),
         ('imu_x', '0.0'), ('imu_y', '0.0'), ('imu_z', '0.05'),
-        ('vision', 'true'), ('camera', 'auto'), ('voice', 'true'),
+        ('vision', 'true'), ('camera', 'auto'), ('voice', 'true'), ('urdf', 'true'),
     ]
     return LaunchDescription(
         [DeclareLaunchArgument(n, default_value=d) for n, d in args] + [OpaqueFunction(function=_setup)])

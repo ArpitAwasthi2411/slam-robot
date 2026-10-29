@@ -54,7 +54,8 @@ Ordered by value for the thesis, the demo and the applications.
   and write `docs/results.md` with the tables. These numbers go in every application.
   Prompt: *"Do task A6 from docs/WORK_LEFT.md: run the evals in simulation, save CSV + charts, write docs/results.md."*
 
-- [ ] **A7. URDF + robot_state_publisher**
+- [x] **A7. URDF + robot_state_publisher**: done 29 Oct (`urdf/pathik.urdf.xacro`, same frames; `urdf:=false` = old static TFs).
+  Robot check: B16.
   Replace the static TF publishers in `bringup.launch.py` with a URDF/Xacro (base, wheels, LiDAR, camera,
   ultrasonics, footprint) and `robot_state_publisher`; RViz shows the robot model.
   Prompt: *"Do task A7 from docs/WORK_LEFT.md: URDF/Xacro + robot_state_publisher, same frames as today."*
@@ -91,6 +92,7 @@ Ordered by value for the thesis, the demo and the applications.
 - [ ] **B13.** Error recovery on the robot: stand in the corridor, block a door, ask-a-person flow (`docs/STEPS_next_run.md`, Phase 3); run `tools/eval_recovery.py` with the Groq key.
 - [ ] **B14.** Front docking on the real dock: print the marker (`tools/marker_webcam.py --print`), measure, run `docs/STEPS_next_run.md` Phase 4.
 - [ ] **B15.** Voice: button on pin 11/9, `scripts/setup_voice.sh`, then the checks in `docs/STEPS_voice.md`.
+- [ ] **B16.** URDF: `ros2 run tf2_tools view_frames` shows the same frames; RViz shows the robot model (`docs/STEPS_next_run.md`, Phase 6).
 - [ ] **B12.** Try the redesigned app on a phone with each role (`docs/STEPS_next_run.md`, Phase 2).
 - [ ] **B11.** Remote control: robot on phone A's hotspot, phone B on mobile data (`docs/STEPS_remote_control.md`).
 - [ ] **B10.** Docker on the Pi (make the GHCR package public first), `scripts/pathik.sh install`.

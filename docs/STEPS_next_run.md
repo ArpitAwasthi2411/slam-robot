@@ -127,3 +127,22 @@ What changed:
 
 Set up: wire the button, then `sudo bash ~/slam-robot/scripts/setup_voice.sh`, then `... setup_voice.sh test`.
 Checks: the five in `docs/STEPS_voice.md` § 5 (button, app button, offline, Hindi, silence).
+
+## Phase 6: robot model (URDF)
+
+What changed: the fixed frames (laser, us_left/center/right, imu_link, plus new camera_link /
+camera_optical_frame, wheels, caster) now come from `urdf/pathik.urdf.xacro` through `robot_state_publisher`,
+with the same names and offsets as the old static publishers. The body box is the navigator's footprint.
+`urdf:=false` brings the old static publishers back.
+
+Install once: `sudo apt install ros-humble-robot-state-publisher ros-humble-xacro`. Without xacro the launch
+uses its own small renderer, so this is only for RViz/tools.
+Checks:
+1. `ros2 topic echo /robot_description --once | head` prints the model.
+2. `ros2 run tf2_tools view_frames` → `frames.pdf`: base_link → laser, us_*, imu_link, camera_link,
+   wheels (and odom → base_link from the bridge, map → odom from Cartographer as before).
+3. `ros2 run tf2_ros tf2_echo base_link laser` → the same `laser_x/y/z` as before (-0.13, 0, 0.10 by default).
+4. RViz with `rviz/robot.rviz`: the robot model is drawn (magenta box with the wheels and sensors). Mapping and
+   driving behave exactly as before.
+5. After you measure the real footprint / LiDAR / camera positions, change them in `robot_params.yaml` or the
+   launch args: the model follows.
