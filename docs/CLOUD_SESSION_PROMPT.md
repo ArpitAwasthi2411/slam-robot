@@ -42,10 +42,23 @@ network** (mobile data). Make this reliable and simple:
 - Write `docs/STEPS_remote_control.md`: exact steps for both phones.
 
 ## Phase 2: complete redesign of the Pathik app (production level)
-The app (`lidar_robot/web/app/`, bundled in the Android WebView APK `android/`) has grown cluttered. Redesign it
-from scratch for real users, keeping every feature reachable:
-- Two clear audiences: **staff** (send/call the robot, see where it is, stop it) and **operators/admins**
-  (drive, map, places/rooms, tuning, health, people). Staff should see almost nothing else.
+The app (`lidar_robot/web/app/`, bundled in the Android WebView APK `android/`) has grown cluttered. Redesign
+**how it looks and how it is organised**, for real users.
+
+**Zero feature loss. This is a hard rule.** Redesign means layout, navigation, visual design and interaction,
+never fewer features. Features may only be added or improved.
+- Before changing anything, write `docs/APP_FEATURES.md`: an inventory of every screen, button, card, setting,
+  tool, test, endpoint call and demo-mode behaviour in the current app, and which roles can see each.
+- After the redesign, go through that list item by item and mark where each feature now lives. Every single item
+  must still exist and work, for the same roles. Include the finished checklist in the PR.
+- Add an automated check (a Playwright or DOM test against demo mode) that opens the app as staff, operator and
+  admin and verifies the key features are reachable.
+- Nothing is hidden behind "advanced" without a clear way in. If something moves, it gets a findable place.
+
+Design direction:
+- Two clear audiences, using the role permissions that already exist: **staff** (send/call the robot, see where
+  it is, stop it, plus everything staff can do today) and **operators/admins** (drive, map, places/rooms, tuning,
+  health, people, plus everything they can do today). Each role sees what it is allowed to, organised clearly.
 - One primary action per screen, a calm home screen (robot status, battery, current mission, big STOP), a map
   screen, a "send / call the robot" flow (places, rooms, typed or spoken command with a plan preview), and an
   operator area that groups Lab/Tuning/Health/Logs/People/Settings instead of many tabs.
@@ -55,6 +68,7 @@ from scratch for real users, keeping every feature reachable:
   on some networks).
 - Keep demo mode working (`demo.js`) so the whole app can be shown without the robot.
 - Show the new features from the phases below (recovery decisions, docking progress, voice, camera).
+- Same rule for every other phase: no existing feature, endpoint, parameter or script may be removed or broken.
 - Bump the APK through the existing `android.yml` workflow.
 
 ## Phase 3: LLM error recovery (thesis novelty, must work end to end)
