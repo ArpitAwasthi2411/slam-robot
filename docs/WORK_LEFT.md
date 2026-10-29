@@ -84,7 +84,7 @@ Ordered by value for the thesis, the demo and the applications.
 - [ ] **B2.** IMU wiring check (SDA 11, SCL 12, 3V3, GND), then `?` shows `imu=ok` (after A5, use `I`).
 - [ ] **B3.** Measure footprint + wheel separation; run the app's Spin and Straight line tests; send the numbers.
 - [ ] **B4.** Camera: Pi online, run `scripts/setup_pi_camera.sh` then `scripts/setup_vision.sh` (`docs/STEPS_camera.md`); tune `stop_m` / `slow_m`.
-- [ ] **B5.** Groq key: **create a new one** (the old one was shown in a screenshot) and put it in `~/robot.env`.
+- [ ] **B5.** Groq key: **create a new one** (the old one was shown in a screenshot) and put it in `~/robot.env` (every key and account: `docs/KEYS.md`).
 - [ ] **B6.** Audio: sound card, mic and speaker test (`docs/STEPS_esp32s3_lab.md` step 9).
 - [ ] **B7.** Map the full floor, label places and rooms with contents, try "take me to the room with the 3D printer".
 - [ ] **B8.** Install the latest APK; MCP test: Claude sends the robot to a room.
