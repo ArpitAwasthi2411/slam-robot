@@ -64,7 +64,7 @@ Ordered by value for the thesis, the demo and the applications.
   Physical MANUAL / AUTO / E-STOP switch on the transmitter (one more GPIO + firmware + bridge mode).
   Prompt: *"Do task A9 from docs/WORK_LEFT.md: RC CH5 mode switch in the S3 firmware and bridge."*
 
-- [ ] **A10. Docs clean-up**
+- [x] **A10. Docs clean-up** (done 29 Oct: docs/REVIEW_2026-10.md)
   README status checklist, `docs/roadmap.md` (still says "no login"), APK number (Pathik-11 vs 12) and
   current-status lines in CLAUDE.md, one up-to-date architecture diagram in the README.
   Prompt: *"Do task A10 from docs/WORK_LEFT.md: bring README, roadmap and CLAUDE.md up to date with the code."*

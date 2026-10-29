@@ -5,36 +5,38 @@
 | Part | Qty | Notes |
 |---|---|---|
 | Raspberry Pi 4 (4 GB) + 32 GB microSD | 1 | Ubuntu 22.04 server, ROS 2 Humble |
-| ESP32-S3 dev board (or classic ESP32 DevKit) | 1 | S3: native USB port. Classic: see pin map + udev notes |
+| ESP32-S3-DevKitC-1 (or classic ESP32 DevKit) | 1 | S3: GPIO UART to the Pi (pins 6/8/10). Classic: USB, see pin map + udev notes |
 | Slamtec RPLiDAR A1M8 | 1 | CP2102 USB adapter → `/dev/rplidar` |
-| DC gear motor with quadrature encoder | 2 | 4740 ticks/wheel-rev with 2× decoding |
+| DC gear motor with quadrature encoder | 2 | ~4970 ticks/wheel-rev with 2× decoding (measured, `TICKS_PER_REV`) |
 | BTS7960 (or similar RPWM/LPWM) motor driver | 2 | |
 | Wheels Ø125 mm | 2 | track (wheel centre to centre) 300 mm |
 | Caster wheel | 1 | |
-| FlySky FS-i6 transmitter + FS-iA6 receiver | 1 | CH1 steering, CH2 throttle |
+| FlySky FS-i6 transmitter + FS-iA6 receiver | 1 | CH1 left/right, CH2 forward/back |
 | Battery + 5 V buck converter for the Pi | 1 | fill in model / capacity |
 | USB-ethernet adapter (laptop) + cable | 1 | direct link 169.254.1.1 ↔ 169.254.1.2 |
 
 ## Pin map
 
-The firmware picks the map automatically from the board selected in the Arduino IDE.
+Each board has its own sketch: ESP32-S3 → `firmware/robot_esp32s3/` (v2.6), classic ESP32 →
+`firmware/robot_esp32_classic/` (v2.4). The numbers below are the sketches' `#define`s; every wire with both
+ends: [CONNECTIONS_esp32s3.md](CONNECTIONS_esp32s3.md) (S3), [wiring_classic_esp32.md](wiring_classic_esp32.md) (classic).
 
-| Function | ESP32-S3 GPIO | Classic ESP32 GPIO | Connects to |
+| Function | ESP32-S3 GPIO (v2.6) | Classic ESP32 GPIO (v2.4) | Connects to |
 |---|---|---|---|
-| RC CH1 steering | 4 | 34 (input-only) | FS-iA6 CH1 signal |
-| RC CH2 throttle | 7 | 35 (input-only) | FS-iA6 CH2 signal |
-| Left motor RPWM (forward) | 5 | 25 | left driver RPWM |
-| Left motor LPWM (reverse) | 6 | 26 | left driver LPWM |
-| Right motor RPWM (forward) | 9 | 32 | right driver RPWM |
-| Right motor LPWM (reverse) | 10 | 33 | right driver LPWM |
-| Left encoder A / B | 15 / 16 | 18 / 19 | left motor encoder |
+| RC steering (left/right stick) | 10 | 35 (input-only) | receiver CH1 signal |
+| RC throttle (forward/back stick) | 9 | 34 (input-only) | receiver CH2 signal |
+| Left motor RPWM / LPWM | 4 / 5 | 25 / 26 | left BTS7960 |
+| Right motor RPWM / LPWM | 6 / 7 | 32 / 33 | right BTS7960 |
+| Left encoder A / B | 15 / 16 | 18 / 19 | left motor encoder (3.3 V on the S3) |
 | Right encoder A / B | 17 / 18 | 4 / 13 | right motor encoder |
-| Link to the Pi | native USB → `/dev/ttyACM0` | USB-UART chip → `/dev/ttyUSB*` | Pi USB, `/dev/esp32` with udev |
-| IMU SDA / SCL (v2.2) | 1 / 2 | 21 / 22 | MPU-6050 (GY-521) |
-| E-stop sense (v2.2) | 41 | 5 | mushroom NO contact to GND |
-| Ultrasonic TRIG L/C/R (v2.2) | 13 / 14 / 21 | 14 / 16 / 17 | HC-SR04 TRIG |
-| Ultrasonic ECHO L/C/R (v2.2) | 38 / 39 / 40 | 23 / 27 / 15 | via level shifter (5 V → 3.3 V) |
-| Free for later | — | 36 ADC (battery), 39 | |
+| Link to the Pi | UART: TX 47 → Pi pin 10, RX 8 ← Pi pin 8 → `/dev/ttyAMA0` | USB-UART chip → `/dev/ttyUSB*` | `/dev/esp32` with udev |
+| IMU + INA226 SDA / SCL | 11 / 12 | 21 / 22 | MPU-6050 (GY-521), INA226 |
+| E-stop sense | 42 | 5 | mushroom NO contact to GND |
+| Ultrasonic TRIG L/C/R | 13 / 14 / 21 | 14 / 16 / 17 | HC-SR04 TRIG (direct) |
+| Ultrasonic ECHO L/C/R | 39 / 40 / 41 | 23 / 27 / 15 | via level shifter (5 V → 3.3 V) |
+| Battery divider (100k/22k) | 1 | 36 | only without INA226, `USE_BAT_ADC 1` |
+| Bumpers | 2 | 39 (+10k pull-up) | `USE_BUMPER 1` |
+| On-board RGB LED | 48 (38 on DevKitC-1 v1.1) | — | status colours (S3 v2.5+) |
 
 Wiring, mounting and tests for the IMU, ultrasonics and e-stop: **[sensors.md](sensors.md)**.
 Full classic-ESP32 connection list: **[wiring_classic_esp32.md](wiring_classic_esp32.md)** (sketch: `firmware/robot_esp32_classic/`).

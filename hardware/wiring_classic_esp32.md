@@ -6,8 +6,8 @@ Sketch: `firmware/robot_esp32_classic/robot_esp32_classic.ino` (board: **ESP32 D
 
 | ESP32 pin | Goes to | Notes |
 |---|---|---|
-| **34** | FS-iA6 **CH1** signal (steering) | input-only pin |
-| **35** | FS-iA6 **CH2** signal (throttle) | input-only pin |
+| **35** | FS-iA6 **CH1** signal (left/right, steering) | input-only pin (`RC_STEERING_PIN 35`, measured 2026-10-07) |
+| **34** | FS-iA6 **CH2** signal (forward/back, throttle) | input-only pin (`RC_THROTTLE_PIN 34`) |
 | **25** | Left BTS7960 **RPWM** | forward |
 | **26** | Left BTS7960 **LPWM** | reverse |
 | **32** | Right BTS7960 **RPWM** | forward |
@@ -29,7 +29,7 @@ Sketch: `firmware/robot_esp32_classic/robot_esp32_classic.ino` (board: **ESP32 D
 | **GND** | common ground (everything) | |
 | **USB** | Raspberry Pi USB | power + serial → `/dev/ttyUSB0` / `/dev/esp32` |
 
-**Leave empty:** 6, 7, 8, 9, 10, 11 (flash), 1, 3 (TX/RX to the Pi), 0, 2, 12 (boot). Free for later: 36 (battery ADC), 39.
+**Leave empty:** 6, 7, 8, 9, 10, 11 (flash), 1, 3 (TX/RX to the Pi), 0, 2, 12 (boot). 36 = battery divider and 39 = bumpers since v2.4 (below); nothing else is free on the classic board.
 
 **v2.4 additions** ([battery_dock.md](battery_dock.md)):
 - **INA226** battery monitor on the same I2C bus as the MPU (SDA 21, SCL 22, 3.3 V, address 0x40).

@@ -422,6 +422,10 @@ class Esp32Bridge(Node):
 
     # ------------------------------------------------------------------ commands
     def _on_cmd(self, source, msg: Twist):
+        # a NaN/inf twist (any publisher) would crash format_velocity in the 20 Hz timer: drop it
+        if not (math.isfinite(msg.linear.x) and math.isfinite(msg.angular.z)):
+            self.get_logger().warn(f'ignored a non-finite {source} command', throttle_duration_sec=5.0)
+            return
         self.cmd[source] = (msg, time.monotonic())
 
     def _on_estop(self, msg: Bool):

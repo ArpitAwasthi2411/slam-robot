@@ -1,4 +1,9 @@
 /*
+ * LEGACY (v2.2, kept for reference only: not built by CI, not used on the robot).
+ * Use firmware/robot_esp32s3/robot_esp32s3.ino (ESP32-S3, v2.6) or
+ *     firmware/robot_esp32_classic/robot_esp32_classic.ino (classic ESP32, v2.4).
+ */
+/*
  * robot_esp32  v2.2  —  ESP32-S3 / classic ESP32 low-level controller
  * -----------------------------------------------------------------------------
  *  - Reads 2 quadrature encoders and streams raw tick deltas to the Pi (50 Hz)

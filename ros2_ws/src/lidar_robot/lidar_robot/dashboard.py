@@ -360,7 +360,7 @@ class DashboardNode(Node):
         return out
 
     def command(self, v, w):
-        if self.estop:
+        if self.estop or not (math.isfinite(v) and math.isfinite(w)):
             return
         t = Twist()
         t.linear.x = max(-self.max_v, min(self.max_v, v))

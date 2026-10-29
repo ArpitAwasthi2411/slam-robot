@@ -8,6 +8,27 @@ set -euo pipefail
 
 list() { ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || true; }
 prop() { udevadm info -q property -n "$1" | sed -n "s/^$2=//p"; }
+R=/etc/udev/rules.d/99-robot.rules
+
+# ESP32-S3 on the Pi's GPIO UART (firmware v2.6, setup_pi_uart.sh): /dev/esp32 -> ttyAMA0 comes from
+# 98-esp32-uart.rules, so only the LiDAR needs a USB rule here. Never write an esp32 USB rule then.
+if [ -f /etc/udev/rules.d/98-esp32-uart.rules ] || [ "${ESP32_LINK:-}" = uart ]; then
+  echo "ESP32 is on the GPIO UART (/dev/esp32 -> ttyAMA0): only naming the LiDAR."
+  echo "Keep ONLY the LiDAR plugged into the Pi's USB. Press Enter."
+  read -r _
+  L=$(list)
+  [ "$(echo "$L" | grep -c .)" = 1 ] || { echo "Expected exactly 1 USB serial device (the LiDAR), found: $L"; exit 1; }
+  LV=$(prop "$L" ID_VENDOR_ID); LP=$(prop "$L" ID_MODEL_ID)
+  {
+    echo "# written by setup_ports.sh $(date -I) (ESP32 on the GPIO UART: see 98-esp32-uart.rules)"
+    echo "SUBSYSTEM==\"tty\", ATTRS{idVendor}==\"$LV\", ATTRS{idProduct}==\"$LP\", SYMLINK+=\"rplidar\", MODE=\"0666\""
+  } > "$R"
+  udevadm control --reload-rules && udevadm trigger
+  [ -n "${SUDO_USER:-}" ] && usermod -aG dialout "$SUDO_USER"
+  sleep 2
+  ls -l /dev/rplidar /dev/esp32 && echo "OK. Rules saved in $R"
+  exit 0
+fi
 
 echo "1) UNPLUG the ESP32 USB. Keep ONLY the LiDAR plugged in. Then press Enter."
 read -r _
@@ -29,7 +50,6 @@ EV=$(prop "$ESP" ID_VENDOR_ID);   EP=$(prop "$ESP" ID_MODEL_ID);   EPATH=$(prop 
 echo "   LiDAR chip $LV:$LP  socket $LPATH"
 echo "   ESP32 chip $EV:$EP  socket $EPATH"
 
-R=/etc/udev/rules.d/99-robot.rules
 {
   echo "# written by setup_ports.sh $(date -I)"
   if [ "$LV:$LP" != "$EV:$EP" ]; then

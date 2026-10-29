@@ -9,11 +9,13 @@ or RViz. Wheel-encoder odometry comes from an ESP32.
 |---|---|
 | Compute | Raspberry Pi 4, Ubuntu 22.04, ROS 2 Humble (headless) |
 | LiDAR | Slamtec RPLiDAR A1M8, 360°, 10 Hz, 12 m |
-| Low-level | ESP32-S3 or classic ESP32 (auto pin map): motor PWM, quadrature encoders, PI wheel-speed loop, RC input |
-| Drive | 2 × DC gear motors with encoders (4740 ticks/rev), BTS7960-style H-bridges, 125 mm wheels, 300 mm track |
+| Low-level | ESP32-S3-DevKitC-1, firmware v2.6 (`firmware/robot_esp32s3`, on the Pi's GPIO UART `/dev/ttyAMA0`) or classic ESP32, v2.4 (`firmware/robot_esp32_classic`, USB): motor PWM, quadrature encoders, PI wheel-speed loop, RC input |
+| Drive | 2 × DC gear motors with encoders (~4970 ticks/rev), BTS7960 H-bridges, 125 mm wheels, 300 mm track |
 | Manual | FlySky FS-i6 + FS-iA6 receiver (always overrides software) |
 | Extra sensors (v2.2) | MPU-6050 gyro (heading), 3× HC-SR04 (low obstacles), mushroom e-stop (hardware cut + sense): [hardware/sensors.md](hardware/sensors.md) |
 | SLAM | Cartographer 2D (LiDAR + odometry, or LiDAR-only fallback) |
+| Camera | Camera Module 3 Wide: YOLO11n people detection, slows / stops for people ([docs/STEPS_camera.md](docs/STEPS_camera.md)) |
+| Wiring | every wire, both ends: [hardware/CONNECTIONS_esp32s3.md](hardware/CONNECTIONS_esp32s3.md) |
 
 ![Web dashboard: live map, LiDAR scan, robot trail and a goal being driven to](docs/images/dashboard.png)
 <sub>Web app (here on `tools/dashboard_sim.py`): planned route, place pins, natural-language command, mission queue, LiDAR, e-stop.</sub>
@@ -35,8 +37,10 @@ flowchart LR
     NAV -->|/cmd_vel| BR
     DB -->|/navigator/request| NAV
     DB -->|/cmd_vel_teleop, /estop| BR
+    CAM[vision: camera + YOLO] -->|/vision/decision| NAV
+    CAM -->|camera picture| DB
   end
-  ESP32-S3 <-->|USB serial 115200: ODM / V,P,S,E,R| BR
+  ESP32-S3 <-->|GPIO UART 115200: ODM, IMU, US, BAT / V,P,S,E,R,K,T,L| BR
   LAP[Laptop: RViz2] <-->|DDS over ethernet| CART
   PHONE[Browser / phone] <-->|HTTP| DB
 ```
@@ -49,15 +53,18 @@ stale SLAM pose → goal controller stops in 0.6 s.
 ## Repository layout
 
 ```
-firmware/robot_esp32/        ESP32-S3 / classic ESP32 Arduino sketch (core 2.x and 3.x)
+firmware/robot_esp32s3/      ESP32-S3 sketch v2.6 (the robot's board; Pi link on the GPIO UART)
+firmware/robot_esp32_classic/ classic ESP32 sketch v2.4 (USB link)   · firmware/robot_esp32/: legacy v2.2
 ros2_ws/src/lidar_robot/     ROS 2 package (ament_python)
-  lidar_robot/               esp32_bridge, navigator, dashboard, goal_controller (+ pure-Python logic:
-                             planner, follower, places, commands, missions, navigator_core)
-  lidar_robot/web/           dashboard page (single file, works offline)
+  lidar_robot/               esp32_bridge, navigator, dashboard, goal_controller, vision (+ pure-Python logic:
+                             planner, follower, places, commands, missions, navigator_core, auth, vision_rules)
+  lidar_robot/web/app/       the Pathik app (also bundled in the Android APK, android/); web/index.html = classic page
   config/                    robot_params.yaml, cartographer_{odom,lidar_only,localization}.lua
   launch/bringup.launch.py   one launch file for everything
   test/                      unit tests, controller simulation, bridge-over-pty integration test
-tools/                       serial_probe.py (debug/calibrate ESP32), dashboard_sim.py (UI without robot)
+tools/                       serial_probe.py (debug/calibrate ESP32), dashboard_sim.py (UI without robot),
+                             link_doctor.sh, robot_check.sh, eval_nav.py, eval_commands.py
+scripts/mcp_server.py        MCP server: AI assistants (Claude) can drive the robot ([docs/mcp.md](docs/mcp.md))
 rviz/robot.rviz              RViz2 layout for the laptop
 udev/ scripts/               stable /dev names, laptop ethernet setup, systemd autostart
 hardware/                    pin map, wiring, BOM, CAD, photos
@@ -100,27 +107,17 @@ No robot? `python3 tools/dashboard_sim.py` runs the app against a simulated robo
 
 ## Status
 
-- [x] LiDAR → Cartographer → live map in RViz over ethernet
-- [x] ESP32 firmware v2.2: velocity commands, PI wheel loop, RC override + failsafe, e-stop latch
-- [x] Bridge with reconnect, teleop/nav arbitration, e-stop
-- [x] Web dashboard: joystick, e-stop, live map, save map
-- [x] Navigator: named places + search, A* routes with preview, path following, replanning around
-      obstacles, priority mission queue, NL commands (LLM + offline fallback), failure reason codes
-      ([docs/navigation.md](docs/navigation.md)), tested in simulation
-- [x] Localization on a saved map (Cartographer pure localization + operator confirmation)
-- [x] Firmware v2.2 + Pi support for MPU-6050, 3× ultrasonic, e-stop button (wiring: hardware/sensors.md)
-- [x] Pathik mobile app + Tuning Lab (live PID, step/straight/spin tests), firmware v2.3
-- [x] Frontier exploration (Map by itself) with map auto-save, tested in simulation
-- [x] Remote access over mobile data (Tailscale), app keeps working on slow links
-- [x] Encoder odometry verified on hardware (directions, ticks per rev, 50 Hz into Cartographer)
-- [x] v2.4: real body shape in planning and driving (rectangle, axle at the front), 3-point turns,
-      0 wall contacts in `tools/eval_nav.py` (old: 3); battery (INA226) + auto-charge on a dock
-      ([hardware/battery_dock.md](hardware/battery_dock.md)); rooms with contents; schedules;
-      "wait for OK" stops; "why did you stop?"; mission log; MCP server ([docs/mcp.md](docs/mcp.md))
-- [ ] Measure the real footprint, fit the INA226, build the dock, flash firmware v2.4
-- [ ] Wheel separation and speed-loop tuning with the Tuning Lab (calibration: [docs/calibration.md](docs/calibration.md))
-- [ ] Navigator verified on the real robot and floor
-- [ ] LLM error recovery + campus app — see [docs/roadmap.md](docs/roadmap.md)
+Done and verified on the robot (classic ESP32 build, Oct 2026):
+- [x] LiDAR → Cartographer → live map (15.5 × 12.2 m floor), ESP32 link ~50 Hz, encoder odometry, ultrasonics
+- [x] Navigator driving: places, A* routes, path following, priority mission queue, NL commands
+- [x] Pathik app on the phone; ESP32-S3 v2.6 on the Pi's GPIO UART (ODM / US lines verified on `/dev/ttyAMA0`)
+
+Done in code + tests, still to be tried on the robot (see [docs/WORK_LEFT.md](docs/WORK_LEFT.md)):
+- [x] Logins with roles (staff / operator / admin), Docker image + CI, MCP server
+- [x] Real body shape in planning, 3-point turns, battery + dock, rooms with contents, schedules, "why did you stop?", mission log
+- [x] Camera people avoidance (Camera Module 3 + YOLO11n, LiDAR distance) + camera view in the app
+- [x] Frontier exploration (Map by itself), Tuning Lab, remote access over Tailscale
+- [ ] IMU on the S3 (not detected yet), footprint + wheel separation measured, front docking, voice, LLM error recovery
 
 ## Tests
 

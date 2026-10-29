@@ -23,7 +23,8 @@ isn't wired yet (`USE_IMU`, `USE_ULTRASONIC`, `USE_ESTOP_BUTTON` at the top of t
 | **Ultrasonic ECHO L / C / R** | **23 / 27 / 15** | **5 V signal: must go through the level shifter** |
 | Free for later | 36 (battery voltage ADC), 39 | |
 
-(ESP32-S3 pins are in the sketch: SDA 1, SCL 2, e-stop 41, TRIG 13/14/21, ECHO 38/39/40.)
+(The pins in this file are the classic ESP32's. ESP32-S3 v2.6: SDA 11, SCL 12, e-stop 42, TRIG 13/14/21,
+ECHO 39/40/41: see [CONNECTIONS_esp32s3.md](CONNECTIONS_esp32s3.md).)
 
 The new pins were chosen around the ESP32's boot quirks. Nothing new sits on 0, 2, 12 (they affect
 booting/flashing) or on the flash pins 6–11. Echoes avoid 36/39, which glitch once the ADC is used

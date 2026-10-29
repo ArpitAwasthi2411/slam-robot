@@ -22,7 +22,7 @@
    when low, reverses onto the dock and confirms by charging current ([hardware/battery_dock.md](../hardware/battery_dock.md)).
 
 ## Later (project polish / report)
-9. **RC mode switch on CH5/CH6**: a physical MANUAL / AUTO / E-STOP switch on the transmitter
+9. **RC mode switch on CH5/CH6** (docs/WORK_LEFT.md A9): a physical MANUAL / AUTO / E-STOP switch on the transmitter
    (one more GPIO + a few lines in `loop()`).
 10. **ros2_control + diff_drive_controller** with a hardware interface for the ESP32: the
     "industry-standard" way, and good for the report.
@@ -45,4 +45,7 @@
 - The obstacle stop looks forward (±25°); the v2.4 body checks use the full 360° scan near the robot.
   Reversing is commanded only for short 3-point turns and docking, at ≤ 6 cm/s, with the scan checked first.
   Things below the LiDAR plane behind the robot are not seen (no rear ultrasonic).
-- The dashboard has no login. Anyone on the robot's network can drive it. Fine on a direct cable; add auth before using shared Wi-Fi.
+- ~~No login~~ **done**: every API call needs a login with a role (staff / operator / admin, `auth.py`);
+  the first account is the admin, later sign-ups wait for approval. The classic page (`/classic`) uses the same login.
+- The link to the Pi is plain HTTP inside the robot's network or Tailscale (encrypted by WireGuard).
+  Only Tailscale Funnel (public HTTPS) exposes it to the internet: see docs/STEPS_remote_control.md.

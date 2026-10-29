@@ -11,7 +11,8 @@ source /opt/pathik_ws/install/setup.bash
 case "${1:-robot}" in
   robot)
     echo "[pathik] version ${PATHIK_VERSION:-dev}  ROS_DOMAIN_ID=${ROS_DOMAIN_ID}  args: ${ROBOT_ARGS:-<none>}"
-    # shellcheck disable=SC2086  (ROBOT_ARGS is a list of launch arguments)
+    # ROBOT_ARGS is a list of launch arguments: split on purpose
+    # shellcheck disable=SC2086
     exec ros2 launch lidar_robot bringup.launch.py ${ROBOT_ARGS}
     ;;
   users)

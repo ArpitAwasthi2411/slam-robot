@@ -27,6 +27,11 @@ JSON request API (handle):
   {"type": "schedule_add", "name": "Patrol", "at": "10:00", "days": [0,1,2,3,4], "action": {...}}
   {"type": "schedule_delete", "id": 1} / {"type": "schedule_enable", "id": 1, "on": false}
   {"type": "mission_log", "n": 50}       evaluation records + summary stats
+  {"type": "goto_poses", "waypoints": [{"x":..,"y":..,"label":..}], "repeat": -1..99}   route / patrol (-1)
+  {"type": "check_path", "points": [[x, y], ...]}  /  {"type": "follow_path", "points": [...], "repeat": 0}
+  {"type": "explore_start", "speed": .18, "turn_speed": .45, "scan_spin": true}  /  {"type": "explore_stop"}
+  {"type": "get_tune"}  /  {"type": "tune", "follower": {...}, "save": true}     path-follower tuning
+  {"type": "find", ...}, {"type": "schedule_list"}, {"type": "search", "q": ...}
 
 Failure reason codes (for logs, the dashboard and future LLM error recovery):
   NO_MAP, NO_PATH, GOAL_IN_OBSTACLE, OUTSIDE_MAP, START_BLOCKED, BLOCKED, POSE_LOST, ESTOP, UNKNOWN_PLACE,
@@ -471,6 +476,8 @@ class NavigatorCore:
             res['plan'] = self._plan_summary(c)
             return res
         if c['intent'] == 'stop':
+            if self.explore.get('active'):            # "stop" also ends Map by itself
+                self._explore_stop('stopped by command')
             self.queue.cancel()
             self.follower.clear()
             self._set(IDLE, 'stopped by command')
@@ -1000,8 +1007,11 @@ class NavigatorCore:
         if not (self.auto_return_s and h) or self.estopped:
             return
         if now - self._idle_since > self.auto_return_s and math.hypot(pose[0] - h['x'], pose[1] - h['y']) > 0.5:
-            self._go_home(0, 'auto-home')
             self._idle_since = now
+            try:
+                self._go_home(0, 'auto-home')
+            except ValueError as e:                 # e.g. battery critical: never crash the control loop
+                self._log(f'auto-return home skipped: {e}', 'warn')
 
     # ---------------------------------------------------------------- status
     def _set(self, state, message):

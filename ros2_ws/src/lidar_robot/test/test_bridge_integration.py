@@ -324,3 +324,23 @@ def test_link_drops_are_classified():
         assert st['drops']['usb'] >= 1, st['drops']
     finally:
         node.destroy_node()
+
+
+def test_non_finite_command_is_ignored_and_timer_survives():
+    """A NaN/inf twist (from any publisher) must not reach format_velocity, which would raise in the timer."""
+    esp = FakeEsp32()
+    node, timers = make_bridge(esp.path)
+    try:
+        pump(timers, 0.3)
+        for bad in (float('nan'), float('inf')):
+            node.subs['cmd_vel_teleop'](twist(bad, 0.0))
+            node.subs['cmd_vel'](twist(0.1, bad))
+            pump(timers, 0.1)                       # would raise ValueError before the fix
+        assert node.cmd_source == 'none'
+        assert not any('nan' in line.lower() or 'inf' in line.lower() for line in esp.sent('V,'))
+        node.subs['cmd_vel'](twist(0.2, 0.0))       # good commands still work afterwards
+        pump(timers, 0.1)
+        assert esp.sent('V,')[-1] == 'V,200,200'
+    finally:
+        node.running = False
+        esp.unplug()
