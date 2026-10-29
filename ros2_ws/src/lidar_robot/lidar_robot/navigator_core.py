@@ -32,8 +32,12 @@ JSON request API (handle):
   {"type": "explore_start", "speed": .18, "turn_speed": .45, "scan_spin": true}  /  {"type": "explore_stop"}
   {"type": "get_tune"}  /  {"type": "tune", "follower": {...}, "save": true}     path-follower tuning
   {"type": "find", ...}, {"type": "schedule_list"}, {"type": "search", "q": ...}
+  {"type": "recovery_answer", "id": 3, "choice": "retry|wait|skip|home|dock|cancel"}   reply to "ask a person"
 
-Failure reason codes (for logs, the dashboard and future LLM error recovery):
+Error recovery (recovery.py): when a mission step fails with a recoverable code, the robot stops (state
+RECOVERING) and the LLM (or the rules) picks one action from a fixed menu; see status()['recovery'].
+
+Failure reason codes (for logs, the dashboard and LLM error recovery):
   NO_MAP, NO_PATH, GOAL_IN_OBSTACLE, OUTSIDE_MAP, START_BLOCKED, BLOCKED, POSE_LOST, ESTOP, UNKNOWN_PLACE,
   DOCK_NO_CONTACT
 """
@@ -52,6 +56,7 @@ from lidar_robot.explorer import ExploreParams, find_frontiers, choose_goal, map
 from lidar_robot.follower import FollowerParams, PathFollower
 from lidar_robot.missions import Mission, MissionQueue, Stop
 from lidar_robot.planner import Planner, PlannerParams, path_length
+from lidar_robot.recovery import RECOVERABLE, Recovery, describe, rule_decide, validate
 from lidar_robot.tuning import (TuningStore, apply_follower, follower_values, ranges_for_app,
                                 FOLLOWER_RANGES)
 
@@ -59,7 +64,11 @@ IDLE, PLANNING, DRIVING, DWELL, WAITING = 'IDLE', 'PLANNING', 'DRIVING', 'DWELL'
 SCANNING = 'SCANNING'          # exploration: turning slowly on the spot so the LiDAR sees every wall
 CONFIRM = 'CONFIRM'            # at a stop, waiting for someone to press OK
 DOCKING, UNDOCKING, CHARGING = 'DOCKING', 'UNDOCKING', 'CHARGING'
-BATTERY_SOURCES = ('battery', 'auto-home', 'explore-return')
+RECOVERING = 'RECOVERING'      # a step failed: stopped while the recovery planner decides / acts
+BATTERY_SOURCES = ('battery', 'auto-home', 'explore-return', 'recovery')
+ANSWERS = {'retry': ('wait_retry', {'wait_s': 3}, 'Try again'), 'wait': ('wait_retry', {'wait_s': 60}, 'Wait 1 min, then try'),
+           'skip': ('skip_stop', {}, 'Skip this stop'), 'home': ('go_home', {}, 'Go home'),
+           'dock': ('go_dock', {}, 'Go and charge'), 'cancel': (None, {}, 'Cancel the mission')}
 
 
 def _reason_code(planner_error):
@@ -79,7 +88,7 @@ class NavigatorCore:
     def __init__(self, places, planner_params=None, follower_params=None, parser=None,
                  dwell_s=3.0, auto_return_s=0.0, max_replans=3, plan_retry_s=2.0, max_plan_attempts=3,
                  clock=time.monotonic, tuning_path=None, footprint=None, data_dir=None, battery=None,
-                 localtime=time.localtime, confirm_timeout_s=300.0, dock_offset=0.55):
+                 localtime=time.localtime, confirm_timeout_s=300.0, dock_offset=0.55, recovery=None):
         self.places = places
         self.planner = Planner(planner_params or PlannerParams())
         self.follower = PathFollower(follower_params or FollowerParams())
@@ -132,6 +141,9 @@ class NavigatorCore:
         self.dock_offset = dock_offset           # m in front of the dock where the reverse starts
         self.docked = False
         self._dock = None
+        self.localtime = localtime
+        self.rec = recovery or Recovery(mode='off')      # error recovery (off unless the node/sim turns it on)
+        self.rec.clock = clock
 
     # ---------------------------------------------------------------- inputs
     def set_map(self, grid):
@@ -170,6 +182,10 @@ class NavigatorCore:
             self.mlog.bump(self.queue.active, 'estops')
             self.estopped = True
             self.hold = True
+            if self.rec.busy():
+                self.rec.cancel('e-stop')
+            if self.state == RECOVERING:
+                self.state = WAITING
             if self.queue.active:
                 self.queue.preempt()
                 self.queue.queue[0].message = 'paused by e-stop' if self.queue.queue else ''
@@ -257,6 +273,8 @@ class NavigatorCore:
                     self._explore_stop('canceled')
                 n = self.queue.cancel(req.get('id'))
                 if not self.queue.active:
+                    if self.rec.busy():
+                        self.rec.cancel('canceled')
                     self.follower.clear()
                     self._set(IDLE, 'canceled')
                 self._log(f'canceled {n} mission(s)')
@@ -387,6 +405,8 @@ class NavigatorCore:
                 n = max(1, min(300, int(req.get('n', 50))))
                 inc = bool(req.get('include_explore'))
                 return {'ok': True, 'missions': self.mlog.recent(n, inc), 'stats': self.mlog.stats(inc)}
+            if t == 'recovery_answer':
+                return self._recovery_answer(req)
             if t == 'search':
                 return {'ok': True, 'results': [{'score': s, **p} for s, p in self.places.search(req.get('q', ''), limit=8, min_score=0.35)]}
             return {'ok': False, 'error': f'unknown request type {t!r}'}
@@ -414,6 +434,8 @@ class NavigatorCore:
     def _cancel_all(self, why):
         if self.explore.get('active'):
             self._explore_stop(why)
+        if self.rec.busy():
+            self.rec.cancel(why)
         n = self.queue.cancel(None)
         self.follower.clear()
         self._set(IDLE, why)
@@ -479,6 +501,8 @@ class NavigatorCore:
             if self.explore.get('active'):            # "stop" also ends Map by itself
                 self._explore_stop('stopped by command')
             self.queue.cancel()
+            if self.rec.busy():
+                self.rec.cancel('stopped by command')
             self.follower.clear()
             self._set(IDLE, 'stopped by command')
         elif c['intent'] == 'return_home':
@@ -575,6 +599,10 @@ class NavigatorCore:
             if self.queue.active or self.queue.queue:
                 self._set(WAITING, 'check the scan matches the map, then press "Position OK"')
             return 0.0, 0.0
+        if self.state == RECOVERING:
+            if pose is None:
+                self._pose_lost_for += dt
+            return self._recovery_tick(pose, now)
         if pose is None:
             self._pose_lost_for += dt
             if self.queue.active:
@@ -668,6 +696,15 @@ class NavigatorCore:
         v, w, event = self.follower.step(pose, front_clearance, dt, guard=guard)
         if event == 'ARRIVED':
             m.skips = 0
+            if m.current.via:                         # recovery detour point: straight on to the real stop
+                self._log(f'passed {m.current.label}')
+                self.follower.clear()
+                m.stops.pop(m.next_stop)
+                self._set(PLANNING, f'next stop: {m.current.label}')
+                return 0.0, 0.0
+            if self.rec.busy() and self.rec.current.get('mission') == m.id:
+                self.rec.resolve('recovered')
+                self._log(f'recovered: reached {m.current.label}')
             if m.current.dock:
                 self.follower.clear()
                 self._dock = {'t0': now, 'contact_t': None}
@@ -724,8 +761,13 @@ class NavigatorCore:
             path = drawn_path.route_from_pose(self.planner, pose, stop.path,
                                               from_nearest=bool(self._replans), extra_obstacles=extra)
         else:
-            path = self.planner.plan(pose[:2], (stop.x, stop.y), extra)
-            if path is not None and self.body_checks:
+            path = None
+            if stop.margin:                          # recovery: a wider berth than usual, if one exists
+                path = self.planner.plan(pose[:2], (stop.x, stop.y), extra,
+                                         radius=self.planner.p.robot_radius + stop.margin)
+            if path is None:
+                path = self.planner.plan(pose[:2], (stop.x, stop.y), extra)
+            if path is not None and self.body_checks and not stop.margin:
                 path, bad = self._fit_body(path, pose, stop, extra)
         if path is None:
             m.attempts += 1
@@ -863,6 +905,15 @@ class NavigatorCore:
 
     def _fail(self, code, text):
         m = self.queue.active
+        if (m and m.current and self.rec.enabled and code in RECOVERABLE and m.source != 'explore'
+                and not m.skip_unreachable and not self.estopped and self._start_recovery(m, code, text)):
+            return
+        self._fail_now(code, text)
+
+    def _fail_now(self, code, text):
+        m = self.queue.active
+        if self.rec.busy():
+            self.rec.resolve('failed', 'failed')
         self.follower.clear()
         self._replans = 0
         if m and m.skip_unreachable and m.skips + 1 < len(m.stops) and code != 'POSE_LOST':
@@ -896,6 +947,209 @@ class NavigatorCore:
         self._set(IDLE, f'failed: {text}')
         self.last_failure = {'code': code, 'text': text, 'mission': m.summary() if m else None, 't': time.time()}
         self._idle_since = self.clock()
+
+    # ---------------------------------------------------------------- error recovery
+    def _start_recovery(self, m, code, text):
+        if self.rec.busy():                            # the last recovery did not work
+            self.rec.resolve('failed_again', 'failed')
+        if m.current.via:                              # the detour itself failed: drop it, count the real stop
+            m.stops.pop(m.next_stop)
+            if m.current is None:
+                return False
+        used, here = self.rec.tries(m.id, m.current.label)
+        if used >= self.rec.max_per_mission:
+            self._log(f'no recovery left for mission #{m.id} ({used} used)', 'warn')
+            return False
+        ctx = self._recovery_context(m, code, text, here, used)
+        self.follower.clear()
+        self._replans = 0
+        m.attempts = 0
+        if code == 'POSE_LOST':
+            self._pose_lost_for = 0.0
+        self.rec.start(ctx)
+        self.last_failure = {'code': code, 'text': text, 'mission': m.summary(), 't': time.time(), 'recovering': True}
+        self._set(RECOVERING, f'{code} at {m.current.label}: deciding what to do')
+        self._log(f'{m.current.label}: {text} -> recovering ({self.rec.mode})', 'warn')
+        return True
+
+    def _recovery_context(self, m, code, text, tries_here, tries_mission):
+        pose = self._pose
+        st = m.current
+        b = self.battery.info()
+        lt = self.localtime()
+        room = self.places.room_at(*pose[:2]) if pose else None
+        return {
+            'failure': {'code': code, 'text': text, 'place': st.label, 'stop_index': m.next_stop},
+            'mission': {'id': m.id, 'text': m.text, 'stops': [s.label for s in m.stops], 'next_stop': m.next_stop,
+                        'priority': m.priority, 'source': m.source, 'round': m.round, 'repeat': m.repeat},
+            'queue': [{'id': q.id, 'text': q.text, 'priority': q.priority} for q in self.queue.queue[:5]],
+            'battery': {'pct': b.get('pct'), 'level': b.get('level'), 'charging': b.get('charging')},
+            'time': time.strftime('%H:%M %A', lt),
+            'robot': {'x': round(pose[0], 2), 'y': round(pose[1], 2), 'room': room['name'] if room else None}
+            if pose else None,
+            'history': {'this_place': self.rec.place_history(st.label),
+                        'recent': [{'place': h['place'], 'code': h['code'], 'action': h['action'], 'outcome': h['outcome']}
+                                   for h in self.rec.history[:5]]},
+            'tries_here': tries_here, 'tries_mission': tries_mission, 'max_tries': self.rec.max_per_mission,
+            'alternatives': self._alternatives(st, pose) if code in ('BLOCKED', 'NO_PATH') else [],
+            'home_set': bool(self.places.home), 'dock_set': bool(self.places.dock),
+            'going_home': st.label == 'home',
+        }
+
+    def _alternatives(self, stop, pose):
+        """Detour waypoints: saved places from which the stop is reachable, by total route length."""
+        if not pose or not self.planner.has_map():
+            return []
+        extra = self._dynamic_obstacles()
+        cands = list(self.places.places) + ([dict(self.places.home, name='home')] if self.places.home else [])
+        def far(c):
+            return (math.hypot(c['x'] - stop.x, c['y'] - stop.y) > 1.0 and
+                    math.hypot(c['x'] - pose[0], c['y'] - pose[1]) > 1.0)
+        cands = sorted([c for c in cands if far(c)],
+                       key=lambda c: math.hypot(c['x'] - pose[0], c['y'] - pose[1]) + math.hypot(c['x'] - stop.x, c['y'] - stop.y))[:6]
+        out = []
+        for c in cands:
+            a = self.planner.plan(pose[:2], (c['x'], c['y']), extra)
+            b = self.planner.plan((c['x'], c['y']), (stop.x, stop.y), extra) if a else None
+            if a and b:
+                out.append({'label': c['name'], 'x': round(c['x'], 2), 'y': round(c['y'], 2),
+                            'length_m': round(path_length(a) + path_length(b), 1)})
+        out.sort(key=lambda o: o['length_m'])
+        for i, o in enumerate(out[:3]):
+            o['id'] = f'via{i + 1}'
+        return out[:3]
+
+    def _recovery_tick(self, pose, now):
+        m = self.queue.active
+        r = self.rec.current
+        if m is None or r is None:
+            if self.rec.busy():
+                self.rec.cancel('mission gone')
+            self._set(IDLE, 'idle')
+            return 0.0, 0.0
+        if r['status'] == 'deciding':
+            d = self.rec.poll()
+            if d is None:
+                self.message = 'deciding what to do'
+                return 0.0, 0.0
+            return self._apply_recovery(m, d, now)
+        if r['status'] == 'asking':
+            if r['_until'] is not None and now > r['_until']:
+                self._log('nobody answered in the app: the rules decide', 'warn')
+                d = rule_decide(r['_ctx'], exclude=('ask_person',))
+                r['why'] = 'nobody answered in the app; ' + (d['reason'] if d else 'nothing left to try')
+                r['source'] = 'rules'
+                return self._apply_recovery(m, d or {'action': None, 'params': {}, 'say': ''}, now)
+            self.message = f'at {m.current.label if m.current else "?"}: waiting for an answer in the app'
+            return 0.0, 0.0
+        if r['status'] == 'running' and r['_until'] is not None and now < r['_until']:
+            self.message = r['doing']
+            return 0.0, 0.0
+        if pose is None:                               # still lost: keep waiting, the pose timer decides
+            self._set(WAITING, 'position lost, waiting for it to come back')
+            return 0.0, 0.0
+        self._set(PLANNING, f'trying {m.current.label} again' if m.current else 'recovering')
+        return 0.0, 0.0
+
+    def _apply_recovery(self, m, d, now):
+        r = self.rec.current
+        ctx = r['_ctx']
+        code, text = ctx['failure']['code'], ctx['failure']['text']
+        a, p = d.get('action'), d.get('params') or {}
+        if a is None:
+            self._fail_now(code, text)
+            return 0.0, 0.0
+        self.mlog.rec(m)['recoveries'].append({'code': code, 'place': ctx['failure']['place'], 'action': a,
+                                               'params': p, 'source': r['source'], 'reason': d.get('reason', ''),
+                                               't': round(time.time(), 1)})
+        alt = next((o for o in ctx.get('alternatives', []) if o['id'] == p.get('via')), None)
+        doing = describe(a, p, ctx, alt and alt['label'])
+        self._log(f'recovery ({r["source"]}): {doing} {("- " + d["reason"]) if d.get("reason") else ""}'.strip(), 'warn')
+        if d.get('say'):
+            self.say_queue.append(('recovery', d['say']))
+        if a == 'wait_retry':
+            self.rec.running(doing, until=now + p['wait_s'])
+            self.message = doing
+            return 0.0, 0.0
+        if a == 'replan_wide':
+            m.current.margin = p['margin_m']
+            self.rec.running(doing)
+        elif a == 'alt_route':
+            m.stops.insert(m.next_stop, Stop(f'via {alt["label"]}', alt['x'], alt['y'], None, via=True))
+            self.rec.running(doing)
+        elif a == 'ask_person':
+            opts = [o for o in ANSWERS.items() if o[1][0] is None or o[1][0] in ctx['allowed'] or o[0] in ('retry', 'wait')]
+            self.rec.asking(p.get('question') or doing, [(k, v[2], k == 'retry') for k, v in opts])
+            self.rec.current['doing'] = 'Waiting for someone to choose in the app.'
+            self.say_queue.append(('recovery_ask', p.get('question') or 'I need help. Please check the app.'))
+            self.message = 'waiting for an answer in the app'
+            return 0.0, 0.0
+        elif a == 'skip_stop':
+            self.rec.running(doing)
+            self.rec.resolve('skipped')
+            self.mlog.bump(m, 'skipped')
+            m.next_stop += 1
+            if m.current is None:
+                self.queue.finish('DONE', f'finished, {ctx["failure"]["place"]} skipped after {code}')
+                self._mission_ended(m, True)
+                self._set(IDLE, f'mission #{m.id} finished ({ctx["failure"]["place"]} skipped)')
+                self._idle_since = self.clock()
+                return 0.0, 0.0
+        elif a == 'reorder':
+            self.rec.running(doing)
+            self.rec.resolve('postponed')
+            if self.queue.queue:
+                m.state, m.message, m.created = 'QUEUED', f'postponed after {code}', time.time()
+                self.queue.queue.append(m)
+                self.queue.queue.sort(key=lambda q: (-q.priority, q.created, q.id))
+                self.queue.active = None
+                self._set(IDLE, 'postponed this task, the next one goes first')
+                return 0.0, 0.0
+            m.stops.append(m.stops.pop(m.next_stop))
+        elif a in ('go_home', 'go_dock'):
+            self.rec.running(doing)
+            self.rec.resolve('gave_up_' + a[3:])
+            m.message = f'{code}: {text} (recovery: {a})'
+            self.queue.finish('FAILED', m.message)
+            self._mission_ended(m, False)
+            self.last_failure = {'code': code, 'text': text, 'mission': m.summary(), 't': time.time()}
+            try:
+                (self._go_dock if a == 'go_dock' else self._go_home)(2, 'recovery')
+            except ValueError as e:
+                self._log(f'recovery {a} not possible: {e}', 'error')
+            self._set(IDLE, doing)
+            return 0.0, 0.0
+        self._set(PLANNING, doing)
+        return 0.0, 0.0
+
+    def _recovery_answer(self, req):
+        r = self.rec.current
+        if not r or r['status'] != 'asking':
+            raise ValueError('nothing is waiting for an answer')
+        if req.get('id') is not None and int(req['id']) != r['id']:
+            raise ValueError('that question was already answered')
+        choice = str(req.get('choice') or '')
+        if choice not in ANSWERS:
+            raise ValueError(f'choice must be one of {", ".join(ANSWERS)}')
+        action, params, label = ANSWERS[choice]
+        who = self._req_by or 'someone'
+        self._log(f'{who} answered in the app: {label}')
+        r['why'] = f'{who} chose "{label}" in the app'
+        r['source'] = 'person'
+        m = self.queue.active
+        if action is None:
+            self.rec.resolve('canceled_by_person')
+            if m:
+                self.queue.cancel(m.id)
+            self.follower.clear()
+            self._set(IDLE, 'mission canceled from the app')
+            return {'ok': True, 'canceled': True}
+        d = validate({'action': action, 'params': params, 'reason': r['why']},
+                     dict(r['_ctx'], allowed=list(set(r['_ctx']['allowed']) | {'wait_retry'})))
+        r['status'] = 'deciding'
+        if m:
+            self._apply_recovery(m, d, self.clock())
+        return {'ok': True, 'action': action}
 
     # ---------------------------------------------------------------- exploration
     def _explore_start(self, req, pose):
@@ -1044,6 +1298,7 @@ class NavigatorCore:
                         if (self.state == CONFIRM and m and m.current) else None),
             'schedules': self.schedules.summary(),
             'log_stats': self.mlog.stats(),
+            'recovery': self.rec.public(), 'recovery_mode': self.rec.mode,
         }
 
 

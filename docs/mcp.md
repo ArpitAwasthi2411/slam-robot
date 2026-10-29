@@ -3,7 +3,7 @@
 `scripts/mcp_server.py` is a small [Model Context Protocol](https://modelcontextprotocol.io) server.
 It runs on your laptop, talks to the robot's HTTP API, and gives an assistant like Claude 13 tools:
 `robot_status`, `list_places`, `go_to`, `go_to_thing`, `command`, `find_thing`, `explain`, `cancel`,
-`go_home`, `charge`, `confirm_ok`, `schedule`, `mission_stats`. No packages to install.
+`go_home`, `charge`, `confirm_ok`, `answer_robot` (reply when the robot asks for help after a failure), `schedule`, `mission_stats`. No packages to install.
 
 ## Claude Desktop
 Settings → Developer → Edit config, add:

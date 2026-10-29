@@ -29,6 +29,7 @@ from lidar_robot.kinematics import wrap_angle                     # noqa: E402
 from lidar_robot.mapsave import save_map                          # noqa: E402
 from lidar_robot.navigator_core import NavigatorCore              # noqa: E402
 from lidar_robot.places import PlaceStore                         # noqa: E402
+from lidar_robot.recovery import Recovery, RecoveryLLM             # noqa: E402
 from lidar_robot.planner import GridMap                           # noqa: E402
 from lidar_robot.tuning import (TelemetryBuffer, TestRunner, WheelSim, WHEEL_RANGES,  # noqa: E402
                                 clamp_values, ranges_for_app)
@@ -101,7 +102,7 @@ def build_world():
 
 
 class SimBackend:
-    def __init__(self, explore=False, start_thread=True, clock=time.monotonic, data_dir=None):
+    def __init__(self, explore=False, start_thread=True, clock=time.monotonic, data_dir=None, recovery=None):
         # data_dir: where the simulated robot keeps places, schedules, mission log and tuning (reset at
         # every start). Default: the repo's maps/ folder; tests pass a temporary folder.
         maps = data_dir or os.path.join(HERE, '..', 'maps')
@@ -135,8 +136,17 @@ class SimBackend:
         for f in ('missions.jsonl', 'schedules.json'):
             if os.path.exists(os.path.join(sim_dir, f)):
                 os.remove(os.path.join(sim_dir, f))
+        # error recovery like on the robot: LLM when GROQ_API_KEY is set, otherwise the rules
+        if recovery is None:
+            recovery = Recovery(llm=RecoveryLLM(os.environ.get('GROQ_API_KEY'),
+                                                model=os.environ.get('RECOVERY_MODEL', 'llama-3.3-70b-versatile')),
+                                mode=os.environ.get('RECOVERY_MODE', 'llm'))
         self.nav = NavigatorCore(self.places, parser=parser, dwell_s=2.0, footprint=FP, data_dir=sim_dir, clock=clock,
-                                 tuning_path=os.path.join(maps, 'sim_tuning.json'))
+                                 tuning_path=os.path.join(maps, 'sim_tuning.json'), recovery=recovery)
+        # scripted trouble (tools/eval_recovery.py): [x, y, radius, until_t] obstacles, and position dropouts
+        self.blocks = []
+        self.pose_drop_until = -1.0
+        self._t = 0.0
         self.outline = FP.outline(0.05)
         self.bumps = 0
         self.bat_v = 11.9                         # 3S pack, ~70 %
@@ -169,6 +179,9 @@ class SimBackend:
         gx, gy = int((x - ORIGIN[0]) / RES), int((y - ORIGIN[1]) / RES)
         if not (0 <= gx < W and 0 <= gy < H):
             return True
+        for bx, by, br, until in self.blocks:                 # a person / trolley / box (not on the map)
+            if (until is None or self._t < until) and (x - bx) ** 2 + (y - by) ** 2 < br * br:
+                return True
         return self.world[gy][gx]
 
     def _body_hits(self, x, y, yaw):
@@ -200,8 +213,8 @@ class SimBackend:
                 px, py = self.x + r * ca, self.y + r * sa
                 gx, gy = int((px - ORIGIN[0]) / RES), int((py - ORIGIN[1]) / RES)
                 if self._occupied(px, py):
-                    if 0 <= gx < W and 0 <= gy < H:
-                        self.known[gy * W + gx] = 101
+                    if 0 <= gx < W and 0 <= gy < H and self.world[gy][gx]:
+                        self.known[gy * W + gx] = 101     # people / boxes (self.blocks) never go into the map
                     pts.append((round(r * math.cos(a), 3), round(r * math.sin(a), 3)))
                     if r < 3.0:
                         world_pts.append((px, py))
@@ -240,6 +253,7 @@ class SimBackend:
 
     def tick(self, dt, t0):
         """One 20 ms physics + navigator step (also used by tools/eval_nav.py, faster than real time)."""
+        self._t = t0
         if t0 - self._last_scan > 0.1:
             self.scan_pts, world_pts, self.front = self._scan()
             self.us = [self._ray(m) for m in US_MOUNTS]
@@ -251,7 +265,7 @@ class SimBackend:
         if t0 - self._last_map > 1.0:
             self._push_map()
             self._last_map = t0
-        pose = (self.x, self.y, self.yaw)
+        pose = None if t0 < self.pose_drop_until else (self.x, self.y, self.yaw)
         nav_cmd = self.nav.step(pose, self.front, dt)
         self.autosave.update(self.nav.explore)
         (tv, tw), tt = self.teleop

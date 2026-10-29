@@ -469,6 +469,7 @@ function onState(st) {
   else if (link.esp_mode === 'RC') { mode = 'Remote control'; cls = 'rc'; }
   else if (st.test_running) { mode = 'Running test'; cls = 'auto'; }
   else if (navs.state === 'CONFIRM') { mode = 'Waiting for OK'; cls = 'wait'; }
+  else if (navs.state === 'RECOVERING') { mode = navs.recovery && navs.recovery.status === 'asking' ? 'Needs help · see Home' : 'Recovering'; cls = 'wait'; }
   else if (navs.state === 'DOCKING') { mode = 'Docking'; cls = 'auto'; }
   else if (navs.state === 'UNDOCKING') { mode = 'Leaving dock'; cls = 'auto'; }
   else if (navs.state === 'CHARGING') { mode = navs.battery && navs.battery.charging ? 'Charging' : 'On the dock'; cls = ''; }
@@ -1937,10 +1938,11 @@ async function loadLog() {
       ['Avg time', secs(s.avg_duration_s)], ['Avg speed', fin(s.avg_speed_mps) ? `${fmt(s.avg_speed_mps, 2)} m/s` : '–'],
       ['Path efficiency', pc(s.path_efficiency)], ['Replans / mission', fin(s.avg_replans) ? fmt(s.avg_replans, 1) : '–'],
       ['Distance', `${fmt(s.total_distance_m, 0)} m`], ['Bumps · e-stops', `${s.bumps || 0} · ${s.estops || 0}`],
+      ['Recoveries', `${s.recoveries || 0} · ${s.recovered || 0} missions saved`],
     ].map(([k, v]) => `<div class="tile"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
     $('#l-list').innerHTML = logRows.length ? logRows.slice(0, 40).map(m => `
       <li class="${esc(m.result)}"><span class="l-top"><span>${esc(m.text || m.stops.join(' → '))}</span><span>${esc(m.result.toLowerCase())}</span></span>
-      <span class="l-sub">${clock(m.started)} · ${secs(m.duration_s)} · ${fmt(m.distance_m, 1)} m driven / ${fmt(m.planned_m, 1)} m planned · ${m.replans} replans${m.bumps ? ` · ${m.bumps} bumps` : ''}${m.reason && m.result !== 'DONE' ? ` · ${esc(m.reason)}` : ''}</span></li>`).join('')
+      <span class="l-sub">${clock(m.started)} · ${secs(m.duration_s)} · ${fmt(m.distance_m, 1)} m driven / ${fmt(m.planned_m, 1)} m planned · ${m.replans} replans${m.bumps ? ` · ${m.bumps} bumps` : ''}${m.recoveries && m.recoveries.length ? ` · recovered by ${esc(m.recoveries.map(r => r.action.replace('_', ' ')).join(', '))}` : ''}${m.reason && m.result !== 'DONE' ? ` · ${esc(m.reason)}` : ''}</span></li>`).join('')
       : '<li class="empty muted">No finished missions yet.</li>';
   } catch (e) { toast(e.message, true); }
 }
@@ -1979,7 +1981,9 @@ const LIGHT = { auto: 'auto', wait: 'wait', estop: 'bad', rc: 'wait', '': 'ok' }
 function renderHome(st) {
   const n = st.nav || {}, b = n.battery || {}, mode = $('#t-mode');
   const offline = S.fails >= 3;
-  $('#h-state').textContent = offline ? 'out of reach' : mode.textContent.replace(/ · why\?$/, '').toLowerCase();
+  $('#h-state').textContent = offline ? 'out of reach'
+    : n.state === 'RECOVERING' ? (n.recovery && n.recovery.status === 'asking' ? 'asking for help' : 'recovering')
+    : mode.textContent.replace(/ · why\?$/, '').toLowerCase();
   const cls = (mode.className.match(/\b(auto|wait|estop|rc)\b/) || [''])[0];
   $('#h-light').className = 'hs-light ' + (offline || !st.bridge_alive ? 'bad' : LIGHT[cls]);
   let sub = '';
@@ -2035,7 +2039,10 @@ function renderRecovery(r) {
       ${r.why ? `<div><dt>Why</dt><dd class="muted small">${esc(r.why)}</dd></div>` : ''}</dl>
     ${ask ? `<p>${esc(r.ask.question || '')}</p><div class="rc-act">${(r.ask.options || []).map(o => `<button class="btn ${o.primary ? 'primary' : ''}" data-rc="${esc(o.id)}">${esc(o.label)}</button>`).join('')}</div>` : ''}`;
   box.hidden = false;
-  if (ask) haptic(60);
+  if (ask && box.dataset.asked !== String(r.id)) {
+    box.dataset.asked = String(r.id); haptic(60);
+    if (S.tab !== 'home') toast('Pathik needs your help: see Home');
+  }
   $$('[data-rc]', box).forEach(b => b.onclick = async () => {
     haptic(20);
     try { await nav({ type: 'recovery_answer', id: r.id, choice: b.dataset.rc }); toast('Thanks, carrying on'); box.dataset.key = ''; }

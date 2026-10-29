@@ -64,3 +64,24 @@ Install: the APK build runs when this is merged (`android.yml`, release **Pathik
 6. Settings → Display → Font size to the largest: the app text grows and nothing important is cut off.
 Without the robot: `node ros2_ws/src/lidar_robot/test/app_parity.js` (303 checks against the demo robot) or the
 demo button on the connect screen.
+
+## Phase 3: LLM error recovery (docs/recovery.md)
+
+What changed: when a step fails (blocked way, no route, stop inside an obstacle, position lost, dock contacts),
+the robot stops and decides what to do from a fixed menu: wait and retry, wider route, detour via a place, skip
+the stop, do it later, ask a person in the app, go home, go to the dock. The LLM decides when `GROQ_API_KEY` is
+in `~/robot.env`; otherwise (or if the LLM is slow / wrong) the rules decide. Home shows "What happened /
+What I'm doing / Why" and, when asked, the answer buttons. Settings: `recovery_*` in `robot_params.yaml`.
+
+Checks (robot running, a map with places, the app open on Home):
+1. `journalctl -u robot | grep "error recovery"` → `error recovery llm (llama-3.3-70b-versatile)` with the key,
+   `(rules: no GROQ_API_KEY)` without it.
+2. **Person in the corridor**: send Pathik to a place; stand in front of it in a narrow spot for ~30 s. Home shows
+   "Recovering", "Waiting N s, then trying again"; step aside: it carries on and the card says Recovered.
+3. **Ask a person**: long-press a spot inside a table on the map → Go here. Home shows "Pathik needs your help"
+   with buttons; press Go home → it drives home. (Staff accounts can answer too.)
+4. **Trip with a blocked stop**: put a box in a lab door, then "go to <that lab> then HOD office". It should
+   skip or postpone that lab and still reach the HOD office. Operate → Mission log shows "recovered by …".
+5. Press STOP during a recovery: it ends at once; Resume continues as before.
+6. Numbers for the report (laptop or Pi, with the key): `python3 tools/eval_recovery.py --rounds 3`
+   → `results/recovery_eval.md` (LLM vs rules vs none).

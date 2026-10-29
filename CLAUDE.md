@@ -52,7 +52,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
   (`lidar_robot/protocol.py`).
 - ROS package `ros2_ws/src/lidar_robot` (ament_python). Nodes: `esp32_bridge` (odom/TF/imu/ultrasonic, link-drop
   counters), `navigator` (`navigator_core.py`: A* `planner.py`, `follower.py`, missions, places/rooms, schedules,
-  battery/dock, explain, exploration), `dashboard` (`dashboard_server.py`, HTTP :8080, auth). Launch:
+  battery/dock, explain, exploration, error recovery `recovery.py`), `dashboard` (`dashboard_server.py`, HTTP :8080, auth). Launch:
   `bringup.launch.py esp32_port:= lidar_port:= slam_mode:=mapping|localization map:=`. Cartographer 2D.
 - Config: `config/robot_params.yaml`. Users: `~/maps/users.json` (`auth.py`, roles staff < operator < admin).
 - App: `lidar_robot/web/app/` (served at `/app/`, bundled in the Android WebView APK `android/`); demo mode `demo.js`.
@@ -84,6 +84,7 @@ Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2
 odometry, ultrasonics, navigator driving, app.
 
 Done in code, NOT yet verified on the robot:
+- LLM error recovery (fixed menu, validation, rules fallback, app card, eval: rules 6/6 vs none 1/6 in sim)
 - redesigned app (v3 layout, every feature kept: docs/APP_FEATURES.md); next APK build after the merge
 - remote control from another network: Tailscale auth key/boot, optional Funnel with login limits, app path tag +
   slow-link joystick pause, hotspot-first Wi-Fi (`docs/STEPS_remote_control.md`)
@@ -101,13 +102,16 @@ Open problems / TODO (priority order):
 4. Camera + people avoidance done in code (`docs/STEPS_camera.md`): run the two setup scripts on the Pi, tune stop_m/slow_m.
 5. **Docking is still reverse-in in the code; the design is now FRONT docking** with an ArUco/AprilTag marker
    (Neelaksh's `detect()`): change the navigator and relax `US_STOP_MM` while docking.
-6. LLM error recovery (thesis novelty), not implemented yet.
+6. LLM error recovery: done in code (`docs/recovery.md`); needs the Groq-key eval run + a robot test.
 7. Install Docker on the Pi (make the GHCR package public first).
 
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
 
+- 2026-10-29: Phase 3 LLM error recovery: recovery.py (8-action menu, JSON validation + clamping, rules ladder, Groq
+  in a thread), RECOVERING state, recovery_answer (staff), mission-log recoveries, Home card + demo, MCP answer_robot,
+  tools/eval_recovery.py + sim blocks/pose drops (results/recovery_eval.md: rules 6/6, none 1/6). docs/recovery.md.
 - 2026-10-29: Phase 2 app redesign: docs/APP_FEATURES.md inventory (104 rows, all mapped), new tabs + Home status
   card + Send flow + Operate hub, STOP in the tab bar, recovery/docking/voice cards ready, delete place, Android back +
   font size; test_app_parity.py (static + 303 browser checks on the demo).

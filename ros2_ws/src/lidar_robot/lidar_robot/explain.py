@@ -38,6 +38,11 @@ def explain(core):
     elif not core.localized:
         parts.append("I'm waiting for someone to check that my position on the map is right "
                      "(press Position OK, or Set position).")
+    elif getattr(core, 'rec', None) is not None and core.rec.busy():
+        r = core.rec.current
+        who = {'llm': ' (decided by the language model)', 'rules': ' (decided by my safety rules)',
+               'person': ' (chosen in the app)'}.get(r.get('source'), '')
+        parts.append(f"{r['what_happened']} {r['doing']}{who}")
     elif st == 'CONFIRM':
         parts.append(f"I'm at {goal} and waiting for someone to press OK before I continue.")
     elif st in ('DOCKING', 'UNDOCKING'):

@@ -296,7 +296,8 @@ class UserStore:
 # ---------------------------------------------------------------------- permissions
 # /api/nav request types a staff member may send: go somewhere, call/stop, ask, look up
 STAFF_NAV = {'goto_place', 'goto_room', 'command', 'preview', 'cancel', 'resume', 'go_home', 'go_dock',
-             'confirm', 'explain', 'find', 'search', 'schedule_list', 'mission_log'}
+             'confirm', 'explain', 'find', 'search', 'schedule_list', 'mission_log',
+             'recovery_answer'}           # the robot asks whoever is there ("ask a person")
 
 
 def required_role(method, path, body=None):

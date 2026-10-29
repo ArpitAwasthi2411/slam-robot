@@ -103,6 +103,7 @@ HTTP, the dashboard forwards `POST /api/nav` with the same JSON.
 {"type": "explore_start", "speed": 0.18, "turn_speed": 0.45, "scan_spin": true}   {"type": "explore_stop"}
 {"type": "get_tune"}   {"type": "tune", "follower": {"lookahead": 0.5}, "save": true}
 // rooms, dock, schedules, "wait for OK", explain, mission log: see "v2.4: tasks people actually ask for" below
+{"type": "recovery_answer", "id": 3, "choice": "retry"}   // answer "ask a person" (docs/recovery.md)
 ```
 The full list with every field is at the top of `lidar_robot/navigator_core.py`; which role may send which
 type is `STAFF_NAV` in `lidar_robot/auth.py` (staff: go/call/stop/ask, operator: everything else).
@@ -184,3 +185,12 @@ New request types (JSON on `/navigator/request` or `POST /api/nav`): `confirm`, 
 `add_room`, `update_room`, `delete_room`, `goto_room`, `set_dock`, `go_dock`, `schedule_add`,
 `schedule_delete`, `schedule_enable`, `schedule_list`, `mission_log`. See the top of
 `navigator_core.py`.
+
+## Error recovery (Phase 3)
+
+When a step fails with a recoverable reason code the navigator no longer just marks the mission FAILED: it
+stops (state `RECOVERING`), the LLM or the rule-based fallback picks one action from a fixed menu (wait and
+retry, wider route, detour, skip the stop, do it later, ask a person, go home, go to the dock) and the robot
+carries it out. `status()['recovery']` drives the app's "What happened / What I'm doing" card. Details,
+settings and the evaluation: [recovery.md](recovery.md).
+

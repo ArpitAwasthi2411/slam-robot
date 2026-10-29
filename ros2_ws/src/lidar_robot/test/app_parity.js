@@ -136,10 +136,47 @@ async function run(browser, role, theme) {
   await ctx.close();
 }
 
+// error recovery in the demo: a trolley blocks the Seminar hall door once (wait, then recovered), and a goal
+// inside furniture makes the robot ask a person; the answer is given on Home
+async function runRecovery(browser) {
+  const ctx = await browser.newContext({ viewport: { width: 360, height: 780 } });
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', e => errs.push(String(e)));
+  await p.goto(APP); await p.click('#c-demo');
+  await p.click('#au-demo-row button[data-u="operator"]');
+  await p.waitForSelector('#main:not([hidden])');
+  await tab(p, 'send');
+  await p.fill('#g-cmd-in', 'go to the seminar hall'); await p.click('#g-cmd .send');
+  await p.waitForSelector('#g-plan [data-p=send]'); await p.click('#g-plan [data-p=send]');
+  await tab(p, 'home');
+  const shown = await p.waitForSelector('#h-recovery:not([hidden])', { timeout: 90000 }).then(() => true, () => false);
+  check(shown, 'recovery: card appears on Home when the trolley blocks the door');
+  if (shown) {
+    const txt = await p.textContent('#h-recovery');
+    check(/What happened/.test(txt) && /What I'm doing/.test(txt) && /safety rules/.test(txt), `recovery: card text (${txt.slice(0, 80)})`);
+    const ok = await p.waitForFunction(() => /Recovered/.test(document.querySelector('#h-recovery').textContent), null, { timeout: 60000 }).then(() => true, () => false);
+    check(ok, 'recovery: wait-and-retry recovers');
+  }
+  const tok = await p.evaluate(() => JSON.parse(localStorage.getItem('pathik.session')).token);
+  await p.evaluate(t => window.PathikDemo.handle('/api/nav', 'POST', { type: 'goto_pose', x: 13.3, y: 1.6, label: 'store rack', replace: true }, t), tok);
+  const asked = await p.waitForSelector('#h-recovery [data-rc=home]', { timeout: 20000 }).then(() => true, () => false);
+  check(asked, 'recovery: asks a person (options on Home)');
+  if (asked) {
+    check(!(await visible(p, '#h-recovery [data-rc=skip]')), 'recovery: no Skip for a one-stop mission');
+    await p.click('#h-recovery [data-rc=home]'); await p.waitForTimeout(600);
+    const st = await p.evaluate(t => window.PathikDemo.handle('/api/state', 'GET', undefined, t).nav, tok);
+    check(st.recovery.source === 'person' && st.recovery.outcome === 'gave_up_home', 'recovery: the answer is carried out');
+  }
+  check(errs.length === 0, `recovery: page errors ${errs.join(' | ')}`);
+  await ctx.close();
+}
+
 (async () => {
   const browser = await chromium.launch();
   try {
     for (const role of Object.keys(ROLES)) await run(browser, role, role === 'operator' ? 'light' : 'dark');
+    await runRecovery(browser);
   } catch (e) { failures.push('crash: ' + (e && e.message || e)); }
   await browser.close();
   console.log(JSON.stringify({ ok: !failures.length, failures, checked }));
