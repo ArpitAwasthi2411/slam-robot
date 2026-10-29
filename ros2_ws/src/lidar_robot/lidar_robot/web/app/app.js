@@ -165,8 +165,15 @@ async function scan() {
   renderFound(found.size ? [...found.values()] : store.get('robots', []), found.size > 0);
   if (!found.size) btn.textContent = 'Find again';
 }
-function netType(base) {
+// How this phone reaches the robot. The robot says it best (st.net.via: what IT sees); before the first
+// answer we guess from the address.
+const VIA_TXT = { public: 'Public link (Funnel)', tailscale: 'Internet (Tailscale)', lan: 'Same Wi‑Fi', local: 'This device' };
+function netType(base, net) {
   if (base === DEMO) return 'Demo';
+  if (net && VIA_TXT[net.via]) {
+    if (net.via !== 'lan') return VIA_TXT[net.via];
+  }
+  if (/^https:\/\//.test(base || '') && /\.ts\.net/.test(base)) return VIA_TXT.public;
   const h = (base || '').replace(/^https?:\/\//, '').replace(/:\d+$/, '');
   if (h === '10.42.0.1') return 'Robot Wi‑Fi';
   if (h.startsWith('169.254.')) return 'Cable';
@@ -180,7 +187,7 @@ function renderFound(robots, live = false) {
   $('#c-list').innerHTML = robots.length ? robots.map((r, i) => `
     <li><button data-i="${i}">
       <svg viewBox="0 0 64 64"><use href="#mark"/></svg>
-      <span><b>${esc(r.robot || 'robot')}</b><small>${esc(r.base.replace('http://', ''))} · ${esc(netType(r.base))}</small></span>
+      <span><b>${esc(r.robot || 'robot')}</b><small>${esc(shortAddr(r.base))} · ${esc(netType(r.base))}</small></span>
       <span class="go">${live ? 'Live' : 'Saved'}</span>
     </button></li>`).join('') : '<li class="empty">No saved robots yet.</li>';
   $$('#c-list button').forEach(b => b.onclick = () => connect(robots[+b.dataset.i]));
@@ -193,13 +200,20 @@ function renderFound(robots, live = false) {
   if (top && !scanning) { btn.textContent = `Connect to ${top.robot || 'robot'}`; btn.onclick = () => connect(top); }
   else if (!scanning) { btn.textContent = 'Find robot'; btn.onclick = scan; }
 }
+// What people type -> a base URL:
+//   10.42.0.1 / slam-robot / 100.101.1.2 / slam-robot.tail1234.ts.net  -> http://<that>:8080 (Tailscale or LAN)
+//   https://slam-robot.tail1234.ts.net                                -> as typed (Funnel: https on port 443)
+//   http://host:9000                                                   -> as typed
 function normalizeAddr(s) {
-  s = s.trim();
+  s = (s || '').trim().replace(/\s+/g, '');
   if (!s) return '';
-  if (!/^https?:\/\//.test(s)) s = 'http://' + s;
-  if (!/:\d+$/.test(s.replace(/\/+$/, ''))) s = s.replace(/\/+$/, '') + ':8080';
-  return s.replace(/\/+$/, '');
+  s = s.replace(/\/(app\/?)?$/, '').replace(/\/+$/, '');     // a pasted ".../app/" link works too
+  if (/^https:\/\//i.test(s)) return s.replace(/^https/i, 'https');
+  if (!/^http:\/\//i.test(s)) s = 'http://' + s;
+  if (!/:\d+$/.test(s.replace(/^http:\/\//i, ''))) s += ':8080';
+  return s.replace(/^http/i, 'http');
 }
+const shortAddr = base => (base || '').replace(/^https?:\/\//, '');
 
 // ------------------------------------------------------------------ app state
 const S = {
@@ -470,7 +484,8 @@ function onState(st) {
   chip.textContent = mode; chip.className = 'chip glass ' + cls;
   renderBattery(navs.battery);
   renderConfirm(navs.confirm);
-  $('#t-link').textContent = `${netType(BASE)}${fin(S.rtt) ? ` · ${Math.round(S.rtt)} ms` : ''}`;
+  $('#t-link').textContent = `${netType(BASE, st.net)}${fin(S.rtt) ? ` · ${Math.round(S.rtt)} ms` : ''}`;
+  renderPublic(st.net);
 
   $('#estopped').hidden = !st.estop;
   $('#estop').hidden = !!st.estop;
@@ -1135,12 +1150,48 @@ function joyFrom(e) {
   const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
   joy.x = Math.abs(x) < 0.06 ? 0 : x; joy.y = Math.abs(y) < 0.06 ? 0 : y; drawJoy();
 }
-jc.addEventListener('pointerdown', e => { jc.setPointerCapture(e.pointerId); joy.active = true; joy.id = e.pointerId; haptic(10); joyFrom(e); });
+jc.addEventListener('pointerdown', e => {
+  const why = S.st ? linkTooSlow() : '';
+  if (why) { toast(`Driving by hand is paused: ${why}`, true); return; }
+  jc.setPointerCapture(e.pointerId); joy.active = true; joy.id = e.pointerId; haptic(10); joyFrom(e);
+});
 jc.addEventListener('pointermove', e => { if (joy.active && e.pointerId === joy.id) joyFrom(e); });
-const joyEnd = e => { if (e.pointerId !== joy.id) return; joy.active = false; joy.x = joy.y = 0; drawJoy(); sendCmd(0, 0); sendCmd(0, 0); };
+const joyEnd = e => { if (e.pointerId !== joy.id) return; joy.active = false; joy.x = joy.y = 0; drawJoy(); sendCmd(0, 0, true); sendCmd(0, 0, true); };
 jc.addEventListener('pointerup', joyEnd); jc.addEventListener('pointercancel', joyEnd);
-function sendCmd(v, w) { post('/api/cmd', { v, w }, { timeout: 800 }).catch(() => {}); }
+// Driving by hand needs a fresh, fast link. The robot stops by itself 0.5 s after the last command
+// (bridge watchdog); the app also never queues commands (a late one is worse than none) and pauses the
+// joystick when the link is slow or silent, so a command can't arrive long after you let go.
+const JOY_MAX_DELAY = 600, JOY_MAX_AGE = 1500;       // ms
+const cmdLink = { inflight: false, ms: 0, stopped: false };
+function linkTooSlow() {
+  if (BASE === DEMO) return '';
+  const age = performance.now() - (S.lastOk || 0);
+  if (!S.lastOk || age > JOY_MAX_AGE) return `no answer from the robot for ${(age / 1000).toFixed(1)} s`;
+  if (fin(S.rtt) && S.rtt > JOY_MAX_DELAY) return `link delay ${Math.round(S.rtt)} ms (max ${JOY_MAX_DELAY})`;
+  return '';
+}
+function sendCmd(v, w, force = false) {
+  if (cmdLink.inflight && !force) return;
+  cmdLink.inflight = true;
+  const t0 = performance.now();
+  post('/api/cmd', { v, w }, { timeout: 800 })
+    .then(() => { const d = performance.now() - t0; cmdLink.ms = cmdLink.ms ? cmdLink.ms * 0.7 + d * 0.3 : d; })
+    .catch(() => {}).finally(() => { cmdLink.inflight = false; });
+}
+function setJoyLock(why) {
+  const lock = $('#joy-lock');
+  if (!lock) return;
+  const was = !lock.hidden;
+  lock.hidden = !why;
+  if (why) lock.querySelector('span').textContent = why;
+  $('.joy-wrap').classList.toggle('locked', !!why);
+  if (why && !was && joy.active) { joy.active = false; joy.x = joy.y = 0; drawJoy(); toast('Link too slow: driving by hand paused', true); }
+}
 setInterval(() => {
+  const why = S.st ? linkTooSlow() : '';
+  setJoyLock(why);
+  if (why) { if (!cmdLink.stopped && S.st) { sendCmd(0, 0, true); cmdLink.stopped = true; } return; }
+  cmdLink.stopped = false;
   if (!joy.active || !S.st || S.st.estop) return;
   const lim = S.st.limits || { max_v: 0.3, max_w: 1.2 }, k = +$('#d-speed').value / 100;
   sendCmd(joy.y * lim.max_v * k, -joy.x * lim.max_w * k);
@@ -1880,10 +1931,18 @@ function renderMe(pending) {
   $('#me-user').textContent = u.legacy ? 'This robot has no accounts (old software)' : `@${u.username}`;
   const r = $('#me-role'); r.textContent = u.role; r.className = 'role ' + u.role;
   $('#me-robot').textContent = BASE === DEMO ? 'Pathik demo' : ((S.robot && (S.robot.robot || S.robot.host)) || 'robot');
-  $('#me-net').textContent = `${netType(BASE)} · ${BASE === DEMO ? 'in the app' : BASE.replace('http://', '')}`;
+  $('#me-net').textContent = `${netType(BASE, S.st && S.st.net)} · ${BASE === DEMO ? 'in the app' : shortAddr(BASE)}`;
   $('#me-dot').className = 'dot ' + (S.st && S.fails < 3 ? 'ok' : 'bad');
   $('#me-pass').hidden = $('#me-out').hidden = !!u.legacy;
   if (pending !== undefined) setPendingBadge(pending);
+}
+// Funnel on: the robot answers on a public https URL. Logins protect it, but it should be off after use.
+function renderPublic(net) {
+  const on = !!(net && net.public);
+  $('#t-public').hidden = !on;
+  const box = $('#me-public');
+  box.hidden = !on;
+  if (on) $('#me-public-url').textContent = net.public_url || 'a public https address';
 }
 function setPendingBadge(n) { const b = $('#tab-me-badge'); b.textContent = n; b.hidden = !n || !can('admin'); }
 $$('[data-theme-pick]').forEach(b => b.onclick = () => { haptic(8); applyTheme(b.dataset.themePick); });
@@ -1975,9 +2034,10 @@ $('#c-manual').onsubmit = async e => {
   e.preventDefault();
   const base = normalizeAddr($('#c-addr').value);
   if (!base) return;
-  $('#c-progress').textContent = `Trying ${base.replace('http://', '')}…`;
-  const r = await probe(base, 2500);
-  if (r) connect(r); else $('#c-progress').textContent = `No robot answered at ${base.replace('http://', '')}. Check the address and the Wi‑Fi.`;
+  $('#c-progress').textContent = `Trying ${shortAddr(base)}…`;
+  const r = await probe(base, 4000);                 // Tailscale / Funnel over mobile data can be slow
+  if (r) connect(r); else $('#c-progress').textContent = `No robot answered at ${shortAddr(base)}. ` +
+    (/ts\.net|^http:\/\/(slam-robot|100\.)/.test(base) ? 'Is Tailscale on (this phone and the robot)?' : 'Check the address and the Wi‑Fi.');
 };
 applyTheme();
 drawJoy();

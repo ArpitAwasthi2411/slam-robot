@@ -49,6 +49,8 @@ class DashboardNode(Node):
         self.declare_parameter('map_dir', os.path.expanduser('~/maps'))
         self.declare_parameter('require_login', True)            # app users + roles (auth.py)
         self.declare_parameter('users_file', os.path.expanduser('~/maps/users.json'))
+        # written by scripts/setup_tailscale.sh funnel on (public https URL), removed by funnel off
+        self.declare_parameter('public_flag_file', os.path.expanduser('~/maps/.public_url'))
         self.declare_parameter('scan_decimation', 3)
         self.declare_parameter('nav_mode', 'planner')
         self.declare_parameter('slam_mode', 'mapping')           # bringup passes the real one
@@ -132,8 +134,12 @@ class DashboardNode(Node):
 
         port = int(gp('port'))
         users = UserStore(gp('users_file')) if gp('require_login') else None
-        self.server = DashboardServer(self, port=port, users=users)
+        self.server = DashboardServer(self, port=port, users=users,
+                                      public_flag=os.path.expanduser(gp('public_flag_file')))
         self.server.start()
+        if os.path.exists(os.path.expanduser(gp('public_flag_file'))):
+            self.get_logger().warn('Tailscale Funnel is ON: the app is reachable from the internet. '
+                                   'Turn it off with: sudo bash scripts/setup_tailscale.sh funnel off')
         self.get_logger().info(f'Dashboard on http://0.0.0.0:{port}  (open http://<pi-ip>:{port})')
         if users is None:
             self.get_logger().warn('require_login is false: ANYONE on the network can drive the robot')

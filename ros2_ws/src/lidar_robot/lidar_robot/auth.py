@@ -28,11 +28,18 @@ import time
 ROLES = ('staff', 'operator', 'admin')
 RANK = {r: i for i, r in enumerate(ROLES)}
 SESSION_DAYS = 30
+SESSION_DAYS_PUBLIC = 7          # logins that came in over the public link (Tailscale Funnel)
 PBKDF2_ROUNDS = 120_000          # ~0.15 s on a Pi 4: slow for attackers, fine for a login
 USERNAME_RE = re.compile(r'^[a-z0-9._-]{3,32}$')
 MIN_PASSWORD = 6
 MAX_FAILS = 5                    # per username+address, then wait FAIL_WINDOW_S
 FAIL_WINDOW_S = 60.0
+# Rate limits that matter when the robot is reachable from the internet (Funnel, docs/STEPS_remote_control.md):
+ADDR_MAX_FAILS = 30              # wrong passwords from one address (any usernames) per ADDR_WINDOW_S
+ADDR_WINDOW_S = 900.0
+PUBLIC_USER_MAX_FAILS = 20       # wrong passwords for one username over the public link per ADDR_WINDOW_S
+SIGNUPS_PER_ADDR = 5             # sign-ups from one address per hour
+MAX_PENDING = 30                 # unapproved sign-ups waiting at once
 
 
 class AuthError(Exception):
@@ -66,6 +73,9 @@ class UserStore:
         self.users = {}
         self.sessions = {}            # token sha256 -> {'user', 'exp'}
         self.fails = {}               # (username, addr) -> [t, ...]
+        self.addr_fails = {}          # addr -> [t, ...]  (any username)
+        self.public_fails = {}        # username -> [t, ...]  (over the public link only)
+        self.signups = {}             # addr -> [t, ...]
         self._load()
 
     # ------------------------------------------------------------------ storage
@@ -110,19 +120,39 @@ class UserStore:
             raise AuthError(f'Password must be at least {MIN_PASSWORD} characters')
         return username
 
-    def _new_session(self, username):
+    def _new_session(self, username, public=False):
         token = secrets.token_urlsafe(32)
-        self.sessions[_token_id(token)] = {'user': username, 'exp': self.clock() + SESSION_DAYS * 86400}
+        days = SESSION_DAYS_PUBLIC if public else SESSION_DAYS
+        self.sessions[_token_id(token)] = {'user': username, 'exp': self.clock() + days * 86400,
+                                           'public': bool(public)}
         return token
 
+    def _prune(self, now):
+        """Forget old failures/sign-ups so the tables can't grow without bound."""
+        for table, win in ((self.fails, FAIL_WINDOW_S), (self.addr_fails, ADDR_WINDOW_S),
+                           (self.public_fails, ADDR_WINDOW_S), (self.signups, 3600.0)):
+            for k in [k for k, ts in table.items() if not ts or now - ts[-1] > win]:
+                del table[k]
+
     # ------------------------------------------------------------------ public API
-    def signup(self, username, password, name=''):
+    def signup(self, username, password, name='', addr='', public=False):
         """First account -> active admin + logged in. Later -> pending (no token)."""
         with self.lock:
+            now = self.clock()
+            self._prune(now)
+            recent = [t for t in self.signups.get(addr, []) if now - t < 3600.0]
+            if len(recent) >= SIGNUPS_PER_ADDR:
+                raise AuthError('Too many sign-ups from here. Try again in an hour.', 429)
+            first = self.setup_needed()
+            if first and public:
+                raise AuthError('Create the first (admin) account on the robot\'s own network, '
+                                'not over the public link.', 403)
+            if not first and self.pending_count() >= MAX_PENDING:
+                raise AuthError('Too many requests are waiting for approval. Ask an admin.', 429)
             username = self._check_new(username, password)
             if username in self.users:
                 raise AuthError('That username is taken', 409)
-            first = self.setup_needed()
+            self.signups[addr] = recent + [now]
             salt, h, rounds = _hash_password(password)
             self.users[username] = {'name': (name or '').strip()[:60] or username,
                                     'role': 'admin' if first else 'staff',
@@ -131,19 +161,28 @@ class UserStore:
                                     'created': int(self.clock()), 'last_login': None}
             token = None
             if first:
-                token = self._new_session(username)
+                token = self._new_session(username, public)
                 self.users[username]['last_login'] = int(self.clock())
             self._save()
             return {'user': self.public(username, self.users[username]), 'token': token}
 
-    def login(self, username, password, addr=''):
+    def login(self, username, password, addr='', public=False):
+        """addr = the real client address (the server resolves proxies); public = came over Funnel."""
         with self.lock:
             username = (username or '').strip().lower()
             key = (username, addr)
             now = self.clock()
+            self._prune(now)
             recent = [t for t in self.fails.get(key, []) if now - t < FAIL_WINDOW_S]
             if len(recent) >= MAX_FAILS:
                 raise AuthError('Too many wrong passwords. Wait a minute and try again.', 429)
+            by_addr = [t for t in self.addr_fails.get(addr, []) if now - t < ADDR_WINDOW_S]
+            if len(by_addr) >= ADDR_MAX_FAILS:
+                raise AuthError('Too many wrong passwords from here. Wait 15 minutes.', 429)
+            by_user = [t for t in self.public_fails.get(username, []) if now - t < ADDR_WINDOW_S]
+            if public and len(by_user) >= PUBLIC_USER_MAX_FAILS:
+                raise AuthError('This account is locked for the public link for 15 minutes '
+                                '(too many wrong passwords). On the robot\'s own network it still works.', 429)
             u = self.users.get(username)
             ok = False
             if u:
@@ -151,13 +190,16 @@ class UserStore:
                 ok = hmac.compare_digest(h, u['hash'])
             if not ok:
                 self.fails[key] = recent + [now]
+                self.addr_fails[addr] = by_addr + [now]
+                if public:
+                    self.public_fails[username] = by_user + [now]
                 raise AuthError('Wrong username or password', 401)
             self.fails.pop(key, None)
             if u['status'] == 'pending':
                 raise AuthError('Your account is waiting for an admin to approve it', 403)
             if u['status'] == 'disabled':
                 raise AuthError('This account has been disabled. Ask an admin.', 403)
-            token = self._new_session(username)
+            token = self._new_session(username, public)
             u['last_login'] = int(now)
             self._save()
             return {'user': self.public(username, u), 'token': token}

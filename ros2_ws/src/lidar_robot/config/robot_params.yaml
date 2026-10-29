@@ -37,6 +37,8 @@ dashboard:
     max_linear: 0.20             # joystick top speed (m/s)
     max_angular: 0.40            # joystick top turn rate (rad/s): turn slower than you drive, faster turns smear the SLAM map
     scan_decimation: 3
+    require_login: true          # never false when Tailscale Funnel is on (the API refuses public requests then)
+    public_flag_file: ~/maps/.public_url   # setup_tailscale.sh funnel on/off writes/removes it
 
 navigator:
   ros__parameters:

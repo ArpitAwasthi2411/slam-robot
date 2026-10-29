@@ -1,5 +1,8 @@
 # Staying connected when the robot goes to another lab
 
+> **Step-by-step for the hotspot + Tailscale (+ optional public Funnel link) set-up: [STEPS_remote_control.md](STEPS_remote_control.md).**
+> This page explains the why and the options.
+
 The problem: the phone and the robot share one Wi-Fi. When the robot drives to another lab or floor
 it leaves that Wi-Fi's range and you lose the app.
 
@@ -46,8 +49,8 @@ Turn the hotspot on.
 ```bash
 cd ~/slam-robot
 sudo bash scripts/setup_wifi.sh hotspot "RobotNet" "hotspot-password"   # joins the robot phone
-sudo bash scripts/setup_wifi.sh extra "CSE-Lab-WiFi" "lab-password"      # optional: lab Wi-Fi as backup
-sudo bash scripts/setup_tailscale.sh                                     # prints a login link
+sudo bash scripts/setup_wifi.sh fallback "CSE-Lab-WiFi" "lab-password"   # optional: lab Wi-Fi as backup
+sudo bash scripts/setup_tailscale.sh          # TS_AUTHKEY in ~/robot.env, or it prints a login link
 ```
 Open the printed link on any device and log in with your Tailscale account. The script then shows
 the robot's Tailscale name **slam-robot** and its address `100.x.y.z`.
@@ -72,14 +75,14 @@ anywhere, and RViz can stay on the ethernet cable when you're next to the robot.
 1. Turn off your phone's Wi-Fi so it uses only mobile data.
 2. Pathik → type `slam-robot` → Connect. You should see the live map.
 3. Status tab: the link line shows the round-trip time (over 4G, 80–300 ms is normal; the app is
-   built for that, joystick driving included, but drive gently over 4G).
+   built for that; above 600 ms the joystick pauses by itself and you send the robot to places instead).
 
 ### Costs and limits
 - The robot sends the map and scan to the app while it's open: roughly 20–60 MB per hour of
   watching. Nothing is sent when the app is closed.
 - Lifts and basements may have no 4G: the robot keeps working there, the app reconnects later.
 - If the robot phone's hotspot turns off, the Pi falls back to any other network you added with
-  `setup_wifi.sh extra`.
+  `setup_wifi.sh fallback`, and switches back to the hotspot within ~30 s when it returns.
 
 ## Which setup when
 
