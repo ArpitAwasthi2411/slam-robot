@@ -101,7 +101,10 @@ def build_world():
 
 
 class SimBackend:
-    def __init__(self, explore=False, start_thread=True, clock=time.monotonic):
+    def __init__(self, explore=False, start_thread=True, clock=time.monotonic, data_dir=None):
+        # data_dir: where the simulated robot keeps places, schedules, mission log and tuning (reset at
+        # every start). Default: the repo's maps/ folder; tests pass a temporary folder.
+        maps = data_dir or os.path.join(HERE, '..', 'maps')
         self.explore_mode = explore
         self.clock = clock
         self.world = build_world()
@@ -115,7 +118,7 @@ class SimBackend:
         self.v = self.w = 0.0
         self.teleop = ((0.0, 0.0), 0.0)
         self.estop = False
-        places_file = os.path.join(HERE, '..', 'maps', 'sim_places.json')
+        places_file = os.path.join(maps, 'sim_places.json')
         if os.path.exists(places_file):
             os.remove(places_file)
         self.places = PlaceStore(places_file)
@@ -127,13 +130,13 @@ class SimBackend:
         for name, poly, contents in ROOMS:
             self.places.add_room(name, poly, contents)
         parser = CommandParser(self.places, groq_api_key=os.environ.get('GROQ_API_KEY'))
-        sim_dir = os.path.join(HERE, '..', 'maps', 'sim')
+        sim_dir = os.path.join(maps, 'sim')
         os.makedirs(sim_dir, exist_ok=True)
         for f in ('missions.jsonl', 'schedules.json'):
             if os.path.exists(os.path.join(sim_dir, f)):
                 os.remove(os.path.join(sim_dir, f))
         self.nav = NavigatorCore(self.places, parser=parser, dwell_s=2.0, footprint=FP, data_dir=sim_dir, clock=clock,
-                                 tuning_path=os.path.join(HERE, '..', 'maps', 'sim_tuning.json'))
+                                 tuning_path=os.path.join(maps, 'sim_tuning.json'))
         self.outline = FP.outline(0.05)
         self.bumps = 0
         self.bat_v = 11.9                         # 3S pack, ~70 %

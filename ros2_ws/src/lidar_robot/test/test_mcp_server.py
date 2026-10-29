@@ -39,7 +39,7 @@ def test_mcp_tools_against_the_simulator(tmp_path):
     users.signup('admin', 'admin123')
     users.signup('teacher', 'teach123')
     users.admin_update('admin', 'teacher', role='staff', status='active')
-    srv = DashboardServer(sim.SimBackend(), host='127.0.0.1', port=0, users=users)
+    srv = DashboardServer(sim.SimBackend(data_dir=str(tmp_path)), host='127.0.0.1', port=0, users=users)
     srv.start()
     url = f'http://127.0.0.1:{srv.httpd.server_address[1]}'
     try:
