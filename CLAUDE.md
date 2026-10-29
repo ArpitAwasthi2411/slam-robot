@@ -56,6 +56,8 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
   `bringup.launch.py esp32_port:= lidar_port:= slam_mode:=mapping|localization map:=`. Cartographer 2D.
 - Config: `config/robot_params.yaml`. Users: `~/maps/users.json` (`auth.py`, roles staff < operator < admin).
 - App: `lidar_robot/web/app/` (served at `/app/`, bundled in the Android WebView APK `android/`); demo mode `demo.js`.
+  v3 layout (Phase 2): Home · Send · Map · Drive · Operate (staff: Home · Send · Map · Me), STOP in the tab bar.
+  Feature inventory + parity checklist `docs/APP_FEATURES.md`; browser check `test/app_parity.js` (run by `test_app_parity.py`).
 - MCP server: `scripts/mcp_server.py` (logs in with `ROBOT_USER`/`ROBOT_PASSWORD`), docs `docs/mcp.md`.
 - Tools: `tools/dashboard_sim.py --demo-users` (whole app without the robot), `tools/link_doctor.sh`,
   `tools/robot_check.sh` (one-shot health check), `tools/serial_probe.py`, `tools/eval_commands.py`, `tools/eval_nav.py`, `scripts/find_ports.py`.
@@ -82,6 +84,7 @@ Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2
 odometry, ultrasonics, navigator driving, app.
 
 Done in code, NOT yet verified on the robot:
+- redesigned app (v3 layout, every feature kept: docs/APP_FEATURES.md); next APK build after the merge
 - remote control from another network: Tailscale auth key/boot, optional Funnel with login limits, app path tag +
   slow-link joystick pause, hotspot-first Wi-Fi (`docs/STEPS_remote_control.md`)
 - ESP32-S3 firmware v2.6 + UART link to the Pi (pins 47/8 ↔ Pi 10/8): ODM/US verified on the Pi; IMU not detected yet
@@ -105,6 +108,9 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-29: Phase 2 app redesign: docs/APP_FEATURES.md inventory (106 rows, all mapped), new tabs + Home status
+  card + Send flow + Operate hub, STOP in the tab bar, recovery/docking/voice cards ready, delete place, Android back +
+  font size; test_app_parity.py (static + 303 browser checks on the demo).
 - 2026-10-29: Phase 1 remote control: setup_tailscale.sh (TS_AUTHKEY from ~/robot.env, boot, status, funnel on/off
   + ~/maps/.public_url flag), auth per-address/public limits, dashboard `net` info (lan/tailscale/public), app PUBLIC
   tag + Me warning + joystick pause >600 ms, setup_wifi.sh hotspot-first timer + fallback. docs/STEPS_remote_control.md.

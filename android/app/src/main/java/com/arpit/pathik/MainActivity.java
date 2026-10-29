@@ -55,7 +55,9 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(true);            // the app itself is file:///android_asset/app/
         s.setCacheMode(WebSettings.LOAD_NO_CACHE);
         s.setMediaPlaybackRequiresUserGesture(true);
-        s.setTextZoom(100);                    // the layout is designed for 100 %; ignore system font scaling
+        // follow the phone's font size (accessibility), capped at 130 % so the map screens still fit
+        float fontScale = getResources().getConfiguration().fontScale;
+        s.setTextZoom(Math.round(Math.max(1f, Math.min(1.3f, fontScale)) * 100));
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -88,7 +90,12 @@ public class MainActivity extends Activity {
     protected void onPause() { web.onPause(); super.onPause(); }
 
     @Override
-    public void onBackPressed() { moveTaskToBack(true); }   // keep the connection; don't tear the app down
+    public void onBackPressed() {
+        // the app closes a dialog / sub-page / goes Home first; only when it has nothing to close do we leave
+        // (to the background: keep the connection, don't tear the app down)
+        web.evaluateJavascript("window.__pathikBack ? String(window.__pathikBack()) : 'false'",
+                v -> { if (!"\"true\"".equals(v) && !"true".equals(v)) moveTaskToBack(true); });
+    }
 
     @Override
     protected void onDestroy() {

@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<meta name="theme-color" content="#0d0d10">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101114">
 <meta name="color-scheme" content="dark light">
 <title>Pathik</title>
 <script>
@@ -21,342 +21,343 @@
 </head>
 <body>
 
+<!-- icons (one sprite, used with <svg><use href="#i-…"/></svg>) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 64 64">
+    <path d="M32 4 60 32 32 60 4 32z" fill="#E5487F"/>
+    <path d="M32 14 50 32 32 50 14 32z" fill="#141418"/>
+    <path d="M32 22 42 32 32 42 22 32z" fill="#FF9F2E"/>
+    <circle cx="32" cy="32" r="3.5" fill="#2DE2C8"/>
+  </symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M10 20v-5h4v5"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12 20 4l-5 16-3.5-6.5z"/><path d="M11.5 13.5 20 4"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></symbol>
+  <symbol id="i-drive" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.2-4 4.3-6 8-6s6.8 2 8 6"/></symbol>
+  <symbol id="i-why" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.3 2.4c-.5.2-.8.7-.8 1.2v.9M12 17h.01"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.8l1.4-2h6.6l1.4 2h1.8A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.5" r="3.6"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 5 12L17 12h4"/></symbol>
+  <symbol id="i-wheel" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.2"/><path d="M12 3.5v6.3M12 14.2v6.3M3.5 12h6.3M14.2 12h6.3"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><circle cx="5" cy="18" r="2.2"/><circle cx="12" cy="7" r="2.2"/><circle cx="19" cy="16" r="2.2"/><path d="M6.3 16.2 10.8 9M13.3 8.9l4.6 5.4"/></symbol>
+  <symbol id="i-test" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7 15h10"/></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 5-8 4 5"/><path d="M3 21h18"/></symbol>
+  <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.9-3.4 3.5-5 6.5-5s5.6 1.6 6.5 5"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.2c2.4.1 4.3 1.6 5 4.3"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 21V4"/><path d="M6 4h11l-2.5 4L17 12H6"/></symbol>
+  <symbol id="i-draw" viewBox="0 0 24 24"><path d="M3 19c3-1 4-5 7-6s4 3 7 1 3-6 4-8"/><circle cx="21" cy="6" r="1"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z"/><path d="M7 11.5l2 2M10 8.5l2.5 2.5M13 5.5l2 2"/></symbol>
+  <symbol id="i-room" viewBox="0 0 24 24"><path d="M4 4h16v16H4z" stroke-dasharray="3 2"/><path d="M8 15l3-3 2 2 3-4"/></symbol>
+  <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><path d="M12 9l2.5 5h-5z"/></symbol>
+  <symbol id="i-follow" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></symbol>
+  <symbol id="i-explore" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M12 3v5M12 12l4-3"/><circle cx="12" cy="12" r="1.6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4.5 6v6c0 4.5 3.2 7.8 7.5 9 4.3-1.2 7.5-4.5 7.5-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 32 32"><rect x="6" y="9" width="20" height="14" rx="4"/><path d="M16 4v5M11 15h.01M21 15h.01M12 19h8"/><circle cx="16" cy="4" r="1.6"/></symbol>
+</svg>
+
 <!-- ===================== connect ===================== -->
-<section id="connect" class="screen" aria-labelledby="c-title">
-  <div class="band" aria-hidden="true"></div>
-  <div class="corner"><button class="icon-btn theme-toggle" aria-label="Light or dark theme"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></button></div>
-  <div class="c-wrap">
-    <h1 id="c-title" class="c-title">Pathik</h1>
-    <p class="c-sub">Your robot companion: drive, map and send it anywhere on campus.</p>
+<section id="connect" class="screen hero-screen" aria-labelledby="c-title">
+  <div class="corner"><button class="icon-btn theme-toggle" aria-label="Switch between light and dark theme"><svg><use href="#i-sun"/></svg></button></div>
+  <div class="narrow stack-l">
+    <header class="brand">
+      <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#mark"/></svg>
+      <h1 id="c-title" class="brand-name">Pathik</h1>
+      <p class="brand-sub">Your campus robot: send it to people and places, see where it is, stop it any time.</p>
+    </header>
 
-    <div class="c-card glass" id="c-card">
-      <div class="c-card-top">
-        <span class="c-bot" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="6" y="9" width="20" height="14" rx="4"/><path d="M16 4v5M11 15h.01M21 15h.01M12 19h8"/><circle cx="16" cy="4" r="1.6"/></svg></span>
-        <div><small>Available robot</small><b id="c-card-name">Looking…</b></div>
-      </div>
-      <div class="c-card-stats">
-        <span><i class="ic-net"></i><span id="c-card-net">–</span></span>
-        <span><i class="ic-lat"></i><span id="c-card-lat">–</span></span>
-        <span><i class="ic-fw"></i><span id="c-card-fw">–</span></span>
-      </div>
-      <button id="c-scan" class="btn grad wide">Find robot</button>
-    </div>
-    <p id="c-progress" class="c-progress" role="status"></p>
-    <button id="c-demo" class="btn ghost wide c-demo">No robot with you? <b>Try the demo</b></button>
-
-    <h2 class="c-h">Saved robots</h2>
-    <ul id="c-list" class="c-list" aria-label="Robots"></ul>
-
-    <form id="c-manual" class="c-manual">
-      <label for="c-addr">Address (Wi‑Fi address, Tailscale name / 100.x address, or public https link)</label>
+    <div class="card stack" id="c-card">
       <div class="row gap">
-        <input id="c-addr" inputmode="url" autocomplete="off" spellcheck="false" placeholder="10.42.0.1, slam-robot or https://…ts.net" aria-label="Robot address">
+        <span class="tile-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#i-bot"/></svg></span>
+        <div class="grow"><small class="eyebrow">Available robot</small><b class="title-m" id="c-card-name">Looking…</b></div>
+      </div>
+      <div class="facts">
+        <span><i class="fdot teal"></i><span id="c-card-net">–</span></span>
+        <span><i class="fdot orange"></i><span id="c-card-lat">–</span></span>
+        <span><i class="fdot magenta"></i><span id="c-card-fw">–</span></span>
+      </div>
+      <button id="c-scan" class="btn primary wide big">Find robot</button>
+    </div>
+    <p id="c-progress" class="center muted small" role="status" aria-live="polite"></p>
+    <button id="c-demo" class="btn dashed wide">No robot with you? <b>Try the demo</b></button>
+
+    <section class="stack-s" aria-labelledby="c-saved-h">
+      <h2 id="c-saved-h" class="section-h">Saved robots</h2>
+      <ul id="c-list" class="list robots" aria-label="Robots"></ul>
+    </section>
+
+    <form id="c-manual" class="stack-s">
+      <label for="c-addr" class="label">Address: Wi‑Fi address, Tailscale name / 100.x address, or public https link</label>
+      <div class="row gap">
+        <input id="c-addr" inputmode="url" autocomplete="off" spellcheck="false" placeholder="10.42.0.1, slam-robot or https://…ts.net">
         <button class="btn" type="submit">Connect</button>
       </div>
     </form>
-    <details class="c-help glass">
+    <details class="card help">
       <summary>How do I connect?</summary>
       <p><b>Robot Wi‑Fi.</b> Join <b>SLAM-Robot</b>, then Find robot (10.42.0.1).</p>
       <p><b>Same Wi‑Fi / hotspot.</b> Robot and phone on one network, then Find robot.</p>
       <p><b>From anywhere (internet).</b> Tailscale on the robot and on this phone, same account. Type <code>slam-robot</code> (or its 100.x address) above. Works on any Wi‑Fi or mobile data.</p>
       <p><b>No Tailscale on this phone.</b> If the robot team turned on the public link, type the full <code>https://….ts.net</code> address they give you. You still need an account.</p>
     </details>
-    <div class="c-voice"><span class="mic-ic"></span>Voice commands ready</div>
+    <p class="c-voice"><svg aria-hidden="true"><use href="#i-mic"/></svg>Voice commands ready: speak or type where to go</p>
   </div>
 </section>
 
 <!-- ===================== login / request access ===================== -->
-<section id="auth" class="screen" hidden aria-labelledby="au-title">
-  <div class="band" aria-hidden="true"></div>
-  <div class="corner"><button class="icon-btn theme-toggle" aria-label="Light or dark theme"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></button></div>
-  <div class="a-wrap">
-    <div class="a-robot">
-      <svg viewBox="0 0 64 64" aria-hidden="true"><use href="#mark"/></svg>
-      <div class="grow"><small id="au-net">Robot</small><b id="au-robot">robot</b></div>
+<section id="auth" class="screen hero-screen" hidden aria-labelledby="au-title">
+  <div class="corner"><button class="icon-btn theme-toggle" aria-label="Switch between light and dark theme"><svg><use href="#i-sun"/></svg></button></div>
+  <div class="narrow stack-l">
+    <div class="row gap">
+      <svg class="robot-mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#mark"/></svg>
+      <div class="grow"><small class="eyebrow" id="au-net">Robot</small><b class="title-s" id="au-robot">robot</b></div>
       <button id="au-back" class="btn small ghost">Switch robot</button>
     </div>
-    <h1 id="au-title" class="a-title">Welcome back</h1>
-    <p id="au-sub" class="a-sub">Log in to use Pathik.</p>
-
-    <form id="au-form" class="a-card" autocomplete="on" novalidate>
-      <p id="au-setup" class="a-setup" hidden><b>First time on this robot.</b> Create the admin account. Everyone else asks for access and you approve them.</p>
-      <label id="au-name-l" hidden>Your name<input id="au-name" name="name" autocomplete="name" maxlength="60" placeholder="e.g. Prof. Sharma"></label>
-      <label>Username<input id="au-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" placeholder="e.g. arpit" required></label>
-      <label>Password<span class="pw"><input id="au-pass" name="password" type="password" autocomplete="current-password" minlength="6" required><button type="button" id="au-show">Show</button></span></label>
-      <p id="au-msg" class="a-msg" role="status"></p>
-      <button id="au-go" class="btn grad wide" type="submit">Log in</button>
+    <div>
+      <h1 id="au-title" class="title-xl">Welcome back</h1>
+      <p id="au-sub" class="muted">Log in to use Pathik.</p>
+    </div>
+    <form id="au-form" class="card stack" autocomplete="on" novalidate>
+      <p id="au-setup" class="note-box" hidden><b>First time on this robot.</b> Create the admin account. Everyone else asks for access and you approve them.</p>
+      <label class="field" id="au-name-l" hidden>Your name<input id="au-name" name="name" autocomplete="name" maxlength="60" placeholder="e.g. Prof. Sharma"></label>
+      <label class="field">Username<input id="au-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" placeholder="e.g. arpit" required></label>
+      <label class="field">Password<span class="pw"><input id="au-pass" name="password" type="password" autocomplete="current-password" minlength="6" required><button type="button" id="au-show" aria-label="Show the password">Show</button></span></label>
+      <p id="au-msg" class="a-msg" role="status" aria-live="polite"></p>
+      <button id="au-go" class="btn primary wide big" type="submit">Log in</button>
     </form>
-    <div id="au-pending" class="a-card a-pending" hidden>
-      <span class="big">⏳</span><b>Request sent</b>
-      <p>An admin of this robot has to approve your account. Then log in here.</p>
+    <div id="au-pending" class="card stack center" hidden>
+      <span class="big-emoji" aria-hidden="true">⏳</span><b class="title-s">Request sent</b>
+      <p class="muted">An admin of this robot has to approve your account. Then log in here.</p>
       <button id="au-pending-ok" class="btn wide">Back to log in</button>
     </div>
-    <p id="au-switch" class="a-switch"><span id="au-switch-t">New here?</span> <button id="au-switch-b" type="button">Request access</button></p>
-    <div id="au-demo" class="a-demo" hidden>
-      <small>Demo robot: try each role</small>
-      <div class="row" id="au-demo-row"></div>
+    <p id="au-switch" class="center muted"><span id="au-switch-t">New here?</span> <button id="au-switch-b" class="link-btn" type="button">Request access</button></p>
+    <div id="au-demo" class="stack-s" hidden>
+      <small class="center muted">Demo robot: try each role</small>
+      <div class="demo-roles" id="au-demo-row"></div>
     </div>
   </div>
 </section>
 
 <!-- ===================== main ===================== -->
 <section id="main" class="screen" hidden>
+  <!-- the map is the bottom layer; Home / Send / Operate are opaque pages on top of it -->
   <div class="mapwrap" id="mapwrap">
-    <canvas id="map" aria-label="Live map. Drag to move, pinch to zoom."></canvas>
-
-    <!-- floating top bar -->
-    <header class="topbar">
-      <button id="t-robot" class="pill glass" aria-label="Connection and robot health">
-        <span id="t-dot" class="dot"></span>
-        <span class="t-name" id="t-host">robot</span>
-        <span id="t-public" class="tag-public" hidden title="Reachable from the internet (Tailscale Funnel): see Me">Public</span>
-        <span class="t-link" id="t-link">–</span>
-      </button>
-      <div class="t-right">
-        <button id="t-cam" class="chip glass cam-chip" aria-label="Camera: what the robot sees" aria-pressed="false" hidden>
-          <svg viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.8l1.4-2h6.6l1.4 2h1.8A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.5" r="3.6"/></svg><i id="t-cam-dot"></i></button>
-        <span id="t-bat" class="chip glass bat" hidden></span>
-        <button id="t-mode" class="chip glass" aria-label="Robot state. Tap: why?">Idle</button>
-      </div>
-    </header>
+    <canvas id="map" aria-label="Live map. Drag to move, pinch to zoom, long-press a spot for actions."></canvas>
     <div id="m-stats" class="m-stats glass" hidden></div>
     <div id="m-mode" class="m-mode glass" hidden role="status"></div>
-    <div id="m-banner" class="m-banner glass" hidden></div>
-    <div id="m-confirm" class="m-confirm glass" hidden role="alert"></div>
-    <div id="m-why" class="m-why glass" hidden role="status"></div>
-    <div id="m-vis" class="m-vis glass" hidden role="status"></div>
-
-    <!-- camera: live picture + what the robot decided about the people in front of it -->
-    <div id="cam" class="cam glass" hidden>
-      <div class="cam-h">
-        <span id="cam-act" class="cam-act">–</span>
-        <span id="cam-fps" class="cam-fps"></span>
-        <button id="cam-size" class="cam-btn" aria-label="Bigger / smaller picture">
-          <svg viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg></button>
-        <button id="cam-x" class="cam-btn" aria-label="Close the camera">
-          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-      </div>
-      <div class="cam-pic">
-        <img id="cam-img" alt="Live picture from the robot's camera" hidden>
-        <canvas id="cam-demo" width="320" height="180" hidden></canvas>
-        <p id="cam-empty" class="cam-empty">Waiting for the camera…</p>
-      </div>
-      <p id="cam-why" class="cam-why"></p>
-      <ul id="cam-people" class="cam-people"></ul>
-    </div>
     <div id="m-hint" class="m-hint" data-min="operator">Pick a tool on the left: flag, draw a path, route points…</div>
 
     <!-- tool rail -->
     <nav class="rail glass" aria-label="Map tools">
-      <button class="tool" data-min="operator" data-tool="goal" aria-pressed="false" title="Goal: tap = go there, drag = also face that way">
-        <svg viewBox="0 0 24 24"><path d="M6 21V4"/><path d="M6 4h11l-2.5 4L17 12H6"/></svg><span>Flag</span></button>
-      <button class="tool" data-min="operator" data-tool="draw" aria-pressed="false" title="Draw a path with your finger">
-        <svg viewBox="0 0 24 24"><path d="M3 19c3-1 4-5 7-6s4 3 7 1 3-6 4-8"/><circle cx="21" cy="6" r="1"/></svg><span>Draw</span></button>
-      <button class="tool" data-min="operator" data-tool="route" aria-pressed="false" title="Route: tap several points">
-        <svg viewBox="0 0 24 24"><circle cx="5" cy="18" r="2.2"/><circle cx="12" cy="7" r="2.2"/><circle cx="19" cy="16" r="2.2"/><path d="M6.3 16.2 10.8 9M13.3 8.9l4.6 5.4" stroke-dasharray="2 2"/></svg><span>Route</span></button>
-      <button class="tool" data-tool="measure" aria-pressed="false" title="Measure a distance">
-        <svg viewBox="0 0 24 24"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z"/><path d="M7 11.5l2 2M10 8.5l2.5 2.5M13 5.5l2 2"/></svg><span>Measure</span></button>
-      <button class="tool" data-min="operator" data-tool="room" aria-pressed="false" title="Room: drag a box over a room and say what is in it">
-        <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z" stroke-dasharray="3 2"/><path d="M8 15l3-3 2 2 3-4"/></svg><span>Room</span></button>
-      <button class="tool" data-min="operator" data-tool="locate" aria-pressed="false" title="Set position: where the robot really is">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><path d="M12 9l2.5 5h-5z"/></svg><span>Locate</span></button>
-      <button id="m-home" class="tool" title="Go home">
-        <svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M10 20v-5h4v5"/></svg><span>Home</span></button>
-      <button id="m-follow" class="tool on" aria-pressed="true" title="Follow the robot">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span>Follow</span></button>
+      <button class="tool" data-min="operator" data-tool="goal" aria-pressed="false" title="Goal: tap = go there, drag = also face that way"><svg><use href="#i-flag"/></svg><span>Flag</span></button>
+      <button class="tool" data-min="operator" data-tool="draw" aria-pressed="false" title="Draw a path with your finger"><svg><use href="#i-draw"/></svg><span>Draw</span></button>
+      <button class="tool" data-min="operator" data-tool="route" aria-pressed="false" title="Route: tap several points"><svg><use href="#i-route"/></svg><span>Route</span></button>
+      <button class="tool" data-tool="measure" aria-pressed="false" title="Measure a distance"><svg><use href="#i-ruler"/></svg><span>Measure</span></button>
+      <button class="tool" data-min="operator" data-tool="room" aria-pressed="false" title="Room: drag a box over a room and say what is in it"><svg><use href="#i-room"/></svg><span>Room</span></button>
+      <button class="tool" data-min="operator" data-tool="locate" aria-pressed="false" title="Set position: where the robot really is"><svg><use href="#i-locate"/></svg><span>Locate</span></button>
+      <button id="m-home" class="tool" title="Go home"><svg><use href="#i-home"/></svg><span>Home</span></button>
+      <button id="m-follow" class="tool on" aria-pressed="true" title="Follow the robot"><svg><use href="#i-follow"/></svg><span>Follow</span></button>
     </nav>
 
     <!-- drive cockpit (Drive tab) -->
     <div id="cockpit" class="cockpit">
-      <div class="joy-wrap"><canvas id="joy" width="240" height="240" aria-label="Joystick"></canvas>
+      <div class="joy-wrap"><canvas id="joy" width="240" height="240" aria-label="Joystick: push to drive"></canvas>
         <p id="joy-lock" class="joy-lock" hidden role="status"><b>Driving by hand paused</b><span></span>STOP still works. Or send it to a place.</p></div>
       <div class="speed glass" aria-label="Top speed">
         <span class="speed-v" id="d-speed-out">60%</span>
-        <input id="d-speed" type="range" min="20" max="100" value="60" aria-label="Top speed" orient="vertical">
+        <input id="d-speed" type="range" min="20" max="100" value="60" aria-label="Top speed">
         <span class="speed-l">Speed</span>
       </div>
-      <div class="readout glass"><b id="d-v">0.00</b><small>m/s</small><b id="d-w">0.00</b><small>rad/s</small></div>
+      <div class="readout glass" aria-label="Measured speed"><b id="d-v">0.00</b><small>m/s</small><b id="d-w">0.00</b><small>rad/s</small></div>
     </div>
 
-    <!-- drawn path / route sheet -->
-    <div id="path-sheet" class="path-sheet glass" hidden>
-      <div class="ps-top"><b id="ps-title">Drawn path</b><button class="x" id="ps-close" aria-label="Discard">✕</button></div>
-      <div class="ps-stats"><span>Length <b id="ps-len">–</b></span><span>ETA <b id="ps-eta">–</b></span><span id="ps-warn" class="ps-warn" hidden></span></div>
+    <!-- drawn path sheet -->
+    <div id="path-sheet" class="path-sheet card" hidden>
+      <div class="row between"><b class="title-s" id="ps-title">Drawn path</b><button class="icon-btn small" id="ps-close" aria-label="Discard the path"><svg><use href="#i-x"/></svg></button></div>
+      <div class="facts"><span>Length <b id="ps-len">–</b></span><span>ETA <b id="ps-eta">–</b></span><span id="ps-warn" class="ps-warn" hidden></span></div>
       <label class="switch"><input id="ps-loop" type="checkbox"><span>Loop (patrol until cancelled)</span></label>
-      <div class="row gap"><button class="btn ghost" id="ps-redraw">Redraw</button><button class="btn cream grow" id="ps-go">Follow this path</button></div>
+      <div class="row gap"><button class="btn ghost" id="ps-redraw">Redraw</button><button class="btn primary grow" id="ps-go">Follow this path</button></div>
+    </div>
+
+    <!-- Map tab: sheet over the map (tap the handle to make it smaller / bigger) -->
+    <div id="sheet" class="sheet">
+      <button class="grip" id="sheet-grip" aria-label="Smaller or bigger panel" aria-expanded="true"><i></i></button>
+      <div class="panel" id="p-map" role="tabpanel" aria-labelledby="tab-map">
+        <div class="stack-s">
+          <h2 class="title-s">Where is Pathik?</h2>
+          <p class="muted" id="sm-where">–</p>
+          <div class="legend-row"><span><i style="background:var(--magenta)"></i>Robot</span><span><i style="background:var(--teal)"></i>Places &amp; route</span><span><i style="background:var(--orange)"></i>Home</span><span><i style="background:var(--good)"></i>Charging dock</span></div>
+          <p class="muted small" data-max="staff">Pinch to zoom, drag to look around. Send the robot from Send.</p>
+        </div>
+        <div id="x-card" class="card stack xcard" data-min="operator">
+          <div class="row gap top">
+            <svg class="x-ic" aria-hidden="true"><use href="#i-explore"/></svg>
+            <div class="grow"><b class="title-s" id="x-head-t">Map by itself</b>
+              <small class="muted block" id="x-sub">Drives slowly into every unmapped area, turns once at each spot, then comes back and saves the map.</small></div>
+          </div>
+          <div id="x-idle" class="stack">
+            <div class="seg" role="radiogroup" aria-label="Exploring speed">
+              <button class="seg-b" data-xs="0.12" role="radio" aria-checked="false">Careful<small>0.12 m/s</small></button>
+              <button class="seg-b on" data-xs="0.18" role="radio" aria-checked="true">Normal<small>0.18 m/s</small></button>
+              <button class="seg-b" data-xs="0.25" role="radio" aria-checked="false">Quick<small>0.25 m/s</small></button>
+            </div>
+            <label class="switch"><input id="x-spin" type="checkbox" checked><span>Turn once at every spot <small>sharper walls, ~15 s per spot</small></span></label>
+            <button id="x-go" class="btn primary wide">Start mapping</button>
+          </div>
+          <div id="x-run" class="stack" hidden>
+            <p id="x-msg" class="x-msg" role="status"></p>
+            <div class="tiles">
+              <div class="tile"><small>Mapped</small><b id="x-area">–</b><span>m²</span></div>
+              <div class="tile"><small>Elapsed</small><b id="x-time">–</b></div>
+              <div class="tile"><small>Areas visited</small><b id="x-done">0</b></div>
+              <div class="tile"><small>Open edges</small><b id="x-left">–</b></div>
+            </div>
+            <button id="x-stop" class="btn wide">Stop mapping</button>
+          </div>
+          <p id="x-last" class="muted small" hidden></p>
+        </div>
+        <div class="row gap" data-min="operator">
+          <button id="d-savemap" class="btn grow">Save map</button>
+          <button id="d-locok" class="btn primary grow" hidden>Position OK</button>
+        </div>
+        <p class="muted small" id="map-mode-note" data-min="operator"></p>
+      </div>
     </div>
   </div>
 
-  <!-- bottom sheet -->
-  <div id="sheet" class="sheet glass">
-    <div class="grip" aria-hidden="true"></div>
+  <!-- ---------- Home: calm status, current mission, big STOP ---------- -->
+  <div class="page" id="p-home" role="tabpanel" aria-labelledby="tab-home" hidden>
+    <div class="page-in stack-l">
+      <div class="row gap"><span class="avatar" id="g-ava" aria-hidden="true">?</span>
+        <span class="grow"><b class="title-m" id="g-hello">Hello</b><small class="muted block" id="g-where">Connecting…</small></span></div>
 
-    <!-- Go: semantic & voice -->
-    <div class="panel" id="p-go" role="tabpanel" aria-labelledby="tab-go" hidden>
-      <div class="greet"><span class="avatar sm" id="g-ava">?</span><span class="grow"><b id="g-hello">Hello</b><small id="g-where">Connecting…</small></span></div>
-      <div class="quick" data-max="staff">
-        <button id="q-home"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/></svg>Come back</button>
-        <button id="q-why"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.3 2.4c-.5.2-.8.7-.8 1.2v.9M12 17h.01"/></svg>Why stopped?</button>
-        <button id="q-charge"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Charge</button>
+      <section class="card hero-status" id="h-status" aria-labelledby="h-state" aria-live="polite">
+        <div class="hs-top">
+          <span class="hs-light" id="h-light" aria-hidden="true"></span>
+          <div class="grow"><small class="eyebrow">Pathik is</small><b class="title-l" id="h-state">connecting…</b>
+            <small class="muted block" id="h-sub"></small></div>
+        </div>
+        <div class="hs-facts">
+          <div class="hs-fact"><small>Battery</small><b id="h-bat">–</b><span class="meter" aria-hidden="true"><i id="h-bat-bar"></i></span></div>
+          <div class="hs-fact"><small>Link</small><b id="h-link">–</b><span class="muted tiny" id="h-link-sub"></span></div>
+          <div class="hs-fact"><small>Room</small><b id="h-room">–</b><span class="muted tiny" id="h-room-sub"></span></div>
+        </div>
+      </section>
+
+      <!-- recovery decision (Phase 3): what happened / what I'm doing -->
+      <section class="card stack recovery" id="h-recovery" hidden aria-live="polite"></section>
+      <!-- front docking progress (Phase 4) -->
+      <section class="card stack docking" id="h-docking" hidden aria-live="polite"></section>
+
+      <div id="g-mission" class="mission card" hidden></div>
+      <div id="h-idle" class="card empty-card" hidden>
+        <b>No mission right now.</b>
+        <span class="muted">Send Pathik somewhere, or call it to you.</span>
       </div>
-      <form id="g-cmd" class="bubble">
-        <textarea id="g-cmd-in" rows="2" autocomplete="off" placeholder="take this to Lab 3, wait 2 mins, then come back"></textarea>
-        <button class="send" type="submit" aria-label="Plan it"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></svg></button>
-      </form>
-      <button id="g-voice" class="companion" aria-label="Hold to talk">
-        <span class="wave" id="g-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
-        <b id="g-voice-t">Tap and speak</b>
-        <small id="g-voice-s">Pathik understands places, waits and “come back”</small>
-      </button>
-      <div id="g-plan" class="plan" hidden></div>
-      <p id="g-reply" class="reply" role="status"></p>
-      <div id="g-mission" class="mission" hidden></div>
-      <div class="row between"><h2>Saved places</h2>
-        <div class="row gap" data-min="operator"><button id="g-here" class="btn small">Save here</button><button id="g-home" class="btn small">Set home</button></div>
+
+      <div class="actions">
+        <button class="action-big primary" id="h-send"><svg aria-hidden="true"><use href="#i-send"/></svg><b>Send or call Pathik</b><small>place, room or a sentence</small></button>
+        <button class="action-sm" id="q-home"><svg aria-hidden="true"><use href="#i-home"/></svg>Come back</button>
+        <button class="action-sm" id="q-charge"><svg aria-hidden="true"><use href="#i-bolt"/></svg>Charge</button>
+        <button class="action-sm" id="q-why"><svg aria-hidden="true"><use href="#i-why"/></svg>Why stopped?</button>
+        <button class="action-sm" id="q-cam"><svg aria-hidden="true"><use href="#i-cam"/></svg>Camera</button>
       </div>
-      <input id="g-search" class="search" placeholder="Search places, rooms and things" autocomplete="off">
-      <ul id="g-places" class="chips-list"></ul>
 
-      <div class="row between"><h2>Rooms</h2><small class="muted" data-min="operator">Map tool “Room” adds one</small></div>
-      <ul id="g-rooms" class="rooms"></ul>
+      <section class="card stack-s" id="h-vis-card" hidden>
+        <div class="row between"><h2 class="section-h">What the camera sees</h2><span class="pill-tag" id="h-vis-tag">–</span></div>
+        <p class="muted small" id="h-vis"></p>
+      </section>
 
-      <div class="row between"><h2>Charging</h2>
-        <div class="row gap"><button id="g-dock" class="btn small" data-min="operator">Robot is on the dock</button><button id="g-charge" class="btn small grad">Charge now</button></div>
-      </div>
-      <p id="g-bat" class="lede"></p>
+      <section class="card stack-s" id="h-voice-card" hidden>
+        <div class="row between"><h2 class="section-h">Robot voice</h2><span class="pill-tag" id="h-voice-tag">–</span></div>
+        <p class="muted small" id="h-voice"></p>
+      </section>
 
-      <div class="row between" data-min="operator"><h2>Schedule</h2><button id="g-sched-add" class="btn small">Add</button></div>
-      <ul id="g-sched" class="sched" data-min="operator"></ul>
+      <section class="card stack-s" aria-labelledby="h-charge-h">
+        <div class="row between"><h2 class="section-h" id="h-charge-h">Charging</h2>
+          <button id="g-charge" class="btn small primary"><svg aria-hidden="true"><use href="#i-bolt"/></svg>Charge now</button></div>
+        <p id="g-bat" class="muted small"></p>
+        <button id="g-dock" class="btn small ghost-line" data-min="operator">Robot is on the dock: save it here</button>
+      </section>
     </div>
+  </div>
 
-    <!-- Map: SLAM mapping / exploration -->
-    <div class="panel" id="p-map" role="tabpanel" aria-labelledby="tab-map" hidden>
-      <div class="staff-map" data-max="staff">
-        <h2>Where is Pathik?</h2>
-        <p class="lede" id="sm-where">–</p>
-        <div class="legend-row"><span><i style="background:var(--magenta)"></i>Robot</span><span><i style="background:var(--teal)"></i>Places &amp; route</span><span><i style="background:var(--orange)"></i>Home</span><span><i style="background:var(--good)"></i>Charging dock</span></div>
-        <p class="lede">Pinch to zoom, drag to look around. Send the robot from Home.</p>
+  <!-- ---------- Send: command / voice with plan preview, places, rooms, schedules ---------- -->
+  <div class="page" id="p-send" role="tabpanel" aria-labelledby="tab-send" hidden>
+    <div class="page-in stack-l">
+      <div>
+        <h1 class="title-l">Where should Pathik go?</h1>
+        <p class="muted small">Type or say it. You see the plan before the robot moves.</p>
       </div>
-      <div id="x-card" class="xcard" data-min="operator">
-        <div class="x-head">
-          <svg class="x-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M12 3v5M12 12l4-3"/><circle cx="12" cy="12" r="1.6"/></svg>
-          <div class="x-title"><b id="x-head-t">Map by itself</b>
-            <small id="x-sub">Drives slowly into every unmapped area, turns once at each spot, then comes back and saves the map.</small></div>
-        </div>
-        <div id="x-idle">
-          <div class="seg" role="radiogroup" aria-label="Exploring speed">
-            <button class="seg-b" data-xs="0.12" role="radio" aria-checked="false">Careful<small>0.12 m/s</small></button>
-            <button class="seg-b on" data-xs="0.18" role="radio" aria-checked="true">Normal<small>0.18 m/s</small></button>
-            <button class="seg-b" data-xs="0.25" role="radio" aria-checked="false">Quick<small>0.25 m/s</small></button>
-          </div>
-          <label class="switch"><input id="x-spin" type="checkbox" checked><span>Turn once at every spot <small>sharper walls, ~15 s per spot</small></span></label>
-          <button id="x-go" class="btn grad wide">Start mapping</button>
-        </div>
-        <div id="x-run" hidden>
-          <p id="x-msg" class="x-msg" role="status"></p>
-          <div class="tiles">
-            <div class="tile"><small>Mapped</small><b id="x-area">–</b><span>m²</span></div>
-            <div class="tile"><small>Elapsed</small><b id="x-time">–</b></div>
-            <div class="tile"><small>Areas visited</small><b id="x-done">0</b></div>
-            <div class="tile"><small>Open edges</small><b id="x-left">–</b></div>
-          </div>
-          <button id="x-stop" class="btn wide">Stop mapping</button>
-        </div>
-        <p id="x-last" class="x-last" hidden></p>
+      <div class="stack">
+        <form id="g-cmd" class="bubble">
+          <label for="g-cmd-in" class="sr-only">Command</label>
+          <textarea id="g-cmd-in" rows="2" autocomplete="off" placeholder="take this to Lab 3, wait 2 mins, then come back"></textarea>
+          <button class="send" type="submit" aria-label="Plan it"><svg><use href="#i-arrow"/></svg></button>
+        </form>
+        <button id="g-voice" class="companion" aria-label="Tap and speak a command">
+          <span class="wave" id="g-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+          <b id="g-voice-t">Tap and speak</b>
+          <small id="g-voice-s">Pathik understands places, waits and “come back”</small>
+        </button>
+        <p id="g-reply" class="reply" role="status" aria-live="polite"></p>
+        <div id="g-plan" class="plan card" hidden></div>
       </div>
-      <div class="row gap" data-min="operator">
-        <button id="d-savemap" class="btn grow">Save map</button>
-        <button id="d-locok" class="btn grad grow" hidden>Position OK</button>
-      </div>
-      <p class="lede" id="map-mode-note" data-min="operator"></p>
+
+      <section class="stack" aria-labelledby="g-places-h">
+        <div class="row between"><h2 class="section-h" id="g-places-h">Places</h2>
+          <div class="row gap-s" data-min="operator"><button id="g-here" class="btn small">Save here</button><button id="g-home" class="btn small">Set home</button></div>
+        </div>
+        <input id="g-search" class="search" type="search" placeholder="Search places, rooms and things" autocomplete="off" aria-label="Search places, rooms and things">
+        <ul id="g-places" class="list places"><li class="empty">Loading places…</li></ul>
+      </section>
+
+      <section class="stack" aria-labelledby="g-rooms-h">
+        <div class="row between"><h2 class="section-h" id="g-rooms-h">Rooms</h2><small class="muted" data-min="operator">Map tool “Room” adds one</small></div>
+        <ul id="g-rooms" class="list rooms"><li class="empty">Loading rooms…</li></ul>
+      </section>
+
+      <section class="stack" data-min="operator" aria-labelledby="g-sched-h">
+        <div class="row between"><h2 class="section-h" id="g-sched-h">Scheduled trips</h2><button id="g-sched-add" class="btn small">Add</button></div>
+        <ul id="g-sched" class="list sched"><li class="empty">Loading…</li></ul>
+      </section>
     </div>
+  </div>
 
-    <!-- Lab & diagnostics -->
-    <div class="panel" id="p-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
-      <div class="seg five" role="tablist" aria-label="Lab">
-        <button class="seg-b on" data-lab="health" role="tab" aria-selected="true">Health</button>
-        <button class="seg-b" data-lab="wheels" role="tab" aria-selected="false">Wheels</button>
-        <button class="seg-b" data-lab="path" role="tab" aria-selected="false">Path</button>
-        <button class="seg-b" data-lab="tests" role="tab" aria-selected="false">Tests</button>
-        <button class="seg-b" data-lab="log" role="tab" aria-selected="false">Log</button>
-      </div>
-
-      <div class="lab" id="lab-health">
-        <dl id="s-list" class="tiles stats"></dl>
-        <div class="console" aria-label="Diagnostics log">
-          <div class="console-h">Diagnostics log</div>
-          <ol id="s-events" class="events"></ol>
-        </div>
-        <button id="s-disconnect" class="btn wide">Switch robot</button>
-      </div>
-
-      <div class="lab" id="lab-wheels" hidden>
-        <p class="lede">Speed loop inside the ESP32. Changes apply instantly. Save keeps them after power‑off.</p>
-        <div class="chart-card">
-          <div class="row between">
-            <span class="legend"><i class="lg-t"></i>Target <i class="lg-l"></i>Left <i class="lg-r"></i>Right</span>
-            <label class="switch"><input id="w-live" type="checkbox"><span>Live</span></label>
-          </div>
-          <canvas id="w-chart" class="chart" height="170"></canvas>
-        </div>
-        <div class="row gap">
-          <button id="w-step" class="btn grad grow">Run step test</button>
-          <select id="w-step-v" aria-label="Step speed">
-            <option value="0.15">0.15 m/s</option><option value="0.2" selected>0.20 m/s</option><option value="0.3">0.30 m/s</option>
-          </select>
-        </div>
-        <div id="w-metrics" class="metrics" hidden></div>
-        <div id="w-params" class="params"></div>
-        <div class="row gap"><button id="w-save" class="btn grad grow">Save to robot</button><button id="w-reset" class="btn">Factory values</button></div>
-      </div>
-
-      <div class="lab" id="lab-path" hidden>
-        <p class="lede">How the robot follows a route. Changes apply to the next metre of driving.</p>
-        <div id="f-params" class="params"></div>
-        <div class="row gap"><button id="f-save" class="btn grad grow">Save</button><button id="f-reset" class="btn">Defaults</button></div>
-      </div>
-
-      <div class="lab" id="lab-log" hidden>
-        <p class="lede">Every finished mission is logged on the robot (maps/missions.jsonl): use these numbers in your report.</p>
-        <dl id="l-stats" class="tiles stats"></dl>
-        <ol id="l-list" class="loglist"></ol>
-        <div class="row gap"><button id="l-refresh" class="btn grow">Refresh</button><button id="l-csv" class="btn grad grow">Export CSV</button></div>
-      </div>
-
-      <div class="lab" id="lab-tests" hidden>
-        <p class="lede">Clear space first. Any touch on the remote or STOP ends a test.</p>
-        <div class="test-pick">
-          <button class="tp on" data-test="straight"><b>Straight line</b><span>Drives forward, measures drift</span></button>
-          <button class="tp" data-test="spin"><b>Spin</b><span>Turns on the spot, checks wheel separation</span></button>
-        </div>
-        <div class="row gap">
-          <label class="mini">Speed <select id="t-speed"></select></label>
-          <label class="mini">Time <select id="t-secs"><option value="2">2 s</option><option value="3" selected>3 s</option><option value="5">5 s</option><option value="8">8 s</option></select></label>
-        </div>
-        <button id="t-run" class="btn grad wide">Run test</button>
-        <div class="chart-card"><canvas id="t-chart" class="chart" height="200"></canvas></div>
-        <div id="t-metrics" class="metrics" hidden></div>
-      </div>
-    </div>
-
-    <!-- Me: account, appearance, robot, people (admin) -->
-    <div class="panel" id="p-me" role="tabpanel" aria-labelledby="tab-me" hidden>
-      <section class="group warn-card" id="me-public" hidden role="alert">
-        <div class="g-h">This robot is public</div>
+  <!-- ---------- Operate (operator / admin) or Me (staff): hub + sub-pages ---------- -->
+  <div class="page" id="p-more" role="tabpanel" aria-labelledby="tab-more" hidden>
+    <div class="page-in stack-l" id="more-hub">
+      <section class="card stack-s warn-card" id="me-public" hidden role="alert">
+        <div class="row gap"><svg class="ic warn" aria-hidden="true"><use href="#i-shield"/></svg><b class="title-s">This robot is public</b></div>
         <p>Anyone on the internet can open <b id="me-public-url">–</b> (Tailscale Funnel). Accounts and passwords
         still protect it, but turn it off when you are done:</p>
         <code>sudo bash ~/slam-robot/scripts/setup_tailscale.sh funnel off</code>
-        <p class="muted">Phones with the Tailscale app don't need it: they use the private path.</p>
-      </section>
-      <div class="me-card"><span class="avatar" id="me-ava">?</span><span class="grow"><b id="me-name">–</b><small id="me-user">–</small></span><span class="role" id="me-role">–</span></div>
-
-      <section class="group" data-min="admin" id="people-box">
-        <div class="g-h row between"><span>People</span><button id="pp-refresh" class="btn small ghost">Refresh</button></div>
-        <div style="padding: 6px 12px 12px"><ul id="people" class="people"></ul></div>
+        <p class="muted small">Phones with the Tailscale app don't need it: they use the private path.</p>
       </section>
 
-      <section class="group">
-        <div class="g-h">Appearance</div>
+      <div class="card row gap me-card"><span class="avatar" id="me-ava" aria-hidden="true">?</span><span class="grow"><b class="title-s" id="me-name">–</b><small class="muted block" id="me-user">–</small></span><span class="role" id="me-role">–</span></div>
+
+      <section class="group" data-min="operator" aria-labelledby="op-h">
+        <h2 class="g-h" id="op-h">Robot team</h2>
+        <button class="g-row" data-sub="health"><svg class="ic" aria-hidden="true"><use href="#i-pulse"/></svg><span class="grow"><b>Health</b><small id="hub-health">Link, motor board, LiDAR, sensors, diagnostics log</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="g-row" data-sub="wheels"><svg class="ic" aria-hidden="true"><use href="#i-wheel"/></svg><span class="grow"><b>Wheel tuning</b><small>Speed loop, live chart, step test</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="g-row" data-sub="path"><svg class="ic" aria-hidden="true"><use href="#i-route"/></svg><span class="grow"><b>Path following</b><small>Cruise speed, turns, look‑ahead</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="g-row" data-sub="tests"><svg class="ic" aria-hidden="true"><use href="#i-test"/></svg><span class="grow"><b>Drive tests</b><small>Straight line drift, spin / wheel separation</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="g-row" data-sub="log"><svg class="ic" aria-hidden="true"><use href="#i-log"/></svg><span class="grow"><b>Mission log</b><small>Success rate, times, CSV export</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="g-row" data-sub="people" data-min="admin"><svg class="ic" aria-hidden="true"><use href="#i-people"/></svg><span class="grow"><b>People</b><small id="hub-people">Approve sign-ups, roles, passwords</small></span><span class="badge" id="hub-people-badge" hidden>0</span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+      </section>
+
+      <section class="group" aria-labelledby="ap-h">
+        <h2 class="g-h" id="ap-h">Appearance</h2>
         <div class="seg theme" role="radiogroup" aria-label="Theme">
           <button class="seg-b" data-theme-pick="system" role="radio">System</button>
           <button class="seg-b" data-theme-pick="light" role="radio">Light</button>
@@ -364,40 +365,143 @@
         </div>
       </section>
 
-      <section class="group">
-        <div class="g-h">Robot</div>
-        <div class="g-row"><span class="grow"><b id="me-robot">–</b><small id="me-net">–</small></span><span class="dot" id="me-dot"></span></div>
-        <button class="g-row" id="me-switch"><span class="grow"><b>Switch robot</b><small>Connect to another Pathik</small></span><span class="chev">›</span></button>
+      <section class="group" aria-labelledby="rb-h">
+        <h2 class="g-h" id="rb-h">Robot</h2>
+        <div class="g-row"><span class="dot" id="me-dot"></span><span class="grow"><b id="me-robot">–</b><small id="me-net">–</small></span></div>
+        <button class="g-row" id="me-switch"><span class="grow"><b>Switch robot</b><small>Connect to another Pathik</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
       </section>
 
-      <section class="group">
-        <div class="g-h">Account</div>
-        <button class="g-row" id="me-pass"><span class="grow"><b>Change password</b><small>Logs you out on your other devices</small></span><span class="chev">›</span></button>
-        <button class="g-row danger" id="me-out"><span class="grow"><b>Log out</b><small>On this phone</small></span><span class="chev">›</span></button>
+      <section class="group" aria-labelledby="ac-h">
+        <h2 class="g-h" id="ac-h">Account</h2>
+        <button class="g-row" id="me-pass"><span class="grow"><b>Change password</b><small>Logs you out on your other devices</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="g-row danger" id="me-out"><span class="grow"><b>Log out</b><small>On this phone</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
       </section>
-      <p class="lede" style="text-align:center">Pathik · roles: <span class="role staff">staff</span> send &amp; stop · <span class="role operator">operator</span> drive, map, tune · <span class="role admin">admin</span> people</p>
+      <p class="muted small center">Pathik · roles: <span class="role staff">staff</span> send &amp; stop · <span class="role operator">operator</span> drive, map, tune · <span class="role admin">admin</span> people</p>
+    </div>
+
+    <!-- sub-pages (operator area) -->
+    <div class="page-in stack-l sub" id="lab-health" hidden>
+      <div class="sub-h"><button class="back" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button><h1 class="title-m">Health</h1></div>
+      <dl id="s-list" class="tiles stats"></dl>
+      <div class="console" aria-label="Diagnostics log">
+        <div class="console-h">Diagnostics log</div>
+        <ol id="s-events" class="events"></ol>
+      </div>
+      <button id="s-disconnect" class="btn wide">Switch robot</button>
+    </div>
+
+    <div class="page-in stack-l sub" id="lab-wheels" hidden>
+      <div class="sub-h"><button class="back" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button><h1 class="title-m">Wheel tuning</h1></div>
+      <p class="muted small">Speed loop inside the ESP32. Changes apply instantly. Save keeps them after power‑off.</p>
+      <div class="card chart-card">
+        <div class="row between">
+          <span class="legend"><i class="lg-t"></i>Target <i class="lg-l"></i>Left <i class="lg-r"></i>Right</span>
+          <label class="switch"><input id="w-live" type="checkbox"><span>Live</span></label>
+        </div>
+        <canvas id="w-chart" class="chart" height="170"></canvas>
+      </div>
+      <div class="row gap">
+        <button id="w-step" class="btn primary grow">Run step test</button>
+        <select id="w-step-v" aria-label="Step speed">
+          <option value="0.15">0.15 m/s</option><option value="0.2" selected>0.20 m/s</option><option value="0.3">0.30 m/s</option>
+        </select>
+      </div>
+      <div id="w-metrics" class="metrics" hidden></div>
+      <div id="w-params" class="params card"></div>
+      <div class="row gap"><button id="w-save" class="btn primary grow">Save to robot</button><button id="w-reset" class="btn">Factory values</button></div>
+    </div>
+
+    <div class="page-in stack-l sub" id="lab-path" hidden>
+      <div class="sub-h"><button class="back" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button><h1 class="title-m">Path following</h1></div>
+      <p class="muted small">How the robot follows a route. Changes apply to the next metre of driving.</p>
+      <div id="f-params" class="params card"><p class="muted">Loading…</p></div>
+      <div class="row gap"><button id="f-save" class="btn primary grow">Save</button><button id="f-reset" class="btn">Defaults</button></div>
+    </div>
+
+    <div class="page-in stack-l sub" id="lab-tests" hidden>
+      <div class="sub-h"><button class="back" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button><h1 class="title-m">Drive tests</h1></div>
+      <p class="muted small">Clear space first. Any touch on the remote or STOP ends a test.</p>
+      <div class="test-pick">
+        <button class="tp on" data-test="straight"><b>Straight line</b><span>Drives forward, measures drift</span></button>
+        <button class="tp" data-test="spin"><b>Spin</b><span>Turns on the spot, checks wheel separation</span></button>
+      </div>
+      <div class="row gap">
+        <label class="mini">Speed <select id="t-speed"></select></label>
+        <label class="mini">Time <select id="t-secs"><option value="2">2 s</option><option value="3" selected>3 s</option><option value="5">5 s</option><option value="8">8 s</option></select></label>
+      </div>
+      <button id="t-run" class="btn primary wide">Run test</button>
+      <div class="card chart-card"><canvas id="t-chart" class="chart" height="200"></canvas></div>
+      <div id="t-metrics" class="metrics" hidden></div>
+    </div>
+
+    <div class="page-in stack-l sub" id="lab-log" hidden>
+      <div class="sub-h"><button class="back" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button><h1 class="title-m">Mission log</h1></div>
+      <p class="muted small">Every finished mission is logged on the robot (maps/missions.jsonl): use these numbers in your report.</p>
+      <dl id="l-stats" class="tiles stats"></dl>
+      <ol id="l-list" class="list loglist"><li class="empty">Loading…</li></ol>
+      <div class="row gap"><button id="l-refresh" class="btn grow">Refresh</button><button id="l-csv" class="btn primary grow">Export CSV</button></div>
+    </div>
+
+    <div class="page-in stack-l sub" id="lab-people" hidden>
+      <div class="sub-h"><button class="back" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button><h1 class="title-m grow">People</h1><button id="pp-refresh" class="btn small ghost">Refresh</button></div>
+      <ul id="people" class="list people"><li class="empty">Loading…</li></ul>
     </div>
   </div>
 
-  <nav class="tabs glass" role="tablist" aria-label="Sections">
-    <button class="tab on" id="tab-drive" data-tab="drive" data-min="operator" role="tab" aria-selected="true">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3"/></svg>Drive</button>
-    <button class="tab" id="tab-go" data-tab="go" role="tab" aria-selected="false">
-      <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><span id="tab-go-t">Go</span></button>
-    <button class="tab" id="tab-map" data-tab="map" role="tab" aria-selected="false">
-      <svg viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg>Map</button>
-    <button class="tab" id="tab-lab" data-tab="lab" data-min="operator" role="tab" aria-selected="false">
-      <svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 5-8 4 5"/><path d="M3 21h18"/></svg>Lab</button>
-    <button class="tab" id="tab-me" data-tab="me" role="tab" aria-selected="false">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.2-4 4.3-6 8-6s6.8 2 8 6"/></svg>Me<span class="badge" id="tab-me-badge" hidden>0</span></button>
+  <!-- ---------- always on top: status bar, alerts, camera ---------- -->
+  <header class="topbar">
+    <button id="t-robot" class="pill glass" aria-label="Connection and robot health">
+      <span id="t-dot" class="dot"></span>
+      <span class="t-name" id="t-host">robot</span>
+      <span id="t-public" class="tag-public" hidden title="Reachable from the internet (Tailscale Funnel): see Operate / Me">Public</span>
+      <span class="t-link" id="t-link">–</span>
+    </button>
+    <div class="t-right">
+      <button id="t-cam" class="chip glass cam-chip" aria-label="Camera: what the robot sees" aria-pressed="false" hidden><svg><use href="#i-cam"/></svg><i id="t-cam-dot"></i></button>
+      <span id="t-bat" class="chip glass bat" hidden></span>
+      <button id="t-mode" class="chip glass" aria-label="Robot state. Tap: why?">Idle</button>
+    </div>
+  </header>
+
+  <div class="alerts" id="alerts">
+    <div id="m-banner" class="m-banner glass" hidden role="status"></div>
+    <div id="m-confirm" class="m-confirm glass" hidden role="alert"></div>
+    <div id="m-why" class="m-why glass" hidden role="status"></div>
+    <div id="m-vis" class="m-vis glass" hidden role="status"></div>
+  </div>
+
+  <!-- camera: live picture + what the robot decided about the people in front of it -->
+  <div id="cam" class="cam glass" hidden>
+    <div class="cam-h">
+      <span id="cam-act" class="cam-act">–</span>
+      <span id="cam-fps" class="cam-fps"></span>
+      <button id="cam-size" class="cam-btn" aria-label="Bigger / smaller picture"><svg><use href="#i-expand"/></svg></button>
+      <button id="cam-x" class="cam-btn" aria-label="Close the camera"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="cam-pic">
+      <img id="cam-img" alt="Live picture from the robot's camera" hidden>
+      <canvas id="cam-demo" width="320" height="180" hidden></canvas>
+      <p id="cam-empty" class="cam-empty">Waiting for the camera…</p>
+    </div>
+    <p id="cam-why" class="cam-why"></p>
+    <ul id="cam-people" class="cam-people"></ul>
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab on" id="tab-home" data-tab="home" role="tab" aria-selected="true"><svg aria-hidden="true"><use href="#i-home"/></svg>Home</button>
+    <button class="tab" id="tab-send" data-tab="send" role="tab" aria-selected="false"><svg aria-hidden="true"><use href="#i-send"/></svg>Send</button>
+    <span class="tab-gap" aria-hidden="true"></span>
+    <button class="tab" id="tab-map" data-tab="map" role="tab" aria-selected="false"><svg aria-hidden="true"><use href="#i-map"/></svg>Map</button>
+    <button class="tab" id="tab-drive" data-tab="drive" data-min="operator" role="tab" aria-selected="false"><svg aria-hidden="true"><use href="#i-drive"/></svg>Drive</button>
+    <button class="tab" id="tab-more" data-tab="more" role="tab" aria-selected="false"><svg aria-hidden="true"><use href="#i-grid"/></svg><span id="tab-more-t">Operate</span><span class="badge" id="tab-me-badge" hidden>0</span></button>
   </nav>
 
   <button id="estop" class="estop" aria-label="Emergency stop"><span>STOP</span></button>
   <div id="estopped" class="estopped" hidden>
-    <div class="es-in glass">
-      <b>Stopped</b>
+    <div class="es-in card" role="alertdialog" aria-labelledby="es-t">
+      <b id="es-t">Stopped</b>
       <p data-min="operator">Motors are locked. Check the area, then hold to release.</p>
-      <p class="stop-note" data-max="staff">Motors are locked. Someone from the robot team (operator) checks the area and releases it.</p>
+      <p class="muted" data-max="staff">Motors are locked. Someone from the robot team (operator) checks the area and releases it.</p>
       <button id="es-release" class="btn hold" data-min="operator"><span class="hold-fill"></span><span class="hold-t">Hold to release</span></button>
     </div>
   </div>
@@ -405,11 +509,11 @@
 
 <!-- long-press action sheet -->
 <div id="action" class="action" hidden>
-  <div class="action-card glass" role="dialog" aria-modal="true" aria-labelledby="a-title">
+  <div class="action-card" role="dialog" aria-modal="true" aria-labelledby="a-title">
     <h3 id="a-title">This spot</h3>
     <p id="a-coords" class="muted"></p>
     <div id="a-route" class="muted"></div>
-    <button id="a-go" class="btn grad wide">Go here</button>
+    <button id="a-go" class="btn primary wide">Go here</button>
     <button id="a-save" class="btn wide">Save as a place</button>
     <button id="a-home" class="btn wide">Set home here</button>
     <button id="a-cancel" class="btn ghost wide">Cancel</button>
@@ -418,14 +522,6 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="mark" viewBox="0 0 64 64">
-    <path d="M32 4 60 32 32 60 4 32z" fill="#E5487F"/>
-    <path d="M32 14 50 32 32 50 14 32z" fill="#141418"/>
-    <path d="M32 22 42 32 32 42 22 32z" fill="#FF9F2E"/>
-    <circle cx="32" cy="32" r="3.5" fill="#2DE2C8"/>
-  </symbol>
-</svg>
 <script src="demo.js"></script>
 <script src="app.js"></script>
 </body>
