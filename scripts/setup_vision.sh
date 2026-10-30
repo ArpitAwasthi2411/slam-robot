@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # People detection for the robot's camera: NCNN runtime (light, no PyTorch while driving) + YOLO11n.
 #   bash ~/slam-robot/scripts/setup_vision.sh        (as arpit, NOT sudo; 15-30 min the first time)
-# The model is exported once in a throwaway Python venv (that part downloads PyTorch, ~1 GB, then deletes it).
+# The model is exported once in a throwaway Python venv (CPU-only PyTorch, a few hundred MB, deleted afterwards).
 # Faster: export on a laptop that has ultralytics:  yolo export model=yolo11n.pt format=ncnn imgsz=320
 #         then copy the folder:  scp -r yolo11n_ncnn_model arpit@<pi>:~/models/
 set -euo pipefail
@@ -24,6 +24,8 @@ else
   VENV="$HOME/.cache/yolo-export"
   python3 -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip
+  # CPU-only PyTorch first (~200 MB): the default wheel drags in ~3 GB of NVIDIA CUDA libraries the Pi can't use
+  "$VENV/bin/pip" install torch torchvision --index-url https://download.pytorch.org/whl/cpu
   "$VENV/bin/pip" install ultralytics ncnn
   mkdir -p "$MODELS" && cd "$MODELS"
   "$VENV/bin/yolo" export model=yolo11n.pt format=ncnn imgsz=320
