@@ -17,6 +17,7 @@ import os
 import threading
 import time
 
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profile_sensor_data
@@ -32,6 +33,8 @@ from lidar_robot.dashboard_server import DashboardServer
 from lidar_robot.explorer import MapAutoSaver
 from lidar_robot.kinematics import yaw_from_quaternion, quaternion_from_yaw, wrap_angle
 from lidar_robot.mapsave import save_map
+from lidar_robot.pihealth import PiHealth
+from lidar_robot import scan_points
 from lidar_robot.tuning import TelemetryBuffer, TestRunner, ranges_for_app, WHEEL_RANGES
 
 APP_API = 2
@@ -69,8 +72,13 @@ class DashboardNode(Node):
         self.map_msg = None
         self.map_version = 0
         self.map_cache = None          # (version, dict)
-        self.scan_pts = []
+        self.scan_msg = None           # latest scan; turned into app points only when an app asks
+        self.scan_pts, self.scan_pts_of = [], None
+        self.scan_geo = scan_points.ScanGeometry()
         self.scan_times = []
+        self.state_cache = (0.0, None)  # several phones polling share one state build (STATE_CACHE_S)
+        self.pihealth = PiHealth()
+        self.create_timer(15.0, self._warn_pi)
         self.laser_tf = None
         self.robot_status = {}
         self.robot_status_t = 0.0
@@ -166,18 +174,30 @@ class DashboardNode(Node):
                                  yaw_from_quaternion(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w))
             except TransformException:
                 return
-        lx, ly, lyaw = self.laser_tf
-        pts = []
-        a = msg.angle_min
-        for i, r in enumerate(msg.ranges):
-            if i % self.scan_dec == 0 and msg.range_min < r < msg.range_max and math.isfinite(r):
-                ab = a + lyaw
-                pts.append((round(lx + r * math.cos(ab), 3), round(ly + r * math.sin(ab), 3)))
-            a += msg.angle_increment
         now = time.monotonic()
         with self.lock:
-            self.scan_pts = pts
+            self.scan_msg = msg
             self.scan_times = [t for t in self.scan_times if now - t < 2.0] + [now]
+
+    def _app_scan_points(self):
+        """The latest scan as app points (base_link), computed at most once per scan and only on demand."""
+        with self.lock:
+            msg, done = self.scan_msg, self.scan_pts_of
+        if msg is None or self.laser_tf is None:
+            return []
+        if msg is not done:
+            pts = scan_points.app_points(self.scan_geo, msg.ranges, msg.angle_min, msg.angle_increment,
+                                         msg.range_min, msg.range_max, laser=self.laser_tf,
+                                         decimation=self.scan_dec)
+            with self.lock:
+                self.scan_pts, self.scan_pts_of = pts, msg
+        return self.scan_pts
+
+    def _warn_pi(self):
+        h = self.pihealth.sample()
+        if h.get('level') == 'bad':
+            self.get_logger().warn(f"Raspberry Pi: {h['text']} (temp {h.get('temp_c')} C, "
+                                   f"throttled {h.get('throttled')})", throttle_duration_sec=60.0)
 
     def _on_robot_status(self, msg):
         try:
@@ -291,14 +311,25 @@ class DashboardNode(Node):
         return self.camera if time.monotonic() - self.camera_t < 2.0 else None
 
     # ------------------------------------------------------------ backend API
+    STATE_CACHE_S = 0.1
+
     def get_state(self):
+        """Everything the app shows. Built at most every STATE_CACHE_S, however many phones poll."""
+        t, st = self.state_cache
+        if st is not None and time.monotonic() - t < self.STATE_CACHE_S:
+            return st
+        st = self._build_state()
+        self.state_cache = (time.monotonic(), st)
+        return st
+
+    def _build_state(self):
         # status comes at 2 Hz; 3 s so a busy Pi (Cartographer) doesn't flash 'not talking'
         alive = time.monotonic() - self.robot_status_t < 3.0
         rs = self.robot_status if alive else {}
+        pts = self._app_scan_points()
         with self.lock:
             m = self.map_msg
             scan_hz = len(self.scan_times) / 2.0
-            pts = list(self.scan_pts)
         odom = rs.get('odom', {})
         return {
             'time': time.time(),
@@ -327,6 +358,7 @@ class DashboardNode(Node):
             'vision': self.vision if time.monotonic() - self.vision_t < 2.0 else None,
             'camera': time.monotonic() - self.camera_t < 2.0,
             'voice': self.voice if time.monotonic() - self.voice_t < 5.0 else None,
+            'pi': self.pihealth.sample(),
         }
 
     # ------------------------------------------------------------ mobile app / Tuning Lab
@@ -377,8 +409,9 @@ class DashboardNode(Node):
                 return None
             if self.map_cache and self.map_cache[0] == ver:
                 return self.map_cache[1]
-        # unknown(-1)->0, 0..100 -> 1..101 so it fits in a byte
-        raw = bytes((v + 1) if v >= 0 else 0 for v in m.data)
+        # unknown(-1)->0, 0..100 -> 1..101 so it fits in a byte (numpy: ~100x faster than a Python loop)
+        d = np.asarray(m.data, dtype=np.int16)
+        raw = np.where(d >= 0, d + 1, 0).astype(np.uint8).tobytes()
         o = m.info.origin
         out = {
             'version': ver, 'width': m.info.width, 'height': m.info.height,

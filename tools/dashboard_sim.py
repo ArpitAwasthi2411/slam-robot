@@ -407,6 +407,8 @@ class SimBackend:
                 'sensors': {'us': list(self.us), 'imu_ok': True, 'yaw_source': 'gyro', 'us_mounts': US_MOUNTS,
                             'bumper': False, 'bumps': self.bumps},
                 'nav': self.nav.status(),
+                'pi': {'temp_c': 55.0, 'cpu_pct': 40.0, 'load1': 1.6, 'cores': 4, 'throttled': '0x0', 'flags': [],
+                       'level': 'ok', 'text': 'OK (simulator: made-up numbers)'},
                 'voice': dict({'ok': False, 'mic': False, 'button': False, 'stt': 'none',
                                'message': 'simulator: no microphone (POST /api/voice {"action": "stop", "text": "..."} pretends)'},
                               **getattr(self, 'voice_last', {})),

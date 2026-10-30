@@ -62,7 +62,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
   v3 layout (Phase 2): Home · Send · Map · Drive · Operate (staff: Home · Send · Map · Me), STOP in the tab bar.
   Feature inventory + parity checklist `docs/APP_FEATURES.md`; browser check `test/app_parity.js` (run by `test_app_parity.py`).
 - MCP server: `scripts/mcp_server.py` (logs in with `ROBOT_USER`/`ROBOT_PASSWORD`), docs `docs/mcp.md`.
-- Tools: `tools/dashboard_sim.py --demo-users` (whole app without the robot), `tools/link_doctor.sh`,
+- Tools: `tools/dashboard_sim.py --demo-users` (whole app without the robot), `tools/link_doctor.sh`, `tools/cpu_report.py` (CPU per program, temp, throttling),
   `tools/robot_check.sh` (one-shot health check), `tools/serial_probe.py`, `tools/eval_commands.py`, `tools/eval_nav.py`, `scripts/find_ports.py`.
 - Deploy: `scripts/robot.service` + `~/robot.env` (ROBOT_ARGS, GROQ_API_KEY) is what runs today.
   Docker (`Dockerfile`, `deploy/pi/docker-compose.yml`, `scripts/pathik.sh`) is built by CI but not installed on the Pi.
@@ -70,7 +70,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
   `firmware.yml` (S3 + classic on cores 2.0.17 and 3.0.7).
 - Voice on the robot: `voice_node.py` (push-to-talk → arecord → `voice.py` Groq Whisper / Vosk → navigator command →
   reply via `/speech/say`), `speech.py` Speaker (Piper / espeak), `scripts/setup_voice.sh`, `docs/STEPS_voice.md`.
-- Vision on the robot: `vision_node.py` (Camera Module 3 via libcamera/GStreamer subprocess, YOLO11n NCNN ~4 Hz,
+- Vision on the robot: `vision_node.py` (Camera Module 3 via libcamera/GStreamer subprocess, 5 frames/s to Python, YOLO11n NCNN det_rate 2/s on core 3,
   LiDAR distance per person) -> `/vision/decision` + `/vision/image/compressed`; rules + `VisionGate` in
   `vision_rules.py`; navigator slows/stops (`use_vision`), app camera card (`/api/camera.jpg`). Setup:
   `scripts/setup_pi_camera.sh` (+ `setup_imx708_driver.sh`: Ubuntu kernels lack imx708), `scripts/setup_vision.sh`,
@@ -84,7 +84,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-10-29**
+**Last updated: 2026-10-30**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -104,6 +104,11 @@ Done in code, NOT yet verified on the robot:
 - link-drop diagnostics (v2.4.2), battery divider, docking, schedules, rooms + LLM on the real floor
 - Docker deployment, MCP server against the real robot
 
+Lab 2026-10-30 findings (S3 board): encoder **GND was not connected** -> 0 ticks, so the speed loop ran open
+(robot 2x too fast, spins 3-4x) and the map shifted; ground found, not yet re-tested. ESP32 flash holds wrong
+wheel tuning (max_mms 225, ki 4.15): reset with esp_cmd `{"op": "defaults"}`. `imu=FAIL(who=0x00)`: check I2C
+wiring (SDA 11, SCL 12). Pi showed under-voltage (0x50005, 4.7 V at the pins) and overload: see docs/compute.md.
+
 Open problems / TODO (priority order):
 1. Lab bring-up on the S3 (`docs/STEPS_esp32s3_lab.md`), then the drive test with `link_doctor.sh --watch`
    (ESP32 used to drop/reconnect while driving: power noise suspected; capacitors planned).
@@ -118,6 +123,14 @@ Open problems / TODO (priority order):
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-10-30 (evening): Pi compute pass (docs/compute.md): localization runs draw the frozen map only (grid node
+  `-include_unfrozen_submaps false`, 10 s); launch `cpu_plan` (cpu_plan.py: vision on core 3 nice 10, dashboard/voice/
+  grid nice 5); map->odom 20 Hz; numpy scan code (scan_points.py) in navigator + dashboard (lazy, per app request);
+  dashboard state cache 0.1 s, numpy map bytes, gzip 1; camera out_fps 5 via videorate + ISP BGR (videoconvert
+  fallback); ArUco only while docking (`/vision/marker_request`, core.wants_marker); YOLO never twice on one frame;
+  Pi health (pihealth.py: temp/CPU/throttle) in /api/state + app Health row + warning toast; app polls 3/s when still;
+  tools/cpu_report.py. Tests: test_compute.py.
 
 - 2026-10-30: robot voice button policy (navigator_core `_button_command`): trips only from the home spot/dock,
   normal priority, 1 per 30 s; stop/OK/questions anywhere; admin switch (app Me → Robot, `button_settings`,

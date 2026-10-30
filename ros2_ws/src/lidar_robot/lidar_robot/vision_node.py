@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Camera node: people detection -> STOP / SLOW_DOWN / CONTINUE for the navigator, live picture for the app.
 
-  camera (Camera Module 3 Wide via libcamera/GStreamer, or a USB webcam)
-    -> YOLO11n person detection (NCNN, no PyTorch at run time; ~4 Hz on a Pi 4, 2 threads)
+  camera (Camera Module 3 Wide via libcamera/GStreamer, or a USB webcam): sensor at fps, only out_fps
+  frames/s reach Python (GStreamer drops the rest; the Pi's ISP makes BGR when it can)
+    -> YOLO11n person detection (NCNN, no PyTorch at run time; det_rate per second, 1 thread)
     -> PersonTracker (ids, approaching) -> distance from the LiDAR scan at each person's bearing
     -> vision_rules.decide()
 
 Publishes
   /vision/decision          std_msgs/String  JSON {action, speed_factor, reason, steer, people[], fps, ...}
-  /vision/image/compressed  sensor_msgs/CompressedImage  JPEG with boxes + decision (for the app)
+  /vision/image/compressed  sensor_msgs/CompressedImage  JPEG with boxes + decision (for the app), only
+                            while the app's camera view is open (/vision/stream_request)
+  /vision/dock_marker       std_msgs/String  dock marker pose, only while docking (/vision/marker_request)
 Subscribes
   /scan                     distances for the people the camera sees
+  /vision/stream_request, /vision/marker_request   std_msgs/Empty  "keep doing it for a few more seconds"
 
 Setup on the Pi (once): scripts/setup_pi_camera.sh (libcamera for the Camera Module 3) and
 scripts/setup_vision.sh (NCNN + the YOLO model). Without them the node keeps running and reports
@@ -50,12 +54,28 @@ def _env_with_libcamera():
 class Camera:
     """Latest frame from libcamera (gst-launch subprocess -> raw BGR on stdout) or OpenCV."""
 
-    def __init__(self, source, width, height, fps, log):
+    def __init__(self, source, width, height, fps, log, out_fps=5):
         self.source, self.w, self.h, self.fps, self.log = source, width, height, fps, log
+        # the sensor runs at fps (short exposures, no motion blur) but only out_fps frames a second reach
+        # Python: videorate drops the rest inside GStreamer, before any colour conversion or pipe copy
+        self.out_fps = max(1, min(int(fps), int(out_fps)))
         self.frame, self.stamp, self.error, self.kind, self.stderr_tail = None, 0.0, '', '', ''
+        self.mode = ''                 # 'isp' (the Pi's ISP makes BGR, no CPU conversion) | 'convert' | 'opencv'
+        # ISP output is tried first; rows must need no padding (640 x 3 bytes is a multiple of 64)
+        self.isp_ok = None if (width * 3) % 64 == 0 else False
         self.proc, self.cap = None, None
         self.running = True
         threading.Thread(target=self._run, daemon=True).start()
+
+    def pipeline(self, isp):
+        """gst-launch-1.0 arguments: libcamera -> drop to out_fps -> BGR -> stdout."""
+        caps = f'video/x-raw,width={self.w},height={self.h},framerate={int(self.fps)}/1'
+        rate = ['videorate', 'drop-only=true', '!', f'video/x-raw,framerate={self.out_fps}/1', '!']
+        if isp:
+            return ['gst-launch-1.0', '-q', 'libcamerasrc', '!', caps + ',format=BGR', '!'] + rate + \
+                   ['fdsink', 'fd=1', 'sync=false']
+        return ['gst-launch-1.0', '-q', 'libcamerasrc', '!', caps, '!'] + rate + \
+               ['videoconvert', '!', 'video/x-raw,format=BGR', '!', 'fdsink', 'fd=1', 'sync=false']
 
     def _libcamera_ok(self, env):
         if not shutil.which('gst-launch-1.0') or not shutil.which('gst-inspect-1.0'):
@@ -67,9 +87,9 @@ class Camera:
         env = _env_with_libcamera()
         src = str(self.source)
         if src in ('auto', 'libcamera') and self._libcamera_ok(env):
-            caps = f'video/x-raw,width={self.w},height={self.h},framerate={int(self.fps)}/1'
-            cmd = ['gst-launch-1.0', '-q', 'libcamerasrc', '!', caps, '!', 'videoconvert', '!',
-                   'video/x-raw,format=BGR', '!', 'fdsink', 'fd=1', 'sync=false']
+            isp = self.isp_ok is not False
+            cmd = self.pipeline(isp)
+            self.mode = 'isp' if isp else 'convert'
             self.proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                          bufsize=0)
             self.stderr_tail = ''
@@ -89,7 +109,8 @@ class Camera:
             return False
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.w)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.h)
-        self.kind = f'opencv {dev}'
+        self.cap.set(cv2.CAP_PROP_FPS, self.out_fps)
+        self.kind, self.mode = f'opencv {dev}', 'opencv'
         return True
 
     def _drain_stderr(self, proc):
@@ -116,14 +137,24 @@ class Camera:
                     time.sleep(10.0)
                     continue
                 self.error = ''
-                self.log(f'camera: {self.kind} {self.w}x{self.h}')
+                self.log(f'camera: {self.kind} ({self.mode}) {self.w}x{self.h}, {self.out_fps} frames/s used')
                 n = self.w * self.h * 3
+                got_one = False
                 while self.running:
                     if self.proc:
                         buf = self._read_exact(n)
                         if buf is None:
                             time.sleep(0.2)
+                            if self.mode == 'isp' and not got_one:
+                                # this libcamera can't hand out BGR itself: convert on the CPU from now on
+                                self.isp_ok = False
+                                self.log('camera: ISP BGR output refused, using videoconvert')
+                                self.close()
+                                break
                             raise RuntimeError('camera stream ended: ' + self.stderr_tail.strip()[-300:])
+                        if self.mode == 'isp':
+                            self.isp_ok = True
+                        got_one = True
                         frame = np.frombuffer(buf, dtype=np.uint8).reshape(self.h, self.w, 3)
                     else:
                         ok, frame = self.cap.read()
@@ -186,7 +217,8 @@ class VisionNode(Node):
         d('camera', 'auto')             # auto | libcamera | /dev/videoN | N
         d('width', 640)
         d('height', 360)                # 16:9 keeps the wide lens' full view
-        d('fps', 15)
+        d('fps', 15)                    # sensor frame rate (short exposures = sharp people)
+        d('out_fps', 5)                 # frames per second handed to Python (detection + app picture)
         d('hfov_deg', 102.0)            # Camera Module 3 Wide: 102 deg horizontal (120 diagonal)
         d('flip', False)                # camera mounted upside down
         d('model_dir', os.path.expanduser('~/models/yolo11n_ncnn_model'))
@@ -206,6 +238,8 @@ class VisionNode(Node):
         d('marker_id', 0)
         d('marker_size_m', 0.08)
         d('marker_rate', 10.0)
+        d('marker_always', False)       # True = look for the marker all the time (bench tests); normally
+                                        # only while the navigator is docking (vision/marker_request)
         d('camera_calib', '')           # YAML (config/camera_calib.yaml); empty = built-in defaults
         g = lambda n: self.get_parameter(n).value  # noqa: E731
         self.p = {n: g(n) for n in ('hfov_deg', 'flip', 'conf', 'det_rate', 'stream_rate', 'jpeg_quality',
@@ -225,7 +259,8 @@ class VisionNode(Node):
         self.people, self.decision, self.fps = [], None, 0.0
 
         self.camera = Camera(g('camera'), int(g('width')), int(g('height')), int(g('fps')),
-                             lambda m: self.get_logger().warn(m, throttle_duration_sec=30.0))
+                             lambda m: self.get_logger().warn(m, throttle_duration_sec=30.0),
+                             out_fps=int(g('out_fps')))
         self.detector, self.det_error = None, ''
         try:
             self.detector = Detector(os.path.expanduser(g('model_dir')), int(g('imgsz')), int(g('threads')))
@@ -247,7 +282,10 @@ class VisionNode(Node):
             if self.marker.error:
                 self.get_logger().warn(f'dock marker detection off: {self.marker.error}')
             else:
-                self.marker_period = 1.0 / max(1.0, float(g('marker_rate')))
+                self.marker_period = 1.0 / max(1.0, min(float(g('marker_rate')), float(self.camera.out_fps)))
+                self.marker_always = bool(g('marker_always'))
+                self.marker_until = 0.0
+                self.create_subscription(Empty, 'vision/marker_request', self._on_marker_request, 5)
                 threading.Thread(target=self._marker_loop, daemon=True).start()
         # the live picture costs CPU (draw + JPEG + ROS transfer): only while someone has the app's camera view open
         self.stream_until = 0.0
@@ -256,9 +294,13 @@ class VisionNode(Node):
         self.get_logger().info('vision node up')
 
     def _on_scan(self, msg):
+        # keep the message's own array (no per-scan list copy): it is only read at detection time
         with self.lock:
-            self.scan = (list(msg.ranges), msg.angle_min, msg.angle_increment, msg.range_min, msg.range_max)
+            self.scan = (msg.ranges, msg.angle_min, msg.angle_increment, msg.range_min, msg.range_max)
             self.scan_t = time.monotonic()
+
+    def _on_marker_request(self, _msg):
+        self.marker_until = time.monotonic() + 3.0
 
     def _frame(self):
         f, t = self.camera.frame, self.camera.stamp
@@ -269,9 +311,21 @@ class VisionNode(Node):
             f = cv2.rotate(f, cv2.ROTATE_180)
         return f
 
+    def marker_wanted(self, now=None):
+        """ArUco search costs a core-share at 10 Hz: only while docking (or marker_always)."""
+        return self.marker_always or (now or time.monotonic()) < self.marker_until
+
     def _marker_loop(self):
+        last_stamp = None
         while self.running:
             t0 = time.monotonic()
+            if not self.marker_wanted(t0):
+                time.sleep(0.2)
+                continue
+            if self.camera.stamp == last_stamp and self.camera.frame is not None:
+                time.sleep(0.02)            # same picture as last time: nothing new to look at
+                continue
+            last_stamp = self.camera.stamp
             frame = self._frame()
             r = self.marker.detect(frame) if frame is not None else {'found': False, 'error': 'no camera picture'}
             r['t'] = round(time.time(), 2)
@@ -283,8 +337,14 @@ class VisionNode(Node):
     def _detect_loop(self):
         period = 1.0 / max(0.5, float(self.p['det_rate']))
         last = time.monotonic()
+        last_stamp = None
         while self.running:
             t0 = time.monotonic()
+            if self.camera.stamp == last_stamp and self.camera.frame is not None \
+                    and t0 - self.camera.stamp < 1.0:
+                time.sleep(0.02)            # no new picture yet: don't run YOLO on the same one twice
+                continue
+            last_stamp = self.camera.stamp
             frame = self._frame()
             msg = {'camera_ok': frame is not None, 'camera': self.camera.kind,
                    'camera_error': self.camera.error, 'detector': self.detector is not None,

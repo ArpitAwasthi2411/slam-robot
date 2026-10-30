@@ -30,8 +30,8 @@ options = {
   num_point_clouds = 0,
 
   lookup_transform_timeout_sec = 0.2,
-  submap_publish_period_sec = 0.3,
-  pose_publish_period_sec = 0.02,      -- 50 Hz is plenty (200 Hz overloaded the Pi's Python TF listeners)
+  submap_publish_period_sec = 1.0,    -- the frozen map does not change: no need to re-list submaps 3x a second
+  pose_publish_period_sec = 0.05,      -- 20 Hz: the navigator takes the fast part from the wheels (50 Hz) and only the slow map->odom correction from here; 200 Hz overloaded the Pi
   trajectory_publish_period_sec = 30e-3,
 
   rangefinder_sampling_ratio = 1.0,

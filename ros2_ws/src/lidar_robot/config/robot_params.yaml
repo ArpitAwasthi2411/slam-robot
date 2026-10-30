@@ -118,7 +118,8 @@ vision:
     camera: auto                 # auto | libcamera (Camera Module 3 Wide) | /dev/video0 (USB webcam)
     width: 640
     height: 360                  # 16:9 keeps the wide lens' full view
-    fps: 15
+    fps: 15                      # sensor rate: short exposures keep walking people sharp
+    out_fps: 5                   # frames/s handed to Python (GStreamer drops the rest): >= det_rate and stream_rate
     hfov_deg: 102.0              # Camera Module 3 Wide: 102 deg horizontal
     flip: false                  # true if the camera is mounted upside down
     model_dir: ~/models/yolo11n_ncnn_model   # made by scripts/setup_vision.sh
@@ -135,7 +136,8 @@ vision:
     marker_dict: DICT_4X4_50
     marker_id: 0
     marker_size_m: 0.08          # black square side, without the white border
-    marker_rate: 10.0
+    marker_rate: 10.0            # only while docking (navigator asks); capped at out_fps
+    marker_always: false         # true = look for the marker all the time (bench test with marker_webcam)
     camera_calib: ''             # '' = built-in Camera Module 3 Wide defaults; or the path of a measured YAML
 
 voice:

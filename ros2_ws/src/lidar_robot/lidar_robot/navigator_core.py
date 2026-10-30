@@ -196,6 +196,15 @@ class NavigatorCore:
         """True while the ESP32 should relax its front ultrasonic stop (creeping onto the dock)."""
         return self.dock_front and self.state == DOCKING and self.docker.mode_on()
 
+    def wants_marker(self):
+        """True while the camera should look for the dock marker: docking, or driving to the dock."""
+        if not self.dock_front or self.dock_without_marker:
+            return False
+        if self.state == DOCKING:
+            return True
+        m = self.queue.active
+        return bool(m and m.current and m.current.dock)
+
     def set_battery(self, volts, amps=None, src='ina226'):
         self.battery.update(volts, amps, src)
 

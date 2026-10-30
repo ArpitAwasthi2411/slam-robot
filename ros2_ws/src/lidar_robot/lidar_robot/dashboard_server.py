@@ -140,7 +140,7 @@ def make_handler(backend, index_path, app_dir=None, users=None, public=None):
             zipped = (len(body) > 1200 and 'gzip' in (self.headers.get('Accept-Encoding') or '')
                       and not ctype.startswith(('image/png', 'image/jpeg', 'font/')))
             if zipped:                     # ~4x less data: matters when the phone is on mobile data
-                body = gzip.compress(body, compresslevel=5)
+                body = gzip.compress(body, compresslevel=1)   # level 1: ~3x faster than 5, ~same size for JSON
             self.send_response(code)
             self.send_header('Content-Type', ctype)
             if zipped:

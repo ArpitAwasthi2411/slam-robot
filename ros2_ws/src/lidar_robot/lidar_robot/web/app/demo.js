@@ -568,6 +568,7 @@ function state() {
     scan: { hz: 8, points: scanPts }, goal: {},
     map: { version: 1, width: W, height: H, resolution: RES }, limits: { max_v: 0.3, max_w: 1.2 }, nav_mode: 'planner',
     sensors: { us: [null, null, null], imu_ok: true, yaw_source: 'gyro', us_mounts: [[0.07, 0.12, 0.52], [0.07, 0, 0], [0.07, -0.12, -0.52]], bumper: false },
+    pi: { temp_c: 58, cpu_pct: 46, load1: 1.9, cores: 4, throttled: '0x0', flags: [], level: 'ok', text: 'OK' },
     nav: navStatus(), places: { map: places.map, home: places.home, dock: places.dock, places: places.places, rooms: places.rooms, version: places.version },
     tune: { ...tune }, fw: '2.4-demo', telemetry: false, turns: 0, sep: 0.3, test_running: false, autosave: {}, slam_mode: 'localization',
     vision: demoVision(), camera: true,

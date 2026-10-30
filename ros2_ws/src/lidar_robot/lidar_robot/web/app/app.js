@@ -351,8 +351,11 @@ async function pollState(g) {
       onLinkLost();
     }
     // fast on local Wi-Fi; slower over mobile data (high delay) or when the app is in the background
+    // and gentle on the robot's Pi when nothing moves (each poll costs it a little CPU)
     const busy = joy.active || (S.tab === 'more' && !!S.lab);
-    const every = document.hidden ? 2000 : busy ? 140 : (S.rtt > 150 ? 400 : 140);
+    const od = (S.st && S.st.odom) || {};
+    const moving = Math.abs(od.v || 0) > 0.01 || Math.abs(od.w || 0) > 0.02 || !!(S.st && S.st.nav && S.st.nav.state && !['IDLE', 'CHARGING'].includes(S.st.nav.state));
+    const every = document.hidden ? 2000 : busy ? 140 : (S.rtt > 150 ? 400 : moving ? 160 : 300);
     await sleep(S.fails ? Math.min(2000, 250 * S.fails) : every);
   }
 }
@@ -457,7 +460,12 @@ async function pollMap(g) {
 }
 
 // ------------------------------------------------------------------ state -> UI
+let piWarnT = 0;
 function onState(st) {
+  // the Pi is overheating / under-voltage: tell the robot team (once every 2 min), Health has the details
+  if (st.pi && st.pi.level === 'bad' && can('operator') && performance.now() - piWarnT > 120000) {
+    piWarnT = performance.now(); toast(`Raspberry Pi: ${st.pi.text}`, true);
+  }
   // connection dot + mode chip
   const link = st.link || {};
   const ok = st.bridge_alive && link.connected && (link.rx_hz || 0) > 15;
@@ -1594,6 +1602,12 @@ function linkDrops(d) {
     d.gaps && `${d.gaps} data gap${d.gaps > 1 ? 's' : ''}`].filter(Boolean).join(', ');
   return `${parts} · last ${d.last_age < 60 ? d.last_age + ' s' : Math.round(d.last_age / 60) + ' min'} ago`;
 }
+// Pi temperature / CPU / slow-down flags (dashboard pihealth.py); the sentence says what to do
+function piText(pi) {
+  if (!pi) return '–';
+  const bits = [fin(pi.temp_c) ? `${fmt(pi.temp_c, 0)} °C` : null, fin(pi.cpu_pct) ? `CPU ${fmt(pi.cpu_pct, 0)} %` : null].filter(Boolean);
+  return (bits.length ? bits.join(' · ') + ' · ' : '') + (pi.text || '');
+}
 function renderStatus(st) {
   const L = st.link || {}, p = st.pose, n = st.nav || {}, se = st.sensors || {};
   const cls = (good, warn) => good ? 'ok' : warn ? 'warn' : 'bad';
@@ -1602,6 +1616,7 @@ function renderStatus(st) {
     ['Link delay', fin(S.rtt) ? `${Math.round(S.rtt)} ms` : '–', cls(S.rtt < 250, S.rtt < 700)],
     ['Motor board', st.bridge_alive && L.connected ? `${fmt(L.rx_hz, 0)} Hz on ${L.port || '?'}` : 'not connected', cls(st.bridge_alive && L.rx_hz > 30, st.bridge_alive)],
     ['Link drops', linkDrops(L.drops), L.drops ? cls(!(L.drops.usb + L.drops.resets + L.drops.gaps), L.drops.last_age > 300) : ''],
+    ['Raspberry Pi', piText(st.pi), st.pi ? cls(st.pi.level === 'ok', st.pi.level === 'warn') : ''],
     ['Firmware', st.fw ? `v${st.fw}` : 'unknown', cls(st.fw && st.fw >= '2.3', st.fw)],
     ['LiDAR', st.scan ? `${fmt(st.scan.hz, 1)} scans/s` : '–', cls(st.scan && st.scan.hz > 5, st.scan && st.scan.hz > 0)],
     ['Position', p ? `${fmt(p.x)}, ${fmt(p.y)} m, ${fmt(p.yaw * 57.2958, 0)}°` : 'unknown', cls(!!p)],

@@ -227,11 +227,13 @@ def test_simulator_robot_docks_nose_first_and_backs_off_for_the_next_task(tmp_pa
     b = sim.SimBackend(start_thread=False, clock=clock, data_dir=str(tmp_path))
     b.drain = 0.0
     b.x, b.y, b.yaw = 6.0, 4.25, 0.0
+    assert not b.nav.wants_marker()                  # idle: the camera doesn't search for the marker
     assert b.nav.handle({'type': 'go_dock'})['ok']
     phases, mode_on, dt = [], False, 0.02
     while clock.t < 240 and not b.nav.docked:
         b.tick(dt, clock.t)
         clock.t += dt
+        assert b.nav.wants_marker() or b.nav.docked  # on the way to the dock and while docking: it does
         d = b.nav.status()['docking']
         if d and (not phases or phases[-1] != d['phase']):
             phases.append(d['phase'])
@@ -241,6 +243,7 @@ def test_simulator_robot_docks_nose_first_and_backs_off_for_the_next_task(tmp_pa
     for ph in ('predock', 'align', 'creep', 'contact'):
         assert ph in phases, phases
     assert mode_on and not b.nav.dock_mode()
+    assert not b.nav.wants_marker()                  # docked: search off again
     # next task: back straight off the dock first
     b.nav.handle({'type': 'goto_place', 'name': 'Lab 2'})
     for _ in range(50):

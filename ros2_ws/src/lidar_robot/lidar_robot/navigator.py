@@ -11,6 +11,7 @@ Subscribes  /map                  nav_msgs/OccupancyGrid
             /navigator/request    std_msgs/String  JSON request (see navigator_core.py)
             /vision/decision      std_msgs/String  camera people decision (vision_node)
             /vision/dock_marker   std_msgs/String  dock marker pose (vision_node, marker_pose.detect format)
+Publishes (also) /vision/marker_request  std_msgs/Empty  while docking: the camera looks for the marker only then
 Publishes   /cmd_vel              geometry_msgs/Twist
             /plan                 nav_msgs/Path    current route (RViz: add Path display)
             /navigator/status     std_msgs/String  JSON, 4 Hz
@@ -45,12 +46,12 @@ from lidar_robot.docking import DockParams
 from lidar_robot.battery import BatteryMonitor
 from lidar_robot.follower import FollowerParams
 from lidar_robot.footprint import Footprint
-from lidar_robot.goal_logic import front_clearance_from_scan
 from lidar_robot.speech import Speaker
 from lidar_robot.kinematics import compose_2d, yaw_from_quaternion
 from lidar_robot.navigator_core import NavigatorCore
 from lidar_robot.netcheck import network_ok
 from lidar_robot.places import PlaceStore
+from lidar_robot import scan_points
 from lidar_robot.planner import GridMap, Planner, PlannerParams
 from lidar_robot.sensors import to_world
 from lidar_robot.us_listener import UltrasonicListener
@@ -215,6 +216,8 @@ class NavigatorNode(Node):
         self.places_pub = self.create_publisher(String, 'navigator/places', latched)
         self.resp_pub = self.create_publisher(String, 'navigator/response', 10)
         self.dock_mode_pub = self.create_publisher(Bool, 'dock_mode', 10)     # ESP32 docking mode via the bridge
+        self.marker_req_pub = self.create_publisher(Empty, 'vision/marker_request', 5)
+        self.scan_geo = scan_points.ScanGeometry()
 
         self.create_subscription(OccupancyGrid, 'map', self._on_map, 1)
         self.create_subscription(LaserScan, 'scan', self._on_scan, qos_profile_sensor_data)
@@ -323,25 +326,15 @@ class NavigatorNode(Node):
             except TransformException:
                 return
         lx, ly, lyaw = self.laser_tf
-        self.front = front_clearance_from_scan(
-            msg.ranges, msg.angle_min, msg.angle_increment, msg.range_min, msg.range_max,
-            laser_yaw=lyaw, half_angle=self.cone, robot_half_width=self.half_width, laser_x=lx)
+        laser = (lx, ly, lyaw)
+        self.front = scan_points.front_clearance(
+            self.scan_geo, msg.ranges, msg.angle_min, msg.angle_increment, msg.range_min, msg.range_max,
+            laser=laser, half_angle=self.cone, robot_half_width=self.half_width)
         self.scan_stamp = self.get_clock().now()
         pose = self._pose()
         if pose:                                  # nearby scan points -> dynamic obstacles for replans
-            x, y, yaw = pose
-            c, s = math.cos(yaw), math.sin(yaw)
-            pts, near = [], []
-            a = msg.angle_min
-            for i, r in enumerate(msg.ranges):
-                if msg.range_min < r < 3.0 and math.isfinite(r):
-                    bx = lx + r * math.cos(a + lyaw)
-                    by = ly + r * math.sin(a + lyaw)
-                    if bx * bx + by * by < 1.0:              # close points: body-shape checks
-                        near.append((bx, by))
-                    if i % 2 == 0:
-                        pts.append((x + c * bx - s * by, y + s * bx + c * by))
-                a += msg.angle_increment
+            pts, near = scan_points.obstacle_points(self.scan_geo, msg.ranges, msg.angle_min,
+                                                    msg.angle_increment, msg.range_min, pose, laser=laser)
             us = self.us.points_base()
             pts += to_world(us, pose)                          # things below the LiDAR plane
             with self.core_lock:
@@ -465,8 +458,11 @@ class NavigatorNode(Node):
         with self.core_lock:
             st = self.core.status()
             dock_mode = self.core.dock_mode()
+            wants_marker = self.core.wants_marker()
         if dock_mode or getattr(self, '_dock_mode_was', False):
             self.dock_mode_pub.publish(Bool(data=dock_mode))
+        if wants_marker:                          # keeps the camera's marker search on (it stops 3 s after)
+            self.marker_req_pub.publish(Empty())
         self._dock_mode_was = dock_mode
         st['vision'] = self.vision.note       # e.g. "camera: person 0.7 m ahead: too close, waiting"
         self.status_pub.publish(String(data=json.dumps(st)))

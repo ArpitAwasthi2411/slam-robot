@@ -29,6 +29,9 @@ Arguments
   urdf          true        robot model (urdf/pathik.urdf.xacro) + robot_state_publisher for the fixed frames;
                             false = the old static_transform_publishers (same frames)
   voice         true        push-to-talk voice commands (voice node: GPIO17 button / app, USB mic, Whisper/Vosk)
+  cpu_plan      true        share the Pi 4's 4 cores (docs/compute.md): camera + YOLO only on core 3, and
+                            lower priority (nice) for the camera, app server, voice and map drawing, so
+                            SLAM, the ESP32 link and the navigator always get the CPU first
 """
 import os
 
@@ -56,6 +59,9 @@ def _setup(context):
     places = os.path.expanduser(cfg('places'))
     vision = _truthy(cfg('vision'))
     voice = _truthy(cfg('voice'))
+    plan = _truthy(cfg('cpu_plan'))
+    from lidar_robot.cpu_plan import cpu_prefix
+    pre = lambda n: cpu_prefix(n, plan)  # noqa: E731
 
     if slam and slam_mode == 'localization':
         if not map_file or not os.path.isfile(map_file):
@@ -85,7 +91,7 @@ def _setup(context):
 
     actions = actions_ports + [LogInfo(msg=f'[bringup] odom={use_odom} slam={slam} slam_mode={slam_mode} '
                            f'map={map_file or "-"} nav_mode={nav_mode} dashboard={cfg("dashboard")} '
-                           f'vision={vision} camera={cfg("camera")} voice={voice}')]
+                           f'vision={vision} camera={cfg("camera")} voice={voice} cpu_plan={plan}')]
 
     # fixed frames (laser, camera, imu_link, us_*, wheels): the URDF model + robot_state_publisher; same frame
     # names and offsets as the static publishers before (urdf:=false brings those back)
@@ -146,10 +152,17 @@ def _setup(context):
             arguments=['-configuration_directory', os.path.join(share, 'config'),
                        '-configuration_basename', lua] + extra,
             remappings=[('scan', '/scan'), ('odom', '/odom')]))
+        if slam_mode == 'localization':
+            # the saved (frozen) map only: it never changes, so draw it rarely, and people/chairs seen now
+            # never get painted into it as walls (the LiDAR scan handles them live)
+            grid_args = ['-publish_period_sec', '10.0', '-include_unfrozen_submaps', 'false']
+        else:
+            grid_args = ['-publish_period_sec', '2.0']
         actions.append(Node(
             package='cartographer_ros', executable='cartographer_occupancy_grid_node',
             name='cartographer_occupancy_grid_node', output='screen',
-            arguments=['-resolution', '0.05', '-publish_period_sec', '2.0']))
+            prefix=pre('cartographer_occupancy_grid_node'),
+            arguments=['-resolution', '0.05'] + grid_args))
 
     goal_frame = 'map' if slam else 'odom'
     if nav_mode == 'planner':
@@ -166,15 +179,17 @@ def _setup(context):
     if vision:
         actions.append(Node(
             package='lidar_robot', executable='vision', name='vision', output='screen',
+            prefix=pre('vision'),
             parameters=[params, {'camera': cfg('camera'), 'laser_yaw': float(cfg('laser_yaw'))}]))
 
     if voice:
         actions.append(Node(package='lidar_robot', executable='voice', name='voice', output='screen',
-                            parameters=[params]))
+                            prefix=pre('voice'), parameters=[params]))
 
     if _truthy(cfg('dashboard')):
         actions.append(Node(
             package='lidar_robot', executable='dashboard', name='dashboard', output='screen',
+            prefix=pre('dashboard'),
             parameters=[params, {'global_frame': goal_frame, 'nav_mode': nav_mode,
                                  'slam_mode': slam_mode if slam else 'off',
                                  'carto_config_dir': os.path.join(share, 'config')}]))
@@ -190,7 +205,7 @@ def generate_launch_description():
         ('laser_x', '-0.13'), ('laser_y', '0.0'), ('laser_z', '0.10'), ('laser_yaw', '0.0'),
         ('us_x', '0.07'), ('us_y', '0.12'), ('us_side_deg', '30'), ('us_z', '0.06'),
         ('imu_x', '0.0'), ('imu_y', '0.0'), ('imu_z', '0.05'),
-        ('vision', 'true'), ('camera', 'auto'), ('voice', 'true'), ('urdf', 'true'),
+        ('vision', 'true'), ('camera', 'auto'), ('voice', 'true'), ('urdf', 'true'), ('cpu_plan', 'true'),
     ]
     return LaunchDescription(
         [DeclareLaunchArgument(n, default_value=d) for n, d in args] + [OpaqueFunction(function=_setup)])
