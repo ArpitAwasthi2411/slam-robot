@@ -110,6 +110,11 @@ class String(_Msg):
     _defaults = {'data': ''}
 
 
+class Empty(_Msg):
+    __slots__ = ()
+    _defaults = {}
+
+
 # ---------------------------------------------------------------- rclpy
 class _Logger:
     def __init__(self, sink):
@@ -208,7 +213,7 @@ def install():
     nm.Odometry = Odometry
     m('nav_msgs').msg = nm
     sm = m('std_msgs.msg')
-    sm.Bool, sm.String = Bool, String
+    sm.Bool, sm.String, sm.Empty = Bool, String, Empty
     m('std_msgs').msg = sm
     m('tf2_ros').TransformBroadcaster = TransformBroadcaster
     rclpy.node = sys.modules['rclpy.node']

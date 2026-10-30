@@ -75,8 +75,11 @@ def test_vision_node_with_fake_camera(tmp_path, monkeypatch):
             d = json.loads(pub.msgs[-1].data)
             assert d['people'][0]['distance_m'] == 0.6 and d['lidar'] is True and '0.6 m' in d['reason']
 
-            # annotated JPEG for the app
+            # annotated JPEG for the app: only streamed while the app asks for it
             period, cb = node.timers[0]
+            cb()
+            assert not node.pubs['vision/image/compressed'].msgs      # nobody watching: nothing sent
+            node._on_stream_request(fake_ros.Empty())
             cb()
             img = node.pubs['vision/image/compressed'].msgs[-1]
             assert img.format == 'jpeg' and bytes(img.data[:2]) == b'\xff\xd8'

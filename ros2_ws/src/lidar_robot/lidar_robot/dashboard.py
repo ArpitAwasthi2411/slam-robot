@@ -111,6 +111,8 @@ class DashboardNode(Node):
         self.vision, self.vision_t, self.camera, self.camera_t = None, 0.0, None, 0.0
         self.create_subscription(String, 'vision/decision', self._on_vision, 10)
         self.create_subscription(CompressedImage, 'vision/image/compressed', self._on_camera, 2)
+        self.stream_req_pub = self.create_publisher(Empty, 'vision/stream_request', 5)
+        self._stream_req_t = 0.0
         self.voice, self.voice_t = None, 0.0
         self.create_subscription(String, 'voice/status', self._on_voice, 10)
         self.voice_pub = self.create_publisher(String, 'voice/control', 10)
@@ -282,6 +284,10 @@ class DashboardNode(Node):
         return {'ok': True}
 
     def camera_jpeg(self):
+        now = time.monotonic()
+        if now - self._stream_req_t > 1.0:           # someone is watching: ask the vision node to stream
+            self._stream_req_t = now
+            self.stream_req_pub.publish(Empty())
         return self.camera if time.monotonic() - self.camera_t < 2.0 else None
 
     # ------------------------------------------------------------ backend API

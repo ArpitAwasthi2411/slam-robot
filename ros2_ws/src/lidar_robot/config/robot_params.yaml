@@ -124,9 +124,9 @@ vision:
     model_dir: ~/models/yolo11n_ncnn_model   # made by scripts/setup_vision.sh
     imgsz: 320
     conf: 0.45
-    threads: 2                   # YOLO threads: the other cores stay free for SLAM + driving
-    det_rate: 4.0                # detections per second
-    stream_rate: 5.0             # app camera picture, frames per second
+    threads: 1                   # YOLO threads: a Pi 4 needs the other 3 cores for SLAM + driving
+    det_rate: 2.0                # detections per second (175 ms each on a Pi 4)
+    stream_rate: 5.0             # app camera picture, frames per second (only while the camera view is open)
     jpeg_quality: 60
     path_half_angle_deg: 15.0    # a person within +-15 deg of straight ahead is "in the path"
     stop_m: 0.8                  # LiDAR distance (from the LiDAR, ~0.2 m behind the bumper): stop closer than this

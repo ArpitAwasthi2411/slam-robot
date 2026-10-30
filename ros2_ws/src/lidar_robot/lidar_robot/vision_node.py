@@ -27,7 +27,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, LaserScan
-from std_msgs.msg import String
+from std_msgs.msg import String, Empty
 
 from lidar_robot.vision_rules import (PersonTracker, bearing_deg, decide, decode_yolo,
                                       letterbox_params, lidar_distance)
@@ -192,8 +192,8 @@ class VisionNode(Node):
         d('model_dir', os.path.expanduser('~/models/yolo11n_ncnn_model'))
         d('imgsz', 320)
         d('conf', 0.45)
-        d('threads', 2)                 # leave the other cores to Cartographer + bridge + navigator
-        d('det_rate', 4.0)
+        d('threads', 1)                 # 1 core: Cartographer + bridge + navigator need the rest of a Pi 4
+        d('det_rate', 2.0)
         d('stream_rate', 5.0)
         d('jpeg_quality', 60)
         d('laser_yaw', 0.0)             # same as the launch's laser_yaw (base_link -> laser)
@@ -249,6 +249,9 @@ class VisionNode(Node):
             else:
                 self.marker_period = 1.0 / max(1.0, float(g('marker_rate')))
                 threading.Thread(target=self._marker_loop, daemon=True).start()
+        # the live picture costs CPU (draw + JPEG + ROS transfer): only while someone has the app's camera view open
+        self.stream_until = 0.0
+        self.create_subscription(Empty, 'vision/stream_request', self._on_stream_request, 5)
         self.create_timer(1.0 / max(0.5, float(self.p['stream_rate'])), self._publish_image)
         self.get_logger().info('vision node up')
 
@@ -324,7 +327,12 @@ class VisionNode(Node):
             self.dec_pub.publish(String(data=json.dumps(msg)))
             time.sleep(max(0.0, period - (time.monotonic() - t0)))
 
+    def _on_stream_request(self, _msg):
+        self.stream_until = time.monotonic() + 5.0
+
     def _publish_image(self):
+        if time.monotonic() > self.stream_until:
+            return
         frame = self._frame()
         if frame is None:
             return

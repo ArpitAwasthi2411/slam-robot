@@ -126,7 +126,7 @@ class VoiceNode(Node):
         self._src = self._next_src
         self.state = {'listening': False, 'thinking': False, 'message': '', 'last_heard': '', 'last_reply': ''}
         self.lock = threading.Lock()
-        self.create_timer(0.02, self._poll_button)
+        self.create_timer(0.05, self._poll_button)   # 20 Hz is plenty for a push button
         self.create_timer(0.5, self._publish_status)
         self.get_logger().info(f'voice ready: speech recognition {self.stt.describe()}, mic '
                                f'{self.mic.error or (self.mic.device or "default")}, button GPIO{g("button_gpio")}'
