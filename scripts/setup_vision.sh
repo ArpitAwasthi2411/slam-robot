@@ -20,6 +20,13 @@ python3 -c "import cv2; print('  dock marker (ArUco):', 'ok' if hasattr(cv2, 'ar
 echo "== 2/3 YOLO11n model for NCNN (320 x 320)"
 if [ -f "$OUT/model.ncnn.param" ] && [ -f "$OUT/model.ncnn.bin" ]; then
   echo "  already there: $OUT"
+elif grep -q "Raspberry Pi 4" /proc/device-tree/model 2>/dev/null; then
+  # current PyTorch ARM wheels use CPU instructions the Pi 4 (Cortex-A72) doesn't have: "Illegal instruction"
+  echo "  This is a Raspberry Pi 4: export the model on the laptop instead (5 min), then run this script again:"
+  echo "    python3 -m venv ~/yolo-env && ~/yolo-env/bin/pip install ultralytics"
+  echo "    ~/yolo-env/bin/yolo export model=yolo11n.pt format=ncnn imgsz=320"
+  echo "    ssh arpit@<pi> 'mkdir -p ~/models' && scp -r yolo11n_ncnn_model arpit@<pi>:~/models/"
+  exit 1
 else
   VENV="$HOME/.cache/yolo-export"
   python3 -m venv "$VENV"
