@@ -6,6 +6,7 @@
   python3 serial_probe.py --vel 200 200         # closed-loop test: 200 mm/s both wheels
   python3 serial_probe.py --calibrate           # robot ON BLOCKS: sweep PWM, suggest firmware constants
   python3 serial_probe.py --push                # roll the robot 1 m by hand, prints ticks per wheel
+  python3 serial_probe.py --push --metres 5     # 5 m along a wall: 5x more accurate (use this for mapping)
   python3 serial_probe.py --rc                  # RC calibration: centre 3 s, then full stick sweeps
 
 Needs only pyserial:  sudo apt install python3-serial
@@ -168,8 +169,9 @@ def cmd_calibrate(s):
               'but check for a dragging wheel or weak motor.')
 
 
-def cmd_push(s):
-    print('Mark the floor, then roll the robot STRAIGHT forward exactly 1.000 m by hand.')
+def cmd_push(s, metres=1.0):
+    print(f'Mark the floor, then roll the robot STRAIGHT forward exactly {metres:.3f} m by hand.')
+    print('(Tape measure on the floor along a wall; line up the same point of the robot at start and end.)')
     print('Press Enter when done...')
     st = Stats()
     import threading
@@ -187,7 +189,9 @@ def cmd_push(s):
     circ = 2 * math.pi * 0.0625
     for name, n in (('left', st.dl), ('right', st.dr)):
         if n:
-            print(f'  ticks_per_rev_{name}: {abs(n) * circ:.1f}   (put in config/robot_params.yaml)')
+            print(f'  ticks_per_rev_{name}: {abs(n) * circ / metres:.1f}   (put in config/robot_params.yaml)')
+    if st.dl and st.dr and abs(abs(st.dl) - abs(st.dr)) / max(abs(st.dl), abs(st.dr)) > 0.02:
+        print('  NOTE: the wheels differ by more than 2 %: tyre sizes / pressure, or the robot curved while pushing.')
     if st.dl < 0 or st.dr < 0:
         print('-> negative ticks while rolling forward: flip that wheel\'s ENC_DIR in the firmware.')
 
@@ -264,6 +268,7 @@ def main():
     g.add_argument('--calibrate', action='store_true')
     g.add_argument('--push', action='store_true')
     g.add_argument('--rc', action='store_true')
+    ap.add_argument('--metres', type=float, default=1.0, help='distance for --push (5 m recommended)')
     a = ap.parse_args()
 
     port = find_port(a.port)
@@ -277,7 +282,7 @@ def main():
         elif a.calibrate:
             cmd_calibrate(s)
         elif a.push:
-            cmd_push(s)
+            cmd_push(s, max(0.2, a.metres))
         elif a.rc:
             cmd_rc(s, max(a.secs, 15.0))
         else:

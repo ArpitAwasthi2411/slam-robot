@@ -74,6 +74,7 @@ class Esp32Bridge(Node):
         p('max_wheel_speed', 0.45)      # m/s, hard clamp on what we ask the ESP32
         p('cmd_rate', 20.0)
         p('use_imu_yaw', True)           # heading from the gyro when the firmware sends it
+        p('gyro_scale', 1.0)             # gyro turn correction from the app's Spin test (MPU-6050 is +-3 %)
         g = lambda n: self.get_parameter(n).value  # noqa: E731
 
         self.port_param = g('serial_port')
@@ -101,6 +102,7 @@ class Esp32Bridge(Node):
         self.esp_mode = -1
         self.esp_info = ''
         self.use_imu_yaw = bool(self.get_parameter('use_imu_yaw').value)
+        self.gyro_scale = float(self.get_parameter('gyro_scale').value)
         self.last_imu = 0.0
         self.last_us = 0.0
         self.us = [None, None, None]
@@ -336,7 +338,7 @@ class Esp32Bridge(Node):
             self._event('gaps', f'no data from the ESP32 for {now_t - self.last_rx:.1f} s, port stayed open '
                                 '(ESP32 busy/reset without banner, USB stall, or this Pi overloaded)')
         with self.lock:
-            gyro = pkt.dyaw if (self.use_imu_yaw and pkt.dyaw is not None) else None
+            gyro = pkt.dyaw * self.gyro_scale if (self.use_imu_yaw and pkt.dyaw is not None) else None
             self.yaw_source = 'gyro' if gyro is not None else 'wheels'
             x, y, th, v, w = self.odom.update(pkt.dl, pkt.dr, pkt.dt_ms / 1000.0, gyro)
             self.rx_count += 1
@@ -563,6 +565,7 @@ class Esp32Bridge(Node):
                 'fw': self.fw,
                 'telemetry': self.telemetry_on,
                 'sep': self.sep,
+                'gyro_scale': self.gyro_scale,
                 'odom': {'x': round(self.odom.x, 3), 'y': round(self.odom.y, 3),
                          'yaw': round(self.odom.theta, 3),
                          'v': round(self.odom.v, 3), 'w': round(self.odom.w, 3),

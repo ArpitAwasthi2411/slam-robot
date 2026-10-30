@@ -2,6 +2,10 @@
 
 Good odometry is what makes the map and the goal controller work. Do these in order.
 
+> For mapping a whole floor, use the stricter version in **`docs/mapping.md` step 1**: ticks per revolution over
+> **5 m** (`serial_probe.py --push --metres 5`) and, with the IMU working, the app's Spin test sets
+> **`gyro_scale`** (the heading then comes from the gyro, so wheel_separation no longer affects the map).
+
 ## 1. Motor feed-forward (firmware) — robot on blocks
 
 ```bash

@@ -351,7 +351,7 @@ class DashboardNode(Node):
                         'us_mounts': self._us_mounts()},
             'nav': self.nav_status if time.monotonic() - self.nav_status_t < 2.0 else None,
             'tune': rs.get('tune'), 'fw': rs.get('fw'), 'telemetry': rs.get('telemetry'),
-            'turns': odom.get('turns'), 'sep': rs.get('sep'), 'test_running': bool(self.tests.result.get('running')),
+            'turns': odom.get('turns'), 'sep': rs.get('sep'), 'gyro_scale': rs.get('gyro_scale'), 'test_running': bool(self.tests.result.get('running')),
             'autosave': self.autosave.info,
             'slam_mode': self.slam_mode,
             'places': self.places,

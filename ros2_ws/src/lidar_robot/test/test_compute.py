@@ -254,3 +254,40 @@ def test_dashboard_map_bytes_match_the_old_loop():
     d = np.asarray(array('b', data), dtype=np.int16)                    # what rclpy hands over
     assert np.where(d >= 0, d + 1, 0).astype(np.uint8).tobytes() == old
     assert json.dumps({'ok': True})
+
+
+# ------------------------------------------------------------------ accurate mapping (docs/mapping.md)
+CFG = os.path.join(os.path.dirname(__file__), '..', 'config')
+
+
+def _lua(name):
+    with open(os.path.join(CFG, name)) as f:
+        return f.read()
+
+
+def test_mapping_configs_trust_good_odometry_in_corridors():
+    live = _lua('cartographer_odom.lua')
+    assert 'use_online_correlative_scan_matching = false' in live
+    assert 'ceres_scan_matcher.translation_weight = 20.' in live
+    assert 'odometry_rotation_weight = 1e5' in live and 'odometry_rotation_weight = 1e3' not in live
+    assert 'constraint_builder.min_score = 0.65' in live and live.rstrip().endswith('return options')
+    hq = _lua('cartographer_mapping_hq.lua')
+    assert hq.index('include "cartographer_odom.lua"') < hq.index('num_background_threads = 4')
+    assert hq.rstrip().endswith('return options') and 'max_num_final_iterations' in hq
+    loc = _lua('cartographer_localization.lua')            # localization keeps its own (unchanged) matcher
+    assert 'pure_localization_trimmer' in loc
+
+
+def test_map_offline_script():
+    import subprocess
+    script = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'scripts', 'map_offline.sh')
+    if not os.path.exists(script):
+        pytest.skip('scripts/ not in this checkout')
+    assert subprocess.run(['bash', '-n', script]).returncode == 0
+    r = subprocess.run(['bash', script], capture_output=True, text=True)
+    assert r.returncode == 1 and 'record' in r.stdout and 'build' in r.stdout and 'set -e' not in r.stdout
+    r = subprocess.run(['bash', script, 'record', 'bad name!'], capture_output=True, text=True)
+    assert r.returncode == 1 and 'map name' in r.stderr
+    text = open(script).read()
+    assert 'cartographer_mapping_hq.lua' in text and '-save_state_filename' in text
+    assert 'cartographer_pbstream_to_ros_map' in text and '/tf_static' in text and ' /tf ' not in text

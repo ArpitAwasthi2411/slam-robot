@@ -1917,7 +1917,7 @@ function showTestMetrics(r) {
     const fwd = dx * c0 - dy * s0, lat = dx * s0 + dy * c0, head = unwrap([a[3], z[3]])[1] * 57.2958;
     const asked = r.v * r.secs, per = Math.abs(lat) / Math.max(0.2, fwd) * 100;
     const tip = per < 3 ? 'Drives straight. Nothing to fix here.' :
-      `Curves to the ${lat > 0 ? 'left' : 'right'} by ${fmt(per, 0)} cm per metre. With the speed loop working, this usually means the two wheels’ ticks per revolution differ: repeat the 1 m push test and set each wheel separately.`;
+      `Curves to the ${lat > 0 ? 'left' : 'right'} by ${fmt(per, 0)} cm per metre. With the speed loop working, this usually means the two wheels’ ticks per revolution differ: repeat the push test over 5 m (serial_probe.py --push --metres 5) and set each wheel separately.`;
     box.innerHTML = `
       <div class="metric"><b>${fmt(fwd, 2)} m</b><span>travelled (asked ${fmt(asked, 2)} m)</span></div>
       <div class="metric ${per < 3 ? 'good' : per < 6 ? 'warn' : 'bad'}"><b>${fmt(lat * 100, 1)} cm</b><span>sideways drift</span></div>
@@ -1927,17 +1927,21 @@ function showTestMetrics(r) {
   } else {
     const turned = unwrap(s.map(q => q[3])), map = turned[turned.length - 1] / 6.283185;
     const odo = fin(z[8]) && fin(a[8]) ? z[8] - a[8] : null, sep = (S.st && S.st.sep) || 0.30;
+    // with a working gyro the robot's heading comes from the gyro, not the wheels: then this test calibrates
+    // the gyro (gyro_scale), and the wheel separation no longer affects the map
+    const gyro = !!(S.st && S.st.sensors && S.st.sensors.yaw_source === 'gyro'), gs = (S.st && S.st.gyro_scale) || 1.0;
+    const cur = gyro ? gs : sep, key = gyro ? 'gyro_scale' : 'wheel_separation', unit = gyro ? '' : ' m';
     let tip = 'Firmware or bridge too old to report odometry turns.', sug = null;
     if (fin(odo) && Math.abs(map) > 0.2) {
-      sug = sep * odo / map;
+      sug = gyro ? gs * map / odo : sep * odo / map;
       const errp = (odo / map - 1) * 100;
-      tip = Math.abs(errp) < 2 ? 'Wheel separation is right.' :
-        `Wheel odometry is ${fmt(Math.abs(errp), 1)} % ${errp > 0 ? 'over' : 'under'}-counting turns. Set wheel_separation to ${fmt(sug, 3)} in robot_params.yaml and restart.`;
+      tip = Math.abs(errp) < 1 ? (gyro ? 'The gyro counts turns right.' : 'Wheel separation is right.') :
+        `${gyro ? 'The gyro' : 'Wheel odometry'} is ${fmt(Math.abs(errp), 1)} % ${errp > 0 ? 'over' : 'under'}-counting turns. Set ${key} to ${fmt(sug, 3)} in robot_params.yaml (esp32_bridge) and restart. Use a slow spin (0.4 rad/s) for at least 3 turns, and repeat once.`;
     }
     box.innerHTML = `
       <div class="metric"><b>${fmt(map, 2)}</b><span>turns, from the LiDAR map</span></div>
-      <div class="metric"><b>${fmt(odo, 2)}</b><span>turns, from the wheels</span></div>
-      <div class="metric wide ${sug == null ? '' : Math.abs(sug / sep - 1) < 0.02 ? 'good' : 'warn'}"><b>${sug == null ? '–' : fmt(sug, 3) + ' m'}</b><span>suggested wheel_separation (now ${fmt(sep, 3)} m)</span></div>
+      <div class="metric"><b>${fmt(odo, 2)}</b><span>turns, from the ${gyro ? 'gyro' : 'wheels'}</span></div>
+      <div class="metric wide ${sug == null ? '' : Math.abs(sug / cur - 1) < 0.01 ? 'good' : 'warn'}"><b>${sug == null ? '–' : fmt(sug, 3) + unit}</b><span>suggested ${key} (now ${fmt(cur, 3)}${unit})</span></div>
       <div class="verdict">${esc(tip)}</div>`;
   }
   box.hidden = false;

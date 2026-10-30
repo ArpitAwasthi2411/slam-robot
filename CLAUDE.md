@@ -112,7 +112,8 @@ wiring (SDA 11, SCL 12). Pi showed under-voltage (0x50005, 4.7 V at the pins) an
 Open problems / TODO (priority order):
 1. Lab bring-up on the S3 (`docs/STEPS_esp32s3_lab.md`), then the drive test with `link_doctor.sh --watch`
    (ESP32 used to drop/reconnect while driving: power noise suspected; capacitors planned).
-2. Measure the footprint + wheel separation; tune with the app's Spin / Straight line tests.
+2. Measure the footprint; calibrate odometry (docs/mapping.md step 1: 5 m push, gyro_scale), then record the floor
+   and build the map offline (`scripts/map_offline.sh`), check 3 lengths (< 1 %), run in localization.
 3. Voice done in code (`docs/STEPS_voice.md`): wire the GPIO17 button, run `scripts/setup_voice.sh`, add the Groq key.
 4. Camera + people avoidance done in code (`docs/STEPS_camera.md`): run the two setup scripts on the Pi, tune stop_m/slow_m.
 5. Front docking with the ArUco marker done in code (`docs/docking.md`, firmware v2.7 `D` mode): measure
@@ -123,6 +124,12 @@ Open problems / TODO (priority order):
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-10-30 (night): accurate mapping (docs/mapping.md): cartographer_odom.lua retuned for corridors with good
+  odometry (no online correlative, ceres translation 20 / rotation 40, odometry weights 1e5, submaps 90, range 10 m,
+  loop closure 0.65/0.70); offline rebuild `scripts/map_offline.sh record|build` + cartographer_mapping_hq.lua
+  (4 threads, sampling 0.5, 400 final iterations) -> pbstream + pgm; bridge `gyro_scale`, app Spin test suggests it
+  when the gyro is the heading source; serial_probe `--push --metres 5`.
 
 - 2026-10-30 (evening): Pi compute pass (docs/compute.md): localization runs draw the frozen map only (grid node
   `-include_unfrozen_submaps false`, 10 s); launch `cpu_plan` (cpu_plan.py: vision on core 3 nice 10, dashboard/voice/
