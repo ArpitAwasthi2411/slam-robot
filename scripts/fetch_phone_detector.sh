@@ -38,6 +38,7 @@ EOF
     cp "$tmp/yolo11n.onnx" "$model"
 fi
 
+python3 -c "import onnx" 2>/dev/null || python3 -m pip install -q onnx    # the cached-model path skipped the export installs
 python3 - "$model" <<'EOF'
 import sys, onnx
 m = onnx.load(sys.argv[1])
