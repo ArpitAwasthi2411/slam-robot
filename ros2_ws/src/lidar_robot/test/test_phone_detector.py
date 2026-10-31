@@ -129,8 +129,11 @@ def test_detector_page_files():
 
 ROOT = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..')
 DETECTOR_JS = os.path.join(APP, 'detector.js')
+needs_repo = pytest.mark.skipif(not os.path.isdir(os.path.join(ROOT, 'android')),
+                                reason='full repo only (the robot image has just the ROS package)')
 
 
+@needs_repo
 def test_native_detector_wiring():
     """The app's TensorFlow Lite engine: model path, packaging and the JS <-> Java bridge must agree."""
     java = open(os.path.join(ROOT, 'android/app/src/main/java/com/arpit/pathik/NativeDetector.java')).read()
@@ -204,6 +207,7 @@ def test_native_engine_failure_falls_back():
     assert 'vendor/ort' in r['err']                         # ONNX Runtime Web isn't loaded in this test
 
 
+@needs_repo
 def test_check_phone_model_script():
     src = open(os.path.join(ROOT, 'scripts/check_phone_model.py')).read()
     assert '[1, 320, 320, 3]' in src and '[1, 84, 2100]' in src and '[1, 2100, 84]' in src
