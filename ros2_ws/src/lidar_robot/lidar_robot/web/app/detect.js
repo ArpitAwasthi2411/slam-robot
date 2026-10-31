@@ -156,7 +156,9 @@
 
   $('run').disabled = true;
   loadModel().then(() => {
-    $('m-be').textContent = st.backend;
+    const inf = DT.info, f1 = v => (v > 0 ? Math.round(v) + ' ms' : '–');
+    $('m-be').textContent = st.backend + (inf ? ` (start test: GPU ${f1(inf.ms_gpu)}, CPU ${f1(inf.ms_cpu)})`
+      : DT.nativeError ? ` (native: ${DT.nativeError})` : '');
     $('run').disabled = false;
     msg('Ready. Press Start.');
     $('dec-r').textContent = 'Press Start';

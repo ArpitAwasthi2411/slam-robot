@@ -103,9 +103,9 @@
     let txt, cls = '';
     if (d.running && d.err) { txt = `detection: ${d.err}`; cls = 'bad'; }
     else if (d.running && d.mode === 'test') {
-      txt = `camera test · ${Math.round(d.ms)} ms · ${d.fps.toFixed(1)}/s · ${d.testDec || '…'}`; cls = 'ok';
+      txt = `camera test (${DT.backend}) · ${Math.round(d.ms)} ms · ${d.fps.toFixed(1)}/s · ${d.testDec || '…'}`; cls = 'ok';
     }
-    else if (d.running) { txt = d.last ? `detecting on this phone · ${Math.round(d.ms)} ms · ${d.fps.toFixed(1)}/s` : 'detecting on this phone · starting…'; cls = 'ok'; }
+    else if (d.running) { txt = d.last ? `detecting on this phone (${DT.backend}) · ${Math.round(d.ms)} ms · ${d.fps.toFixed(1)}/s` : 'detecting on this phone · starting…'; cls = 'ok'; }
     else if (robotSide && robotSide.paused) txt = 'detection resting (robot idle)';
     else if (robotSide && robotSide.detected_by === 'pi') { txt = 'detection on the robot (Pi)'; cls = 'warn'; }
     else txt = S.model ? 'detection ready' : d.err ? `detector not loaded: ${d.err}` : 'loading detector…';

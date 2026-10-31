@@ -26,6 +26,19 @@ vision node: LiDAR distance per person + the same rules (vision_rules.decide) �
   (`idle_pause_s`), so an idle robot spends no CPU on detection.
 - App Health → camera / the head's top-right chip show who is detecting: *this phone*, *the robot (Pi)* or *resting*.
 
+## Which engine runs the detection on the phone
+
+| Engine | Where | Speed (YOLO11n 320) |
+|---|---|---|
+| **Native TensorFlow Lite on the GPU** | Pathik APK, phones whose GPU TFLite supports | usually fastest |
+| **Native TensorFlow Lite on the CPU** | Pathik APK, XNNPACK on (cores − 1, max 4) threads | several cores |
+| ONNX Runtime Web | any browser / if the native engine can't start | **1 core** in an Android WebView (~180 ms) |
+
+At start the app times the GPU and the CPU engine on the model and keeps the faster; the Phone detector page shows
+*runs on* with both start-test times (e.g. "phone GPU (start test: GPU 22 ms, CPU 64 ms)"). The model in the APK is
+`vendor/yolo11n_320.tflite`, converted from the same ONNX file at build time (`scripts/fetch_phone_detector.sh`),
+so both engines give the same boxes.
+
 ## Set up
 
 1. Robot: the new code (vision node with `phone_timeout`, `idle_pause_s`; dashboard `/api/vision/phone`).

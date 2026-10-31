@@ -3,7 +3,7 @@ name: Pathik APK
 on:
   push:
     branches: [main]
-    paths: ['android/**', 'ros2_ws/src/lidar_robot/lidar_robot/web/app/**', '.github/workflows/android.yml', 'scripts/fetch_phone_detector.sh']
+    paths: ['android/**', 'ros2_ws/src/lidar_robot/lidar_robot/web/app/**', '.github/workflows/android.yml', 'scripts/fetch_phone_detector.sh', 'scripts/check_phone_model.py']
     tags: ['v*']
   workflow_dispatch:
 
@@ -44,8 +44,10 @@ jobs:
       - name: Phone detector model cache
         uses: actions/cache@v4
         with:
-          path: ros2_ws/src/lidar_robot/lidar_robot/web/app/vendor/yolo11n_320.onnx
-          key: phone-detector-yolo11n-320-ultralytics-8.4.194
+          path: |
+            ros2_ws/src/lidar_robot/lidar_robot/web/app/vendor/yolo11n_320.onnx
+            ros2_ws/src/lidar_robot/lidar_robot/web/app/vendor/yolo11n_320.tflite
+          key: phone-detector-yolo11n-320-onnx-tflite-ultralytics-8.4.194
 
       - name: Phone detector files (ONNX Runtime Web + YOLO11n model, not in Git)
         run: bash scripts/fetch_phone_detector.sh

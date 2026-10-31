@@ -1,5 +1,7 @@
 /* Shared by detect.html (lab) and head.html (the phone in the robot's head):
- *   PathikDetector.load()            YOLO11n 320 px on ONNX Runtime Web (WebAssembly, multi-threaded when isolated)
+ *   PathikDetector.load()            YOLO11n 320 px. In the Pathik APK: NATIVE TensorFlow Lite on the phone's GPU or
+ *                                    all its big CPU cores (NativeDetector.java, the faster one is picked at start).
+ *                                    Elsewhere / if that fails: ONNX Runtime Web (WebAssembly; one core in a WebView).
  *   PathikDetector.run(frame, conf)  -> {boxes: [[x1,y1,x2,y2,conf]] in frame pixels, ms}
  *   PhoneCamera / RobotCamera        picture sources: {img, w, h} per frame
  * Needs vision.js and vendor/ort/ort.wasm.min.js loaded first.
@@ -9,10 +11,41 @@
   const V = root.PathikVision;
   const SIZE = 320;
   const MODEL = 'vendor/yolo11n_320.onnx';
-  const st = { session: null, input: 'images', output: 'output0', backend: '' };
+  const st = { session: null, input: 'images', output: 'output0', backend: '', native: false, info: null };
+
+  // ---- native engine (Android app): jobs go to Java, results come back through window.__pathikDetDone(id, json)
+  const N = root.PathikNative;
+  const jobs = new Map();
+  let jobId = 1;
+  root.__pathikDetDone = (id, json) => {
+    const j = jobs.get(id); if (!j) return;
+    jobs.delete(id);
+    let r; try { r = JSON.parse(json); } catch (e) { r = { ok: false, error: 'bad reply' }; }
+    if (r.ok) j.resolve(r); else j.reject(new Error(r.error || 'native detector failed'));
+  };
+  function nativeCall(fn, ...args) {
+    return new Promise((resolve, reject) => {
+      const id = jobId++;
+      jobs.set(id, { resolve, reject });
+      try { N[fn](id, ...args); } catch (e) { jobs.delete(id); reject(e); }
+      setTimeout(() => { if (jobs.has(id)) { jobs.delete(id); reject(new Error('native detector timed out')); } }, fn === 'detectorInit' ? 30000 : 5000);
+    });
+  }
+  async function loadNative() {
+    if (!(N && N.hasNativeDetector && N.detect)) return false;
+    try {
+      const info = await nativeCall('detectorInit');
+      st.native = true; st.info = info; st.backend = info.engine;
+      return true;
+    } catch (e) {
+      st.nativeError = e.message;
+      return false;
+    }
+  }
 
   async function load() {
-    if (st.session) return st.backend;
+    if (st.session || st.native) return st.backend;
+    if (await loadNative()) return st.backend;
     if (!root.ort) throw new Error('Detector files are missing (vendor/ort). Use the Pathik app (APK).');
     const threads = root.crossOriginIsolated ? Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)) : 1;
     ort.env.wasm.wasmPaths = new URL('vendor/ort/', location.href).href;
@@ -31,7 +64,7 @@
 
   let pre = null, pctx = null;
   const chw = new Float32Array(3 * SIZE * SIZE);
-  function toTensor(f) {
+  function letterbox(f) {
     if (!pre) {
       pre = document.createElement('canvas'); pre.width = pre.height = SIZE;
       pctx = pre.getContext('2d', { willReadFrequently: true });
@@ -40,6 +73,10 @@
     pctx.fillStyle = 'rgb(114,114,114)';
     pctx.fillRect(0, 0, SIZE, SIZE);
     pctx.drawImage(f.img, 0, 0, f.w, f.h, px, py, nw, nh);
+  }
+
+  function toTensor(f) {
+    letterbox(f);
     const d = pctx.getImageData(0, 0, SIZE, SIZE).data, n = SIZE * SIZE;
     for (let i = 0, j = 0; i < n; i++, j += 4) {
       chw[i] = d[j] / 255; chw[n + i] = d[j + 1] / 255; chw[2 * n + i] = d[j + 2] / 255;
@@ -48,10 +85,24 @@
   }
 
   async function run(f, conf = 0.45) {
+    if (st.native) return runNative(f, conf);
     const t0 = performance.now();
     const out = (await st.session.run({ [st.input]: toTensor(f) }))[st.output];
     const boxes = V.decodeYolo(out.data, out.dims[2], f.w, f.h, SIZE, conf, 0);
     return { boxes, ms: performance.now() - t0 };
+  }
+
+  // the letterboxed 320 x 320 picture as a JPEG -> Java -> person candidates in 320 px -> frame pixels + NMS
+  async function runNative(f, conf) {
+    const t0 = performance.now();
+    letterbox(f);
+    const b64 = pre.toDataURL('image/jpeg', 0.92).slice('data:image/jpeg;base64,'.length);
+    const r = await nativeCall('detect', b64, conf);
+    const [s, px, py] = V.letterboxParams(f.w, f.h, SIZE);
+    const boxes = r.boxes.map(b => [Math.max(0, (b[0] - px) / s), Math.max(0, (b[1] - py) / s),
+                                    Math.min(f.w, (b[2] - px) / s), Math.min(f.h, (b[3] - py) / s), b[4]])
+      .filter(b => b[2] > b[0] && b[3] > b[1]);
+    return { boxes: V.nms(boxes), ms: performance.now() - t0, inferMs: r.infer_ms };
   }
 
   class PhoneCamera {
@@ -98,5 +149,7 @@
     stop() { if (this.last && this.last.close) this.last.close(); this.last = null; }
   }
 
-  root.PathikDetector = { load, run, PhoneCamera, RobotCamera, SIZE, get backend() { return st.backend; } };
+  root.PathikDetector = { load, run, PhoneCamera, RobotCamera, SIZE, get backend() { return st.backend; },
+                          get native() { return st.native; }, get info() { return st.info; },
+                          get nativeError() { return st.nativeError; } };
 })(window);

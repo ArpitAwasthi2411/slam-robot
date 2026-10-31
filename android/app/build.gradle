@@ -10,6 +10,7 @@ android {
         targetSdk 34
         versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int)
         versionName '1.0.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '0')
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }   // phones only: keeps TensorFlow Lite's native libs small
     }
 
     signingConfigs {
@@ -37,8 +38,17 @@ android {
     sourceSets {
         main { assets.srcDirs += ["$rootDir/../ros2_ws/src/lidar_robot/lidar_robot/web"] }
     }
+    // the TFLite model is memory-mapped straight from the APK: it must not be compressed
+    androidResources { noCompress 'tflite' }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    // native people detector (NativeDetector.java): TensorFlow Lite + its GPU delegate
+    implementation 'org.tensorflow:tensorflow-lite:2.16.1'
+    implementation 'org.tensorflow:tensorflow-lite-gpu:2.16.1'
+    implementation 'org.tensorflow:tensorflow-lite-gpu-api:2.16.1'
 }

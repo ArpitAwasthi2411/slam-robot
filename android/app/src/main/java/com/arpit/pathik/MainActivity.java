@@ -52,6 +52,9 @@ public class MainActivity extends Activity {
     static final String DETECTOR_URL = "https://" + ASSET_HOST + "/app/detect.html";
     static final String HEAD_URL = "https://" + ASSET_HOST + "/app/head.html";
     private PermissionRequest pendingCam = null;
+    /** People detection in TensorFlow Lite (GPU / all CPU cores); runs off the UI thread, one job at a time. */
+    final NativeDetector detector = new NativeDetector();
+    final java.util.concurrent.ExecutorService detExec = java.util.concurrent.Executors.newSingleThreadExecutor();
     private String pendingLang = null;
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -142,6 +145,16 @@ public class MainActivity extends Activity {
         return "application/octet-stream";
     }
 
+    /** Result of a detector job to the page: window.__pathikDetDone(id, json). */
+    void detDone(int id, String json) {
+        final String js = "window.__pathikDetDone && window.__pathikDetDone(" + id + "," + JSONObjectQuote(json) + ")";
+        runOnUiThread(() -> web.evaluateJavascript(js, null));
+    }
+
+    static String JSONObjectQuote(String s) {
+        return org.json.JSONObject.quote(s == null ? "" : s);
+    }
+
     @Override
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
@@ -166,6 +179,8 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         if (recognizer != null) recognizer.destroy();
         if (tts != null) tts.shutdown();
+        detExec.shutdownNow();
+        detector.close();
         super.onDestroy();
     }
 
@@ -312,6 +327,21 @@ public class MainActivity extends Activity {
         public void openDetector(final String hash) {
             act.runOnUiThread(() -> act.web.loadUrl(DETECTOR_URL + (hash == null || hash.isEmpty() ? "" : "#" + hash)));
         }
+
+        /** Start the native detector (async): window.__pathikDetDone(id, {ok, engine, ms_gpu, ms_cpu}). */
+        @JavascriptInterface
+        public void detectorInit(final int id) {
+            act.detExec.execute(() -> act.detDone(id, act.detector.init(act)));
+        }
+
+        /** Detect people on one 320 x 320 letterboxed JPEG (base64), async -> window.__pathikDetDone(id, json). */
+        @JavascriptInterface
+        public void detect(final int id, final String jpegB64, final float conf) {
+            act.detExec.execute(() -> act.detDone(id, act.detector.detect(jpegB64, conf)));
+        }
+
+        @JavascriptInterface
+        public boolean hasNativeDetector() { return true; }
 
         /** Head mode: the phone mounted on the robot (face, kiosk, people detection). */
         @JavascriptInterface

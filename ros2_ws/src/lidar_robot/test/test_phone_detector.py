@@ -125,3 +125,85 @@ def test_detector_page_files():
     assert 'raw=1' in det                                   # the head / lab use the plain Pi picture
     js = open(os.path.join(APP, 'detect.js')).read()
     assert '__pathikBack' in js and 'new RobotCamera(robot.base, robot.token, true)' in js
+
+
+ROOT = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..')
+DETECTOR_JS = os.path.join(APP, 'detector.js')
+
+
+def test_native_detector_wiring():
+    """The app's TensorFlow Lite engine: model path, packaging and the JS <-> Java bridge must agree."""
+    java = open(os.path.join(ROOT, 'android/app/src/main/java/com/arpit/pathik/NativeDetector.java')).read()
+    main = open(os.path.join(ROOT, 'android/app/src/main/java/com/arpit/pathik/MainActivity.java')).read()
+    gradle = open(os.path.join(ROOT, 'android/app/build.gradle')).read()
+    fetch = open(os.path.join(ROOT, 'scripts/fetch_phone_detector.sh')).read()
+    ci = open(os.path.join(ROOT, '.github/workflows/android.yml')).read()
+    assert 'MODEL = "app/vendor/yolo11n_320.tflite"' in java          # web/ is the APK's assets folder
+    assert 'lidar_robot/web"]' in gradle and "noCompress 'tflite'" in gradle  # memory-mapped: must stay uncompressed
+    for dep in ('tensorflow-lite:', 'tensorflow-lite-gpu:', 'tensorflow-lite-gpu-api:'):
+        assert f"org.tensorflow:{dep}" in gradle
+    assert 'GpuDelegate' in java and 'setNumThreads' in java and 'setUseXNNPACK(true)' in java
+    assert 'tfl="$dest/yolo11n_320.tflite"' in fetch and 'check_phone_model.py" tflite' in fetch
+    assert 'vendor/yolo11n_320.tflite' in ci
+    for fn in ('detectorInit(final int id)', 'detect(final int id, final String jpegB64, final float conf)',
+               'hasNativeDetector()'):
+        i = main.index(fn)
+        assert '@JavascriptInterface' in main[i - 80:i], fn
+    assert 'window.__pathikDetDone(' in main
+    det = open(DETECTOR_JS).read()
+    assert "nativeCall('detectorInit')" in det and "nativeCall('detect', b64, conf)" in det
+    assert 'root.__pathikDetDone' in det
+
+
+NATIVE_MOCK = r"""
+// detector.js in Node with a fake canvas and a fake Java bridge (window.PathikNative)
+const fs = require('fs');
+global.window = global;
+global.performance = { now: () => Date.now() };
+const ctx = { fillRect() {}, drawImage() {}, getImageData: () => ({ data: new Uint8ClampedArray(320 * 320 * 4) }) };
+global.document = { createElement: () => ({ getContext: () => ctx, toDataURL: () => 'data:image/jpeg;base64,QUJD' }) };
+const calls = [];
+window.PathikNative = {
+  hasNativeDetector: () => true,
+  detectorInit: id => { calls.push('init'); setTimeout(() => window.__pathikDetDone(id,
+    JSON.stringify(IN.fail ? { ok: false, error: 'no native model' } : { ok: true, engine: 'phone GPU', ms_gpu: 21, ms_cpu: 60 }))); },
+  detect: (id, b64, conf) => { calls.push(['detect', b64, conf]); setTimeout(() => window.__pathikDetDone(id,
+    JSON.stringify({ ok: true, engine: 'phone GPU', ms: 30, infer_ms: 20, boxes: IN.boxes }))); },
+};
+window.PathikVision = V;
+eval(fs.readFileSync(IN.det, 'utf8'));
+(async () => {
+  const D = window.PathikDetector;
+  let backend = null, err = null;
+  try { backend = await D.load(); } catch (e) { err = e.message; }
+  const out = { backend, err, native: D.native, info: D.info, nativeError: D.nativeError || null, calls };
+  if (!err) out.run = await D.run({ img: {}, w: IN.w, h: IN.h }, 0.4);
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+def test_native_engine_path_in_js():
+    """Boxes from Java (320 px letterbox space) come back in frame pixels, duplicates removed, like the web engine."""
+    boxes = [[100, 60, 140, 260, 0.9], [101, 61, 141, 259, 0.8], [10, 70, 12, 72, 0.5]]
+    r = run_js(NATIVE_MOCK, {'det': os.path.abspath(DETECTOR_JS), 'boxes': boxes, 'w': 640, 'h': 360})
+    assert r['backend'] == 'phone GPU' and r['native'] is True and r['info']['ms_gpu'] == 21
+    assert r['calls'][0] == 'init' and r['calls'][1] == ['detect', 'QUJD', 0.4]
+    s, px, py, _, _ = vr.letterbox_params(640, 360, 320)
+    want = [max(0, (100 - px) / s), max(0, (60 - py) / s), min(640, (140 - px) / s), min(360, (260 - py) / s)]
+    got = r['run']['boxes']
+    assert len(got) == 2                                    # the near-duplicate is suppressed, the far box kept
+    assert all(abs(a - b) < 1e-6 for a, b in zip(got[0][:4], want)) and got[0][4] == 0.9
+    assert r['run']['inferMs'] == 20
+
+
+def test_native_engine_failure_falls_back():
+    """No model in the APK (or TFLite fails): the page says why and uses the web engine (here: missing -> error)."""
+    r = run_js(NATIVE_MOCK, {'det': os.path.abspath(DETECTOR_JS), 'boxes': [], 'w': 640, 'h': 480, 'fail': True})
+    assert r['native'] is False and r['nativeError'] == 'no native model'
+    assert 'vendor/ort' in r['err']                         # ONNX Runtime Web isn't loaded in this test
+
+
+def test_check_phone_model_script():
+    src = open(os.path.join(ROOT, 'scripts/check_phone_model.py')).read()
+    assert '[1, 320, 320, 3]' in src and '[1, 84, 2100]' in src and '[1, 2100, 84]' in src

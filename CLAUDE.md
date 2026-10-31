@@ -125,6 +125,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-31 (late): native phone detector: android NativeDetector.java (TensorFlow Lite 2.16.1, GPU delegate vs
+  XNNPACK on cores-1 threads, benchmarked at start, faster kept), bridge detectorInit/detect/hasNativeDetector ->
+  window.__pathikDetDone(id, json); detector.js tries native first, else ONNX Runtime Web (1 thread in a WebView).
+  Model web/app/vendor/yolo11n_320.tflite = the 320 ONNX converted by onnx2tf (fp16, pixel boxes, same as ONNX)
+  in fetch_phone_detector.sh + scripts/check_phone_model.py; build.gradle noCompress 'tflite', arm ABIs only.
+
 - 2026-10-31 (night): head mode (docs/head_mode.md): web/app/head.html + head.js + face.js (11 moods from /api/state,
   PIN kiosk, STOP without PIN, OK / recovery answers, demo + phone-camera test) + detector.js (shared with detect.js);
   phone detects on the Pi camera's plain frame (/api/camera.jpg?raw=1 -> vision/raw/compressed) and POSTs boxes to
