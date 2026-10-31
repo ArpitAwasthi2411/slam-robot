@@ -34,6 +34,7 @@ from lidar_robot.explorer import MapAutoSaver
 from lidar_robot.kinematics import yaw_from_quaternion, quaternion_from_yaw, wrap_angle
 from lidar_robot.mapsave import save_map
 from lidar_robot.pihealth import PiHealth
+from lidar_robot.vision_rules import clean_phone_detections
 from lidar_robot import scan_points
 from lidar_robot.tuning import TelemetryBuffer, TestRunner, ranges_for_app, WHEEL_RANGES
 
@@ -121,6 +122,11 @@ class DashboardNode(Node):
         self.create_subscription(CompressedImage, 'vision/image/compressed', self._on_camera, 2)
         self.stream_req_pub = self.create_publisher(Empty, 'vision/stream_request', 5)
         self._stream_req_t = 0.0
+        # the phone in the robot's head: plain camera frames out, people boxes back in
+        self.raw, self.raw_t, self._raw_req_t = None, 0.0, 0.0
+        self.create_subscription(CompressedImage, 'vision/raw/compressed', self._on_raw, 2)
+        self.raw_req_pub = self.create_publisher(Empty, 'vision/raw_request', 5)
+        self.phone_pub = self.create_publisher(String, 'vision/phone_boxes', 10)
         self.voice, self.voice_t = None, 0.0
         self.create_subscription(String, 'voice/status', self._on_voice, 10)
         self.voice_pub = self.create_publisher(String, 'voice/control', 10)
@@ -287,6 +293,17 @@ class DashboardNode(Node):
     def _on_camera(self, msg):
         self.camera, self.camera_t = bytes(msg.data), time.monotonic()
 
+    def _on_raw(self, msg):
+        self.raw, self.raw_t = bytes(msg.data), time.monotonic()
+
+    def phone_detections(self, body):
+        """POST /api/vision/phone: people boxes the phone found on a plain camera frame.
+        {"boxes": [[x1, y1, x2, y2, conf], ...], "w": 640, "h": 360, "ms": 85}. The vision node uses them
+        instead of its own YOLO while they keep coming (and falls back to its own after 1 s without)."""
+        msg = clean_phone_detections(body)
+        self.phone_pub.publish(String(data=json.dumps(msg)))
+        return {'ok': True, 'n': len(msg['boxes'])}
+
     def _on_voice(self, msg):
         try:
             self.voice, self.voice_t = json.loads(msg.data), time.monotonic()
@@ -303,8 +320,13 @@ class DashboardNode(Node):
                                                        'max_s': float((body or {}).get('max_s', 8.0))})))
         return {'ok': True}
 
-    def camera_jpeg(self):
+    def camera_jpeg(self, raw=False):
         now = time.monotonic()
+        if raw:                                       # plain picture for the phone detector
+            if now - self._raw_req_t > 1.0:
+                self._raw_req_t = now
+                self.raw_req_pub.publish(Empty())
+            return self.raw if now - self.raw_t < 2.0 else None
         if now - self._stream_req_t > 1.0:           # someone is watching: ask the vision node to stream
             self._stream_req_t = now
             self.stream_req_pub.publish(Empty())

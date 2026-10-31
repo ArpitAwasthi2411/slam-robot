@@ -313,7 +313,8 @@ def make_handler(backend, index_path, app_dir=None, users=None, public=None):
                     return self._send(200, dict(backend.get_state(), net=self._net()))
                 if url.path == '/api/camera.jpg':
                     fn = getattr(backend, 'camera_jpeg', None)
-                    jpg = fn() if fn else None
+                    raw = q.get('raw', ['0'])[0] in ('1', 'true')
+                    jpg = (fn(raw=True) if raw else fn()) if fn else None
                     if not jpg:
                         return self._send(404, {'error': 'no camera picture'})
                     return self._send(200, jpg, 'image/jpeg')
@@ -352,6 +353,8 @@ def make_handler(backend, index_path, app_dir=None, users=None, public=None):
                     return self._send(200, {'ok': True, 'saved': backend.save_map(str(body.get('name', 'map')))})
                 elif url.path == '/api/relocalize':
                     return self._optional('relocalize', body)
+                elif url.path == '/api/vision/phone':           # people boxes from the phone in the robot's head
+                    return self._optional('phone_detections', body)
                 elif url.path == '/api/voice':                  # {"action": "listen" | "stop"}: robot's mic
                     return self._optional('voice_control', body)
                 elif url.path == '/api/esp':

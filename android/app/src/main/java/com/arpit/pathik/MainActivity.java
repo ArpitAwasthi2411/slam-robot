@@ -50,6 +50,7 @@ public class MainActivity extends Activity {
      *  reserved host instead of file:// (same idea as androidx WebViewAssetLoader, without the library). */
     static final String ASSET_HOST = "appassets.androidplatform.net";
     static final String DETECTOR_URL = "https://" + ASSET_HOST + "/app/detect.html";
+    static final String HEAD_URL = "https://" + ASSET_HOST + "/app/head.html";
     private PermissionRequest pendingCam = null;
     private String pendingLang = null;
 
@@ -310,6 +311,12 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void openDetector(final String hash) {
             act.runOnUiThread(() -> act.web.loadUrl(DETECTOR_URL + (hash == null || hash.isEmpty() ? "" : "#" + hash)));
+        }
+
+        /** Head mode: the phone mounted on the robot (face, kiosk, people detection). */
+        @JavascriptInterface
+        public void openHead(final String hash) {
+            act.runOnUiThread(() -> act.web.loadUrl(HEAD_URL + (hash == null || hash.isEmpty() ? "" : "#" + hash)));
         }
 
         /** Back from the detector to the app. */

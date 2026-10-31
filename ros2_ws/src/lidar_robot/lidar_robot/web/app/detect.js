@@ -9,96 +9,24 @@
 (function () {
   'use strict';
   const V = window.PathikVision;
-  const SIZE = 320;
-  const MODEL = 'vendor/yolo11n_320.onnx';
   const $ = id => document.getElementById(id);
   const COL = { STOP: '#e6282a', SLOW_DOWN: '#ffaa00', CONTINUE: '#3cc850', UNKNOWN: '#a0a0a0' };
 
   const hash = new URLSearchParams(location.hash.slice(1));
   const robot = { base: hash.get('base') || '', token: hash.get('token') || '' };
 
-  const st = { session: null, input: 'images', running: false, src: null, srcKind: 'phone', facing: 'environment',
+  const st = { running: false, src: null, srcKind: 'phone', facing: 'environment',
                tracker: new V.PersonTracker(), fps: 0, lastT: 0, ms: 0, backend: '' };
 
-  // ------------------------------------------------------------------ picture sources
-  class PhoneCamera {
-    constructor(facing) { this.facing = facing; this.video = null; this.stream = null; }
-    async start() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error(window.isSecureContext ? 'This browser has no camera access.'
-          : 'The camera only works in the Pathik app (or on https / localhost).');
-      }
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: false, video: { facingMode: { ideal: this.facing }, width: { ideal: 640 }, height: { ideal: 480 } } });
-      const v = document.createElement('video');
-      v.playsInline = true; v.muted = true; v.srcObject = this.stream;
-      await v.play();
-      this.video = v;
-    }
-    async frame() {
-      const v = this.video;
-      if (!v || v.readyState < 2 || !v.videoWidth) return null;
-      return { img: v, w: v.videoWidth, h: v.videoHeight };
-    }
-    stop() { if (this.stream) this.stream.getTracks().forEach(t => t.stop()); this.stream = null; this.video = null; }
-  }
+  const DT = window.PathikDetector;
+  const PhoneCamera = DT.PhoneCamera;
+  const RobotCamera = DT.RobotCamera;
 
-  class RobotCamera {
-    constructor(base, token) { this.base = base.replace(/\/$/, ''); this.token = token; this.last = null; }
-    async start() { if (!this.base) throw new Error('Not connected to a robot: open this from the Pathik app while connected.'); }
-    async frame() {
-      const r = await fetch(`${this.base}/api/camera.jpg?t=${Date.now()}`,
-        { headers: this.token ? { Authorization: 'Bearer ' + this.token } : {}, cache: 'no-store' });
-      if (!r.ok) throw new Error(r.status === 404 ? 'The robot has no camera picture (is the camera node running?)'
-        : `Robot camera: HTTP ${r.status}`);
-      const bmp = await createImageBitmap(await r.blob());
-      if (this.last && this.last.close) this.last.close();
-      this.last = bmp;
-      return { img: bmp, w: bmp.width, h: bmp.height };
-    }
-    stop() { if (this.last && this.last.close) this.last.close(); this.last = null; }
-  }
-
-  // ------------------------------------------------------------------ model
-  async function loadModel() {
-    if (!window.ort) throw new Error('Detector files are missing (vendor/ort). Use the Pathik app (APK).');
-    const threads = window.crossOriginIsolated ? Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)) : 1;
-    ort.env.wasm.wasmPaths = new URL('vendor/ort/', location.href).href;
-    ort.env.wasm.numThreads = threads;
-    ort.env.wasm.proxy = false;
-    const res = await fetch(MODEL);
-    if (!res.ok) throw new Error(`Model not found (${MODEL}).`);
-    const buf = await res.arrayBuffer();
-    st.session = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
-    st.input = st.session.inputNames[0];
-    st.backend = `phone CPU, ${threads} thread${threads > 1 ? 's' : ''}`;
-    // warm-up so the first real frame isn't slow
-    await st.session.run({ [st.input]: new ort.Tensor('float32', new Float32Array(3 * SIZE * SIZE), [1, 3, SIZE, SIZE]) });
-  }
-
-  // ------------------------------------------------------------------ detection on one frame
-  const pre = document.createElement('canvas'); pre.width = pre.height = SIZE;
-  const pctx = pre.getContext('2d', { willReadFrequently: true });
-  const chw = new Float32Array(3 * SIZE * SIZE);
-
-  function toTensor(f) {
-    const [s, px, py, nw, nh] = V.letterboxParams(f.w, f.h, SIZE);
-    pctx.fillStyle = 'rgb(114,114,114)';
-    pctx.fillRect(0, 0, SIZE, SIZE);
-    pctx.drawImage(f.img, 0, 0, f.w, f.h, px, py, nw, nh);
-    const d = pctx.getImageData(0, 0, SIZE, SIZE).data, n = SIZE * SIZE;
-    for (let i = 0, j = 0; i < n; i++, j += 4) {
-      chw[i] = d[j] / 255; chw[n + i] = d[j + 1] / 255; chw[2 * n + i] = d[j + 2] / 255;
-    }
-    return new ort.Tensor('float32', chw, [1, 3, SIZE, SIZE]);
-  }
+  async function loadModel() { st.backend = await DT.load(); }
 
   async function detect(f) {
-    const t0 = performance.now();
-    const out = (await st.session.run({ [st.input]: toTensor(f) }))[st.session.outputNames[0]];
-    const n = out.dims[2];
-    const boxes = V.decodeYolo(out.data, n, f.w, f.h, SIZE, +$('conf').value, 0);
-    st.ms = performance.now() - t0;
+    const { boxes, ms } = await DT.run(f, +$('conf').value);
+    st.ms = ms;
     const hfov = +$('fov').value;
     const people = st.tracker.update(boxes, performance.now() / 1000);
     for (const p of people) {
@@ -177,7 +105,7 @@
   async function start() {
     if (st.running) return;
     try {
-      st.src = st.srcKind === 'robot' ? new RobotCamera(robot.base, robot.token) : new PhoneCamera(st.facing);
+      st.src = st.srcKind === 'robot' ? new RobotCamera(robot.base, robot.token, true) : new PhoneCamera(st.facing);
       msg(st.srcKind === 'robot' ? 'Getting the robot camera picture…' : 'Starting the phone camera…');
       await st.src.start();
     } catch (e) {

@@ -117,8 +117,11 @@ def test_camera_distance_estimate():
 
 def test_detector_page_files():
     html = open(os.path.join(APP, 'detect.html')).read()
-    for f in ('vision.js', 'vendor/ort/ort.wasm.min.js', 'detect.js'):
+    for f in ('vision.js', 'vendor/ort/ort.wasm.min.js', 'detector.js', 'detect.js'):
         assert f'src="{f}"' in html
+    assert html.index('src="detector.js"') < html.index('src="detect.js"')
+    det = open(os.path.join(APP, 'detector.js')).read()
+    assert 'vendor/yolo11n_320.onnx' in det and 'class PhoneCamera' in det and 'class RobotCamera' in det
+    assert 'raw=1' in det                                   # the head / lab use the plain Pi picture
     js = open(os.path.join(APP, 'detect.js')).read()
-    assert 'vendor/yolo11n_320.onnx' in js and 'class PhoneCamera' in js and 'class RobotCamera' in js
-    assert '__pathikBack' in js
+    assert '__pathikBack' in js and 'new RobotCamera(robot.base, robot.token, true)' in js

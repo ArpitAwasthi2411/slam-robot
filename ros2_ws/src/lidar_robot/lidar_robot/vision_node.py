@@ -33,8 +33,8 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, LaserScan
 from std_msgs.msg import String, Empty
 
-from lidar_robot.vision_rules import (PersonTracker, bearing_deg, decide, decode_yolo,
-                                      letterbox_params, lidar_distance)
+from lidar_robot.vision_rules import (ActivityWatch, PersonTracker, bearing_deg, decide, decode_yolo,
+                                      letterbox_params, lidar_distance, phone_boxes)
 
 LIBCAMERA_PATHS = {   # where scripts/setup_pi_camera.sh installs libcamera (meson default prefix)
     'GST_PLUGIN_PATH': '/usr/local/lib/aarch64-linux-gnu/gstreamer-1.0',
@@ -241,6 +241,8 @@ class VisionNode(Node):
         d('marker_always', False)       # True = look for the marker all the time (bench tests); normally
                                         # only while the navigator is docking (vision/marker_request)
         d('camera_calib', '')           # YAML (config/camera_calib.yaml); empty = built-in defaults
+        d('phone_timeout', 1.0)         # s: phone detections older than this -> the Pi runs YOLO itself again
+        d('idle_pause_s', 30.0)         # pause detection this long after the robot stopped being busy (0 = never)
         g = lambda n: self.get_parameter(n).value  # noqa: E731
         self.p = {n: g(n) for n in ('hfov_deg', 'flip', 'conf', 'det_rate', 'stream_rate', 'jpeg_quality',
                                      'laser_yaw')}
@@ -253,9 +255,19 @@ class VisionNode(Node):
         self.dec_pub = self.create_publisher(String, 'vision/decision', 10)
         self.marker_pub = self.create_publisher(String, 'vision/dock_marker', 10)
         self.img_pub = self.create_publisher(CompressedImage, 'vision/image/compressed', 2)
+        # the plain picture (no boxes drawn) for the phone detector in the robot's head (/api/camera.jpg?raw=1)
+        self.raw_pub = self.create_publisher(CompressedImage, 'vision/raw/compressed', 2)
+        self.create_subscription(Empty, 'vision/raw_request', self._on_raw_request, 5)
+        # people boxes found by the phone (POST /api/vision/phone -> dashboard): used instead of our own YOLO
+        self.create_subscription(String, 'vision/phone_boxes', self._on_phone_boxes, 10)
+        # detection only while the robot is busy
+        self.create_subscription(String, 'navigator/status', self._on_nav_status, 5)
         self.create_subscription(LaserScan, 'scan', self._on_scan, qos_profile_sensor_data)
         self.scan, self.scan_t = None, 0.0
         self.lock = threading.Lock()
+        self.stream_until = self.raw_until = 0.0   # app camera view / phone head asking for pictures
+        self.phone_msg, self.phone_timeout = None, float(g('phone_timeout'))
+        self.activity = ActivityWatch(float(g('idle_pause_s')))
         self.people, self.decision, self.fps = [], None, 0.0
 
         self.camera = Camera(g('camera'), int(g('width')), int(g('height')), int(g('fps')),
@@ -288,7 +300,6 @@ class VisionNode(Node):
                 self.create_subscription(Empty, 'vision/marker_request', self._on_marker_request, 5)
                 threading.Thread(target=self._marker_loop, daemon=True).start()
         # the live picture costs CPU (draw + JPEG + ROS transfer): only while someone has the app's camera view open
-        self.stream_until = 0.0
         self.create_subscription(Empty, 'vision/stream_request', self._on_stream_request, 5)
         self.create_timer(1.0 / max(0.5, float(self.p['stream_rate'])), self._publish_image)
         self.get_logger().info('vision node up')
@@ -301,6 +312,25 @@ class VisionNode(Node):
 
     def _on_marker_request(self, _msg):
         self.marker_until = time.monotonic() + 3.0
+
+    def _on_raw_request(self, _msg):
+        self.raw_until = time.monotonic() + 5.0
+
+    def _on_phone_boxes(self, msg):
+        try:
+            d = json.loads(msg.data)
+        except ValueError:
+            return
+        if isinstance(d, dict):
+            d['t_mono'] = time.monotonic()
+            self.phone_msg = d
+
+    def _on_nav_status(self, msg):
+        try:
+            state = json.loads(msg.data).get('state')
+        except (ValueError, AttributeError):
+            return
+        self.activity.update(state, time.monotonic())
 
     def _frame(self):
         f, t = self.camera.frame, self.camera.stamp
@@ -337,31 +367,57 @@ class VisionNode(Node):
     def _detect_loop(self):
         period = 1.0 / max(0.5, float(self.p['det_rate']))
         last = time.monotonic()
-        last_stamp = None
+        last_stamp, last_phone, paused_t = None, None, 0.0
         while self.running:
             t0 = time.monotonic()
-            if self.camera.stamp == last_stamp and self.camera.frame is not None \
-                    and t0 - self.camera.stamp < 1.0:
-                time.sleep(0.02)            # no new picture yet: don't run YOLO on the same one twice
+            if t0 < self.stream_until or t0 < self.raw_until:
+                self.activity.poke(t0)                # someone is looking at the camera: keep detecting
+            if not self.activity.wanted(t0):          # robot idle: no detection (saves ~1 core)
+                if t0 - paused_t > 1.0:
+                    paused_t = t0
+                    self._publish_decision({'camera_ok': self.camera.frame is not None, 'camera': self.camera.kind,
+                                            'camera_error': self.camera.error, 'detector': self.detector is not None,
+                                            'detector_error': self.det_error, 'detected_by': None, 'paused': True,
+                                            'action': 'UNKNOWN', 'speed_factor': 1.0, 'steer': 'none', 'people': [],
+                                            'people_in_path': 0, 'reason': 'robot idle: detection paused'})
+                time.sleep(0.2)
                 continue
-            last_stamp = self.camera.stamp
-            frame = self._frame()
+            frame = self.camera.frame if self.camera.frame is not None and t0 - self.camera.stamp < 1.0 else None
+            fh, fw = (frame.shape[:2] if frame is not None else (0, 0))
+            pmsg = self.phone_msg
+            boxes = phone_boxes(pmsg, fw, fh, t0, self.phone_timeout) if pmsg is not None else None
+            if boxes is not None:                     # the phone in the head detects: just use its boxes
+                if pmsg is last_phone:
+                    time.sleep(0.02)
+                    continue
+                last_phone, by = pmsg, 'phone'
+                h, w = (fh, fw) if frame is not None else (int(pmsg['h']), int(pmsg['w']))
+            else:                                     # no (fresh) phone: our own YOLO, as before
+                if self.camera.stamp == last_stamp and self.camera.frame is not None \
+                        and t0 - self.camera.stamp < 1.0:
+                    time.sleep(0.02)            # no new picture yet: don't run YOLO on the same one twice
+                    continue
+                last_stamp, by = self.camera.stamp, 'pi'
+                frame = self._frame()
             msg = {'camera_ok': frame is not None, 'camera': self.camera.kind,
                    'camera_error': self.camera.error, 'detector': self.detector is not None,
-                   'detector_error': self.det_error}
-            if frame is None:
+                   'detector_error': self.det_error, 'detected_by': by, 'paused': False}
+            if by == 'pi' and frame is None:
                 msg.update(action='UNKNOWN', speed_factor=1.0, steer='none', people=[], people_in_path=0,
                            reason='no camera picture' + (f': {self.camera.error}' if self.camera.error else ''))
-            elif self.detector is None:
+            elif by == 'pi' and self.detector is None:
                 msg.update(action='UNKNOWN', speed_factor=1.0, steer='none', people=[], people_in_path=0,
                            reason=self.det_error)
             else:
-                try:
-                    boxes = self.detector.detect(frame, float(self.p['conf']))
-                except Exception as e:
-                    boxes = []
-                    self.get_logger().error(f'detection failed: {e}', throttle_duration_sec=10.0)
-                h, w = frame.shape[:2]
+                if by == 'pi':
+                    try:
+                        boxes = self.detector.detect(frame, float(self.p['conf']))
+                    except Exception as e:
+                        boxes = []
+                        self.get_logger().error(f'detection failed: {e}', throttle_duration_sec=10.0)
+                    h, w = frame.shape[:2]
+                else:
+                    msg['phone_ms'] = pmsg.get('ms')
                 with self.lock:
                     scan = self.scan if time.monotonic() - self.scan_t < 0.6 else None
                 people = self.tracker.update(boxes)
@@ -381,22 +437,38 @@ class VisionNode(Node):
                            lidar=scan is not None)
                 with self.lock:
                     self.people = people
-            msg['time'] = time.time()
-            with self.lock:
-                self.decision = msg
-            self.dec_pub.publish(String(data=json.dumps(msg)))
-            time.sleep(max(0.0, period - (time.monotonic() - t0)))
+            self._publish_decision(msg)
+            if by == 'pi':
+                time.sleep(max(0.0, period - (time.monotonic() - t0)))
+
+    def _publish_decision(self, msg):
+        msg['time'] = time.time()
+        with self.lock:
+            self.decision = msg
+        self.dec_pub.publish(String(data=json.dumps(msg)))
 
     def _on_stream_request(self, _msg):
         self.stream_until = time.monotonic() + 5.0
 
     def _publish_image(self):
-        if time.monotonic() > self.stream_until:
+        now = time.monotonic()
+        if now > self.stream_until and now > self.raw_until:
             return
         frame = self._frame()
         if frame is None:
             return
         import cv2
+        if now <= self.raw_until:                # plain picture for the phone detector
+            ok, jpg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if ok:
+                m = CompressedImage()
+                m.header.stamp = self.get_clock().now().to_msg()
+                m.header.frame_id = 'camera'
+                m.format = 'jpeg'
+                m.data = jpg.tobytes()
+                self.raw_pub.publish(m)
+        if now > self.stream_until:
+            return
         img = frame.copy()
         h, w = img.shape[:2]
         with self.lock:

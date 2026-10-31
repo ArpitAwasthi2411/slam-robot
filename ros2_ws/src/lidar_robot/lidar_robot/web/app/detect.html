@@ -102,11 +102,12 @@
   SLOW DOWN closer than 1.8 m (or STOP if they walk towards me). On the robot the distance comes from the LiDAR;
   here it is estimated from the box height (a 1.7 m tall person), so set the field of view to your camera's.
   When a person is cut off by the picture's edge, the box-size rule decides instead, as on the robot without a LiDAR hit.<br>
-  <b>Robot camera</b> uses the Pi camera's picture instead of the phone's; everything else stays the same.</p>
+  <b>Robot camera</b> uses the Pi camera's plain picture instead of the phone's; everything else stays the same.</p>
 </main>
 
 <script src="vision.js"></script>
 <script src="vendor/ort/ort.wasm.min.js"></script>
+<script src="detector.js"></script>
 <script src="detect.js"></script>
 </body>
 </html>

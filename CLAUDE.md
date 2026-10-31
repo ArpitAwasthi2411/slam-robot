@@ -125,6 +125,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-31 (night): head mode (docs/head_mode.md): web/app/head.html + head.js + face.js (11 moods from /api/state,
+  PIN kiosk, STOP without PIN, OK / recovery answers, demo + phone-camera test) + detector.js (shared with detect.js);
+  phone detects on the Pi camera's plain frame (/api/camera.jpg?raw=1 -> vision/raw/compressed) and POSTs boxes to
+  /api/vision/phone -> /vision/phone_boxes; vision node uses them instead of its YOLO (phone_timeout 1 s fallback),
+  ActivityWatch pauses detection when idle (idle_pause_s 30); Android openHead. Tests: test_head_mode.py, test_head_face.py.
+
 - 2026-10-31: lab day: encoder GND fixed, wheel tuning reset to defaults, speed loop verified (±200 mm/s both wheels),
   ticks from a 5 m drive (wheels 4.669 m vs real 4.590 m) -> 5048/5063 set ON THE PI (not yet in the repo yaml),
   IMU still silent on I2C. Phone detector (lab): web/app/detect.html + detect.js + vision.js (JS port of

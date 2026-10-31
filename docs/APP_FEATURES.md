@@ -140,6 +140,7 @@ shrink to a strip, Android back button (dialog → sub-page → Home), phone fon
 | B7 | Drive tests: Straight line / Spin, speed + time choices, confirm, live chart (drift in cm or turned degrees vs odometry), metrics + advice (curve per metre; suggested wheel_separation) | O | `POST /api/test`, `GET /api/test` || Operate → Drive tests |
 | B8 | Mission log: stats tiles (missions, success, avg time, avg speed, path efficiency, replans, distance, bumps · e-stops), last 40 missions, Refresh, Export CSV (APK share, else download + clipboard) | O | `nav mission_log` || Operate → Mission log |
 | B9 | Phone detector (lab, new 2026-10-31): YOLO11n people detection on the phone (ONNX Runtime Web), phone camera or the robot camera, same rules as the robot (vision.js = vision_rules.py), boxes + decision + ms/fps | O | `GET /api/camera.jpg` (robot camera source) || Operate → Phone detector (`detect.html`) |
+| B10 | Head mode (new 2026-10-31): the phone on the robot shows a face (11 moods from the robot's state), STOP, OK / recovery answers; PIN-protected kiosk (places, rooms, typed or spoken command, go home, cancel); detects people on the Pi camera's plain picture and sends the boxes to the robot (Pi skips its own YOLO, 1 s fallback), only while the robot is busy; demo + phone-camera test without a robot | O | `GET /api/state`, `GET /api/camera.jpg?raw=1`, `POST /api/vision/phone`, `/api/nav`, `/api/estop` || Operate → Head mode (`head.html`) |
 
 ## 9. Me tab
 

@@ -1657,6 +1657,13 @@ const SUBS = ['health', 'wheels', 'path', 'tests', 'log', 'people'];
 $$('[data-sub]').forEach(b => b.onclick = () => { haptic(8); S.lab = b.dataset.sub; labEnter(); });
 // Phone detector (lab): detect.html runs YOLO on this phone. In the APK it opens on a secure asset origin
 // (camera + WebAssembly); the robot's address and login go along so it can also use the robot's camera.
+// Head mode: the phone mounted on the robot (face, PIN kiosk, people detection on the Pi camera's picture)
+$('#hub-head').onclick = () => {
+  haptic(8);
+  const h = BASE && BASE !== DEMO ? `base=${encodeURIComponent(BASE)}&token=${encodeURIComponent(TOKEN || '')}` : '';
+  if (window.PathikNative && PathikNative.openHead) PathikNative.openHead(h);
+  else location.href = 'head.html' + (h ? '#' + h : '');
+};
 $('#hub-detector').onclick = () => {
   haptic(8);
   const h = BASE && BASE !== DEMO ? `base=${encodeURIComponent(BASE)}&token=${encodeURIComponent(TOKEN || '')}` : '';

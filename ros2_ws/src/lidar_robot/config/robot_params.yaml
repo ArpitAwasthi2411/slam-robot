@@ -139,6 +139,8 @@ vision:
     marker_size_m: 0.08          # black square side, without the white border
     marker_rate: 10.0            # only while docking (navigator asks); capped at out_fps
     marker_always: false         # true = look for the marker all the time (bench test with marker_webcam)
+    phone_timeout: 1.0           # s: the phone in the head stopped sending people boxes -> the Pi's own YOLO again
+    idle_pause_s: 30.0           # people detection pauses this long after the robot stopped being busy (0 = never)
     camera_calib: ''             # '' = built-in Camera Module 3 Wide defaults; or the path of a measured YAML
 
 voice:

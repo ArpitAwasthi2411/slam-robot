@@ -198,6 +198,74 @@ def decide(people, frame_h, cfg=None):
     return _d('CONTINUE', 1.0, 'people in view, none in my path', closest=closest)
 
 
+# ------------------------------------------------------------------ phone detections + idle pause
+class ActivityWatch:
+    """Is people detection needed right now? Only while the robot is busy (driving, docking, ...) and for
+    idle_pause_s after it stopped; the app's camera view or a phone asking for frames also count.
+    No navigator status for 5 s (navigator not running) = always on, to be safe."""
+
+    IDLE_STATES = ('IDLE', 'CHARGING')
+
+    def __init__(self, idle_pause_s=30.0):
+        self.idle_pause_s = idle_pause_s
+        self.state, self.state_t, self.busy_t = None, -1e9, -1e9
+
+    def update(self, state, now):
+        self.state, self.state_t = state, now
+        if state not in self.IDLE_STATES:
+            self.busy_t = now
+
+    def poke(self, now):
+        """Someone is watching (camera view open, phone fetching frames)."""
+        self.busy_t = now
+
+    def wanted(self, now):
+        if self.idle_pause_s <= 0 or now - self.state_t > 5.0:
+            return True
+        return now - self.busy_t < self.idle_pause_s
+
+
+def clean_phone_detections(body, max_boxes=30):
+    """Validate a POST /api/vision/phone body -> the /vision/phone_boxes message. Raises ValueError."""
+    boxes = body.get('boxes')
+    w, h = body.get('w'), body.get('h')
+    if not isinstance(boxes, list) or len(boxes) > max_boxes:
+        raise ValueError(f'boxes must be a list (at most {max_boxes})')
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v <= 4096 for v in (w, h)):
+        raise ValueError('w and h must be the frame size in pixels')
+    clean = []
+    for b in boxes:
+        if not (isinstance(b, list) and len(b) >= 5 and
+                all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in b[:5])):
+            raise ValueError('each box is [x1, y1, x2, y2, conf]')
+        clean.append([round(float(v), 2) for v in b[:5]])
+    ms = body.get('ms')
+    return {'boxes': clean, 'w': w, 'h': h,
+            'ms': ms if isinstance(ms, (int, float)) and not isinstance(ms, bool) and math.isfinite(ms) else None}
+
+
+def phone_boxes(msg, frame_w, frame_h, now, max_age_s=1.0, max_boxes=30):
+    """Boxes from the phone detector (/vision/phone_boxes JSON) scaled to this camera's frame, or None when
+    there is nothing fresh/valid (the Pi then runs its own YOLO). msg: {boxes: [[x1,y1,x2,y2,conf]], w, h, t_mono}."""
+    if not isinstance(msg, dict) or now - float(msg.get('t_mono', -1e9)) > max_age_s:
+        return None
+    try:
+        w, h = float(msg['w']), float(msg['h'])
+        boxes = msg['boxes'][:max_boxes]
+        if w <= 0 or h <= 0:
+            return None
+        sx, sy = (frame_w / w if frame_w else 1.0), (frame_h / h if frame_h else 1.0)
+        out = []
+        for b in boxes:
+            x1, y1, x2, y2, c = (float(v) for v in b[:5])
+            if not all(math.isfinite(v) for v in (x1, y1, x2, y2, c)) or x2 <= x1 or y2 <= y1:
+                continue
+            out.append((x1 * sx, y1 * sy, x2 * sx, y2 * sy, c))
+        return out
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+
+
 # ------------------------------------------------------------------ navigator side
 class VisionGate:
     """Applies the latest camera decision to the navigator's command.

@@ -1,0 +1,102 @@
+/* Shared by detect.html (lab) and head.html (the phone in the robot's head):
+ *   PathikDetector.load()            YOLO11n 320 px on ONNX Runtime Web (WebAssembly, multi-threaded when isolated)
+ *   PathikDetector.run(frame, conf)  -> {boxes: [[x1,y1,x2,y2,conf]] in frame pixels, ms}
+ *   PhoneCamera / RobotCamera        picture sources: {img, w, h} per frame
+ * Needs vision.js and vendor/ort/ort.wasm.min.js loaded first.
+ */
+(function (root) {
+  'use strict';
+  const V = root.PathikVision;
+  const SIZE = 320;
+  const MODEL = 'vendor/yolo11n_320.onnx';
+  const st = { session: null, input: 'images', output: 'output0', backend: '' };
+
+  async function load() {
+    if (st.session) return st.backend;
+    if (!root.ort) throw new Error('Detector files are missing (vendor/ort). Use the Pathik app (APK).');
+    const threads = root.crossOriginIsolated ? Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)) : 1;
+    ort.env.wasm.wasmPaths = new URL('vendor/ort/', location.href).href;
+    ort.env.wasm.numThreads = threads;
+    ort.env.wasm.proxy = false;
+    const res = await fetch(MODEL);
+    if (!res.ok) throw new Error(`Model not found (${MODEL}).`);
+    st.session = await ort.InferenceSession.create(await res.arrayBuffer(),
+      { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+    st.input = st.session.inputNames[0];
+    st.output = st.session.outputNames[0];
+    st.backend = `phone CPU, ${threads} thread${threads > 1 ? 's' : ''}`;
+    await st.session.run({ [st.input]: new ort.Tensor('float32', new Float32Array(3 * SIZE * SIZE), [1, 3, SIZE, SIZE]) });
+    return st.backend;
+  }
+
+  let pre = null, pctx = null;
+  const chw = new Float32Array(3 * SIZE * SIZE);
+  function toTensor(f) {
+    if (!pre) {
+      pre = document.createElement('canvas'); pre.width = pre.height = SIZE;
+      pctx = pre.getContext('2d', { willReadFrequently: true });
+    }
+    const [, px, py, nw, nh] = V.letterboxParams(f.w, f.h, SIZE);
+    pctx.fillStyle = 'rgb(114,114,114)';
+    pctx.fillRect(0, 0, SIZE, SIZE);
+    pctx.drawImage(f.img, 0, 0, f.w, f.h, px, py, nw, nh);
+    const d = pctx.getImageData(0, 0, SIZE, SIZE).data, n = SIZE * SIZE;
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+      chw[i] = d[j] / 255; chw[n + i] = d[j + 1] / 255; chw[2 * n + i] = d[j + 2] / 255;
+    }
+    return new ort.Tensor('float32', chw, [1, 3, SIZE, SIZE]);
+  }
+
+  async function run(f, conf = 0.45) {
+    const t0 = performance.now();
+    const out = (await st.session.run({ [st.input]: toTensor(f) }))[st.output];
+    const boxes = V.decodeYolo(out.data, out.dims[2], f.w, f.h, SIZE, conf, 0);
+    return { boxes, ms: performance.now() - t0 };
+  }
+
+  class PhoneCamera {
+    constructor(facing = 'environment') { this.facing = facing; this.video = null; this.stream = null; }
+    async start() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error(root.isSecureContext ? 'This browser has no camera access.'
+          : 'The camera only works in the Pathik app (or on https / localhost).');
+      }
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: false, video: { facingMode: { ideal: this.facing }, width: { ideal: 640 }, height: { ideal: 480 } } });
+      const v = document.createElement('video');
+      v.playsInline = true; v.muted = true; v.srcObject = this.stream;
+      await v.play();
+      this.video = v;
+    }
+    async frame() {
+      const v = this.video;
+      if (!v || v.readyState < 2 || !v.videoWidth) return null;
+      return { img: v, w: v.videoWidth, h: v.videoHeight };
+    }
+    stop() { if (this.stream) this.stream.getTracks().forEach(t => t.stop()); this.stream = null; this.video = null; }
+  }
+
+  /** The Pi camera's picture. raw = the plain frame (no boxes drawn), as the head's detector needs. */
+  class RobotCamera {
+    constructor(base, token, raw = false) {
+      this.base = (base || '').replace(/\/$/, ''); this.token = token; this.raw = raw; this.last = null;
+    }
+    async start() { if (!this.base) throw new Error('Not connected to a robot: open this from the Pathik app while connected.'); }
+    async frame() {
+      const r = await fetch(`${this.base}/api/camera.jpg?${this.raw ? 'raw=1&' : ''}t=${Date.now()}`,
+        { headers: this.token ? { Authorization: 'Bearer ' + this.token } : {}, cache: 'no-store' });
+      if (!r.ok) {
+        throw new Error(r.status === 404 ? 'No camera picture from the robot yet (is the camera node running?)'
+          : r.status === 401 || r.status === 403 ? 'The robot refused the login: open this again from the app'
+            : `Robot camera: HTTP ${r.status}`);
+      }
+      const bmp = await createImageBitmap(await r.blob());
+      if (this.last && this.last.close) this.last.close();
+      this.last = bmp;
+      return { img: bmp, w: bmp.width, h: bmp.height };
+    }
+    stop() { if (this.last && this.last.close) this.last.close(); this.last = null; }
+  }
+
+  root.PathikDetector = { load, run, PhoneCamera, RobotCamera, SIZE, get backend() { return st.backend; } };
+})(window);

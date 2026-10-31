@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#08080a">
+<title>Pathik head</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: #08080a; color: var(--text); font-family: var(--ui); overflow: hidden;
+         user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+  .h-hd { position: fixed; inset: 0; display: flex; flex-direction: column; padding: calc(var(--safe-t) + 8px) 14px calc(var(--safe-b) + 10px); }
+  .h-bar { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+  .h-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill);
+          background: rgba(255,255,255,.07); color: var(--text-2); font-size: var(--fs-small); white-space: nowrap; }
+  .h-chip.ok { color: var(--good); } .h-chip.warn { color: var(--warn); } .h-chip.bad { color: var(--bad-text); }
+  .h-grow { flex: 1; min-width: 0; }
+  .h-corner { width: 40px; height: 40px; border-radius: var(--r-pill); border: 0; background: rgba(255,255,255,.06);
+            color: var(--dim); font-size: 20px; cursor: pointer; }
+  .h-face-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0; cursor: pointer; }
+  svg.face { width: min(92vw, 120vh); max-height: 52vh; --face: var(--teal); }
+  .f-eye { fill: var(--face); transition: y .18s, height .18s; }
+  .f-pupil { fill: #08080a; transition: r .2s; } .f-shine { fill: #fff; opacity: .85; }
+  .f-arc { fill: none; stroke: var(--face); stroke-width: 18; stroke-linecap: round; opacity: 0; transition: opacity .2s; }
+  .f-cross { fill: none; stroke: var(--face); stroke-width: 18; stroke-linecap: round; opacity: 0; }
+  .f-brow { fill: var(--face); opacity: .8; transition: transform .25s; }
+  .f-mouth { fill: none; stroke: var(--face); stroke-width: 12; stroke-linecap: round; stroke-linejoin: round; }
+  svg.face[data-mood="happy"] .f-mouth { fill: var(--face); }
+  .f-zz { fill: var(--dim); font: 700 44px var(--display); opacity: 0; transition: opacity .4s; }
+  .h-line { font: 800 clamp(24px, 6vw, 44px)/1.1 var(--display); text-align: center; margin: 6px 0 4px; max-width: 900px; }
+  .h-sub { color: var(--dim); font-size: clamp(14px, 3.4vw, 20px); text-align: center; min-height: 1.4em; max-width: 900px; }
+  .h-acts { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 14px; }
+  .h-b { min-height: 56px; padding: 0 22px; border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--surface-2);
+       color: var(--text); font: 700 18px var(--ui); cursor: pointer; }
+  .h-b.go { background: var(--grad); color: var(--on-grad); border-color: transparent; }
+  .h-stop { position: fixed; right: 16px; bottom: calc(var(--safe-b) + 16px); width: 96px; height: 96px; border-radius: 50%;
+          border: 5px solid #fff3; background: var(--red); color: #fff; font: 900 20px var(--display); letter-spacing: .04em;
+          box-shadow: 0 8px 30px #e5301f66; cursor: pointer; z-index: 5; }
+  body.estop .h-hd { box-shadow: inset 0 0 0 6px var(--red); }
+  .h-sheet { position: fixed; inset: 0; background: rgba(5,5,8,.86); z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .h-sheet[hidden] { display: none; }
+  .h-panel { width: min(720px, 100%); max-height: 100%; overflow: auto; background: var(--surface); border-radius: var(--r-xl);
+           border: 1px solid var(--line); padding: 18px; }
+  .h-panel h2 { font: 800 var(--fs-l)/1.1 var(--display); margin: 0 0 4px; }
+  .h-panel p { color: var(--dim); margin: 0 0 12px; }
+  .h-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 10px 0 14px; }
+  .h-grid button { min-height: 64px; border-radius: var(--r-m); border: 1px solid var(--line-2); background: var(--surface-2);
+                 color: var(--text); font: 700 17px var(--ui); padding: 8px 12px; text-align: left; cursor: pointer; }
+  .h-grid button small { display: block; color: var(--dim); font-weight: 500; font-size: 13px; margin-top: 2px; }
+  .h-h3 { font: 700 14px var(--ui); color: var(--dim); text-transform: uppercase; letter-spacing: .08em; margin: 6px 0 0; }
+  .h-cmd { display: flex; gap: 8px; }
+  .h-cmd input { flex: 1; min-width: 0; min-height: 56px; border-radius: var(--r-pill); border: 1px solid var(--line-2);
+               background: var(--surface-2); color: var(--text); font: 500 18px var(--ui); padding: 0 18px; }
+  .h-pin-dots { display: flex; gap: 14px; justify-content: center; margin: 14px 0; }
+  .h-pin-dots i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-2); }
+  .h-pin-dots i.on { background: var(--orange); border-color: var(--orange); }
+  .h-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; max-width: 320px; margin: 0 auto; }
+  .h-pad button { min-height: 64px; border-radius: var(--r-m); border: 1px solid var(--line-2); background: var(--surface-2);
+                color: var(--text); font: 700 26px var(--display); cursor: pointer; }
+  .h-err { color: var(--bad-text); text-align: center; min-height: 1.3em; }
+  .h-row { display: flex; gap: 10px; flex-wrap: wrap; } .h-row > * { flex: 1 1 140px; }
+  label.tg { display: flex; gap: 10px; align-items: center; padding: 10px 0; font-size: 16px; }
+  label.tg input { width: 22px; height: 22px; accent-color: var(--orange); }
+  .h-muted { color: var(--dim); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="h-hd">
+  <div class="h-bar">
+    <button class="h-corner" id="gear" aria-label="Head settings (PIN)">⚙</button>
+    <span class="h-chip" id="c-bat">–</span>
+    <span class="h-chip" id="c-net">–</span>
+    <span class="h-grow"></span>
+    <span class="h-chip" id="c-det">detection –</span>
+  </div>
+  <div class="h-face-wrap" id="face-wrap" role="button" aria-label="Tap to choose where to go">
+    <svg class="face" id="face" aria-hidden="true"></svg>
+    <div class="h-line" id="line">…</div>
+    <div class="h-sub" id="sub"></div>
+    <div class="h-acts" id="acts"></div>
+  </div>
+</div>
+<button class="h-stop" id="stop" aria-label="Stop the robot">STOP</button>
+
+<!-- PIN pad -->
+<div class="h-sheet" id="pin" hidden><div class="h-panel">
+  <h2 id="pin-t">Enter the PIN</h2><p id="pin-p">To choose a place.</p>
+  <div class="h-pin-dots" id="pin-dots"></div>
+  <div class="h-err" id="pin-e"></div>
+  <div class="h-pad" id="pad"></div>
+  <div class="h-row" style="margin-top:14px"><button class="h-b" id="pin-x">Cancel</button></div>
+</div></div>
+
+<!-- kiosk: where to go -->
+<div class="h-sheet" id="kiosk" hidden><div class="h-panel">
+  <h2>Where should I go?</h2><p>Tap a place or a room, or say / type it.</p>
+  <div class="h-cmd"><input id="k-text" placeholder="e.g. take me to the HOD office" autocomplete="off">
+    <button class="h-b" id="k-mic" hidden aria-label="Speak">🎤</button><button class="h-b go" id="k-send">Go</button></div>
+  <div class="h-h3">Places</div><div class="h-grid" id="k-places"></div>
+  <div class="h-h3">Rooms</div><div class="h-grid" id="k-rooms"></div>
+  <div class="h-row"><button class="h-b" id="k-home">Go home</button><button class="h-b" id="k-cancel">Cancel my trip</button>
+    <button class="h-b" id="k-close">Close</button></div>
+  <p class="h-muted" id="k-msg" style="margin-top:10px"></p>
+</div></div>
+
+<!-- settings -->
+<div class="h-sheet" id="set" hidden><div class="h-panel">
+  <h2>Head settings</h2><p id="s-robot">–</p>
+  <label class="h-tg"><input type="checkbox" id="s-detect" checked> Detect people on this phone (the robot's camera picture)</label>
+  <label class="h-tg"><input type="checkbox" id="s-test"> Test detection with this phone's camera (no robot needed)</label>
+  <p class="h-muted">While this phone detects, the robot's Pi skips its own YOLO. If the phone stops for 1 s, the Pi detects
+  again by itself. The LiDAR and ultrasonic stops never depend on the phone.</p>
+  <div class="h-row" style="margin-top:12px"><button class="h-b" id="s-pin">Change PIN</button>
+    <button class="h-b" id="s-release">Release STOP</button></div>
+  <div class="h-row" style="margin-top:10px"><button class="h-b" id="s-exit">Leave head mode</button><button class="h-b go" id="s-close">Done</button></div>
+</div></div>
+
+<script src="vision.js"></script>
+<script src="vendor/ort/ort.wasm.min.js"></script>
+<script src="detector.js"></script>
+<script src="face.js"></script>
+<script src="head.js"></script>
+</body>
+</html>
