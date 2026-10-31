@@ -3,7 +3,7 @@ name: Pathik APK
 on:
   push:
     branches: [main]
-    paths: ['android/**', 'ros2_ws/src/lidar_robot/lidar_robot/web/app/**', '.github/workflows/android.yml']
+    paths: ['android/**', 'ros2_ws/src/lidar_robot/lidar_robot/web/app/**', '.github/workflows/android.yml', 'scripts/fetch_phone_detector.sh']
     tags: ['v*']
   workflow_dispatch:
 
@@ -36,6 +36,19 @@ jobs:
           else
             echo "No keystore secret: signing with a debug key (installable, but updates need the same key)"
           fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Phone detector model cache
+        uses: actions/cache@v4
+        with:
+          path: ros2_ws/src/lidar_robot/lidar_robot/web/app/vendor/yolo11n_320.onnx
+          key: phone-detector-yolo11n-320-ultralytics-8.4.194
+
+      - name: Phone detector files (ONNX Runtime Web + YOLO11n model, not in Git)
+        run: bash scripts/fetch_phone_detector.sh
 
       - name: Build APK
         working-directory: android

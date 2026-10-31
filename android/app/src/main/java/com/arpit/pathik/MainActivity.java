@@ -20,13 +20,18 @@ import android.os.Vibrator;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import java.io.InputStream;
 import java.net.Inet4Address;
+import java.util.HashMap;
+import java.util.Map;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.Collections;
@@ -40,6 +45,12 @@ public class MainActivity extends Activity {
     private TextToSpeech tts;
     private boolean ttsReady = false;
     private static final int REQ_MIC = 7;
+    private static final int REQ_CAM = 8;
+    /** Bundled pages that need a secure web origin (camera, WebAssembly): served from the assets under this
+     *  reserved host instead of file:// (same idea as androidx WebViewAssetLoader, without the library). */
+    static final String ASSET_HOST = "appassets.androidplatform.net";
+    static final String DETECTOR_URL = "https://" + ASSET_HOST + "/app/detect.html";
+    private PermissionRequest pendingCam = null;
     private String pendingLang = null;
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -58,11 +69,35 @@ public class MainActivity extends Activity {
         // follow the phone's font size (accessibility), capped at 130 % so the map screens still fit
         float fontScale = getResources().getConfiguration().fontScale;
         s.setTextZoom(Math.round(Math.max(1f, Math.min(1.3f, fontScale)) * 100));
-        web.setWebChromeClient(new WebChromeClient());
+        // the detector page (https asset origin) fetches the robot's http camera picture
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                // only our own bundled detector page may use the camera
+                boolean ours = request.getOrigin() != null && ASSET_HOST.equals(request.getOrigin().getHost());
+                boolean video = false;
+                for (String r : request.getResources()) video |= PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r);
+                if (!ours || !video) { request.deny(); return; }
+                if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                    request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+                } else {
+                    pendingCam = request;
+                    requestPermissions(new String[]{Manifest.permission.CAMERA}, REQ_CAM);
+                }
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return !request.getUrl().toString().startsWith("file:///android_asset/");
+                String u = request.getUrl().toString();
+                return !(u.startsWith("file:///android_asset/") || ASSET_HOST.equals(request.getUrl().getHost()));
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                if (!ASSET_HOST.equals(request.getUrl().getHost())) return null;
+                return serveAsset(request.getUrl().getPath());
             }
         });
         web.addJavascriptInterface(new Bridge(this), "PathikNative");
@@ -75,6 +110,35 @@ public class MainActivity extends Activity {
         });
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl("file:///android_asset/app/index.html");
+    }
+
+    /** A file from the APK's assets for https://appassets.androidplatform.net/<path>, with the headers that make
+     *  the page cross-origin isolated (multi-threaded WebAssembly). Nothing outside assets/app is served. */
+    WebResourceResponse serveAsset(String path) {
+        Map<String, String> h = new HashMap<>();
+        h.put("Cross-Origin-Opener-Policy", "same-origin");
+        h.put("Cross-Origin-Embedder-Policy", "credentialless");
+        h.put("Cache-Control", "no-store");
+        if (path == null || path.contains("..") || !path.startsWith("/app/")) {
+            return new WebResourceResponse("text/plain", "utf-8", 404, "Not Found", h, null);
+        }
+        try {
+            InputStream in = getAssets().open(path.substring(1));
+            return new WebResourceResponse(mimeOf(path), mimeOf(path).startsWith("text/") ? "utf-8" : null, 200, "OK", h, in);
+        } catch (Exception e) {
+            return new WebResourceResponse("text/plain", "utf-8", 404, "Not Found", h, null);
+        }
+    }
+
+    static String mimeOf(String p) {
+        if (p.endsWith(".html")) return "text/html";
+        if (p.endsWith(".js") || p.endsWith(".mjs")) return "text/javascript";
+        if (p.endsWith(".css")) return "text/css";
+        if (p.endsWith(".wasm")) return "application/wasm";
+        if (p.endsWith(".svg")) return "image/svg+xml";
+        if (p.endsWith(".woff2")) return "font/woff2";
+        if (p.endsWith(".json") || p.endsWith(".webmanifest")) return "application/json";
+        return "application/octet-stream";
     }
 
     @Override
@@ -154,6 +218,15 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
         super.onRequestPermissionsResult(code, perms, res);
+        if (code == REQ_CAM && pendingCam != null) {
+            if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED) {
+                pendingCam.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+            } else {
+                pendingCam.deny();
+            }
+            pendingCam = null;
+            return;
+        }
         if (code == REQ_MIC) {
             if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED) startListening(pendingLang);
             else voiceEvent("error", "Microphone permission is needed for voice commands");
@@ -230,6 +303,21 @@ public class MainActivity extends Activity {
                 i.putExtra(Intent.EXTRA_TITLE, name);
                 i.putExtra(Intent.EXTRA_TEXT, text);
                 act.startActivity(Intent.createChooser(i, "Share " + name));
+            });
+        }
+
+        /** Open the phone detector (lab). hash: "base=...&token=..." so it can use the robot camera. */
+        @JavascriptInterface
+        public void openDetector(final String hash) {
+            act.runOnUiThread(() -> act.web.loadUrl(DETECTOR_URL + (hash == null || hash.isEmpty() ? "" : "#" + hash)));
+        }
+
+        /** Back from the detector to the app. */
+        @JavascriptInterface
+        public void closeDetector() {
+            act.runOnUiThread(() -> {
+                if (act.web.canGoBack()) act.web.goBack();
+                else act.web.loadUrl("file:///android_asset/app/index.html");
             });
         }
 

@@ -125,6 +125,13 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-10-31: lab day: encoder GND fixed, wheel tuning reset to defaults, speed loop verified (±200 mm/s both wheels),
+  ticks from a 5 m drive (wheels 4.669 m vs real 4.590 m) -> 5048/5063 set ON THE PI (not yet in the repo yaml),
+  IMU still silent on I2C. Phone detector (lab): web/app/detect.html + detect.js + vision.js (JS port of
+  vision_rules.py, checked against it by test_phone_detector.py), YOLO11n ONNX 320 on ONNX Runtime Web, phone camera
+  or robot camera source; APK serves it from https://appassets.androidplatform.net (COOP/COEP, CAMERA permission);
+  model + ORT fetched at APK build by scripts/fetch_phone_detector.sh (web/app/vendor/ is git-ignored).
+
 - 2026-10-30 (night): accurate mapping (docs/mapping.md): cartographer_odom.lua retuned for corridors with good
   odometry (no online correlative, ceres translation 20 / rotation 40, odometry weights 1e5, submaps 90, range 10 m,
   loop closure 0.65/0.70); offline rebuild `scripts/map_offline.sh record|build` + cartographer_mapping_hq.lua

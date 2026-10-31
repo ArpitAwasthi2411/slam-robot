@@ -45,3 +45,6 @@ id_rsa*
 # simulator / test output
 maps/sim_*
 maps/test_room.*
+
+# Phone detector: ONNX Runtime Web + YOLO model, fetched by scripts/fetch_phone_detector.sh (too big for Git)
+ros2_ws/src/lidar_robot/lidar_robot/web/app/vendor/

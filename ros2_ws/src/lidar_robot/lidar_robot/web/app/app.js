@@ -1655,6 +1655,14 @@ const lab = { wheelRanges: null, wheel: {}, wheelEdit: 0, wheelDirty: false, fol
 // Operate area: a list (hub) of the robot-team tools; each opens as a sub-page with a back button
 const SUBS = ['health', 'wheels', 'path', 'tests', 'log', 'people'];
 $$('[data-sub]').forEach(b => b.onclick = () => { haptic(8); S.lab = b.dataset.sub; labEnter(); });
+// Phone detector (lab): detect.html runs YOLO on this phone. In the APK it opens on a secure asset origin
+// (camera + WebAssembly); the robot's address and login go along so it can also use the robot's camera.
+$('#hub-detector').onclick = () => {
+  haptic(8);
+  const h = BASE && BASE !== DEMO ? `base=${encodeURIComponent(BASE)}&token=${encodeURIComponent(TOKEN || '')}` : '';
+  if (window.PathikNative && PathikNative.openDetector) PathikNative.openDetector(h);
+  else location.href = 'detect.html' + (h ? '#' + h : '');
+};
 $$('[data-back]').forEach(b => b.onclick = () => { haptic(8); lab_set(null); });
 function lab_set(which) {
   if (which === 'people' ? !can('admin') : which && !can('operator')) which = null;

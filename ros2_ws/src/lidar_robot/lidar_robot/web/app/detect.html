@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101114">
+<meta name="color-scheme" content="dark light">
+<title>Phone detector</title>
+<script>
+(function () {
+  var t = 'system';
+  try { t = JSON.parse(localStorage.getItem('pathik.theme') || '"system"'); } catch (e) {}
+  var dark = t === 'dark' || (t !== 'light' && !(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches));
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+})();
+</script>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+<style>
+  body { background: var(--page-bg); color: var(--text); margin: 0; font-family: var(--ui); }
+  .dt { max-width: 720px; margin: 0 auto; padding: calc(var(--safe-t) + 12px) 16px calc(var(--safe-b) + 24px); }
+  .dt-top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .dt-top h1 { font: 700 var(--fs-m)/1.15 var(--display); margin: 0; flex: 1; }
+  .dt-back { width: var(--hit-s); height: var(--hit-s); border-radius: var(--r-pill); border: 1px solid var(--line-2);
+             background: var(--surface); color: var(--text); font-size: 22px; line-height: 1; cursor: pointer; }
+  .lab { font-size: var(--fs-tiny); padding: 4px 10px; border-radius: var(--r-pill); background: var(--tint-teal); color: var(--teal); }
+  .seg { display: flex; gap: 4px; padding: 4px; border-radius: var(--r-pill); background: var(--surface); border: 1px solid var(--line); margin-bottom: 12px; }
+  .seg button { flex: 1; min-height: 40px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--dim);
+                font: 600 var(--fs-small) var(--ui); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--grad); color: var(--on-grad); }
+  .seg button:disabled { opacity: .45; cursor: not-allowed; }
+  .view { position: relative; border-radius: var(--r-l); overflow: hidden; background: #000; aspect-ratio: 16 / 9; }
+  .view canvas { width: 100%; height: 100%; display: block; object-fit: contain; }
+  .view .msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px;
+               color: #ddd; font-size: var(--fs-body); }
+  .decision { display: flex; align-items: center; gap: 12px; margin: 12px 0; padding: 14px 16px; border-radius: var(--r-m);
+              background: var(--surface); border: 1px solid var(--line); }
+  .decision b { font: 800 var(--fs-l)/1 var(--display); letter-spacing: .02em; }
+  .decision small { color: var(--dim); display: block; margin-top: 4px; font-size: var(--fs-small); }
+  .decision.STOP { background: var(--tint-red); border-color: var(--red); } .decision.STOP b { color: var(--bad-text); }
+  .decision.SLOW_DOWN { background: var(--tint-orange); border-color: var(--orange); } .decision.SLOW_DOWN b { color: var(--orange); }
+  .decision.CONTINUE { background: var(--tint-good); border-color: var(--good); } .decision.CONTINUE b { color: var(--good); }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+  @media (min-width: 560px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  .m { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-s); padding: 10px 12px; min-width: 0; }
+  .m b { display: block; font: 700 var(--fs-s)/1.2 var(--display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .m span { color: var(--dim); font-size: var(--fs-tiny); }
+  .ctl { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m); padding: 12px 14px; margin-bottom: 12px; }
+  .ctl label { display: flex; justify-content: space-between; gap: 10px; font-size: var(--fs-small); color: var(--text-2); margin: 6px 0 2px; }
+  .ctl input[type=range] { width: 100%; accent-color: var(--orange); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn-d { flex: 1 1 140px; min-height: var(--hit); border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--surface-2);
+           color: var(--text); font: 600 var(--fs-body) var(--ui); cursor: pointer; }
+  .btn-d.go { background: var(--grad); color: var(--on-grad); border-color: transparent; }
+  .note { color: var(--dim); font-size: var(--fs-small); line-height: 1.45; }
+  .note code { font-family: var(--mono); font-size: .92em; }
+  .people { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+  .people li { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-s); padding: 8px 12px; font-size: var(--fs-small); }
+</style>
+</head>
+<body>
+<main class="dt">
+  <div class="dt-top">
+    <button class="dt-back" id="back" aria-label="Back to Pathik">‹</button>
+    <h1>Phone detector</h1>
+    <span class="lab">lab</span>
+  </div>
+
+  <div class="seg" role="radiogroup" aria-label="Picture source">
+    <button id="src-phone" role="radio" aria-pressed="true">Phone camera</button>
+    <button id="src-robot" role="radio" aria-pressed="false">Robot camera</button>
+  </div>
+
+  <div class="view"><canvas id="cv" width="640" height="360" aria-label="Camera picture with detections"></canvas>
+    <div class="msg" id="msg">Loading the detector…</div></div>
+
+  <div class="decision" id="dec" aria-live="polite"><div><b id="dec-a">–</b><small id="dec-r">Press Start</small></div></div>
+
+  <div class="grid">
+    <div class="m"><b id="m-ms">–</b><span>detection time (ms)</span></div>
+    <div class="m"><b id="m-fps">–</b><span>decisions per second</span></div>
+    <div class="m"><b id="m-n">–</b><span>people / in my path</span></div>
+    <div class="m"><b id="m-be">–</b><span>runs on</span></div>
+  </div>
+
+  <ul class="people" id="people"></ul>
+
+  <div class="row" style="margin-bottom:12px">
+    <button class="btn-d go" id="run">Start</button>
+    <button class="btn-d" id="flip">Switch phone camera</button>
+  </div>
+
+  <div class="ctl">
+    <label for="conf"><span>Confidence threshold</span><b id="conf-v">0.45</b></label>
+    <input type="range" id="conf" min="0.2" max="0.8" step="0.05" value="0.45">
+    <label for="fov"><span>Camera field of view (for the angle of each person)</span><b id="fov-v">68°</b></label>
+    <input type="range" id="fov" min="40" max="120" step="1" value="68">
+  </div>
+
+  <p class="note">The same detector (YOLO11n) and the same rules as the robot's camera node
+  (<code>vision_rules.py</code>): a person inside ±15° of straight ahead is "in my path"; STOP closer than 0.8 m,
+  SLOW DOWN closer than 1.8 m (or STOP if they walk towards me). On the robot the distance comes from the LiDAR;
+  here it is estimated from the box height (a 1.7 m tall person), so set the field of view to your camera's.
+  When a person is cut off by the picture's edge, the box-size rule decides instead, as on the robot without a LiDAR hit.<br>
+  <b>Robot camera</b> uses the Pi camera's picture instead of the phone's; everything else stays the same.</p>
+</main>
+
+<script src="vision.js"></script>
+<script src="vendor/ort/ort.wasm.min.js"></script>
+<script src="detect.js"></script>
+</body>
+</html>
