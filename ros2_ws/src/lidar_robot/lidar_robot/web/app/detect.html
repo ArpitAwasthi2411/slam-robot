@@ -18,6 +18,8 @@
 <link rel="stylesheet" href="app.css">
 <style>
   body { background: var(--page-bg); color: var(--text); margin: 0; font-family: var(--ui); }
+  /* app.css locks the main screen (map); this is a normal long page: let it scroll */
+  html, body { height: auto; min-height: 100%; } body { overflow-y: auto; overscroll-behavior-y: auto; }
   .dt { max-width: 720px; margin: 0 auto; padding: calc(var(--safe-t) + 12px) 16px calc(var(--safe-b) + 24px); }
   .dt-top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
   .dt-top h1 { font: 700 var(--fs-m)/1.15 var(--display); margin: 0; flex: 1; }
