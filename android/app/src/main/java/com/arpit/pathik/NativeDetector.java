@@ -33,6 +33,7 @@ final class NativeDetector {
     private Interpreter interp;
     private GpuDelegate gpu;
     private String engine = "none";
+    private double startGpu = -1, startCpu = -1;   // the start test, kept for later pages (init runs once per app)
     private int outA, outB;               // output shape [1, outA, outB]: [1, 84, 2100] or [1, 2100, 84]
     private float[][][] out;
     private final ByteBuffer input = ByteBuffer.allocateDirect(SIZE * SIZE * 3 * 4).order(ByteOrder.nativeOrder());
@@ -40,7 +41,7 @@ final class NativeDetector {
 
     /** Load the model, pick the fastest engine. Returns a JSON string {ok, engine, ms_gpu, ms_cpu, error}. */
     synchronized String init(Context ctx) {
-        if (interp != null) return info(null, -1, -1);
+        if (interp != null) return info(null, startGpu, startCpu);
         MappedByteBuffer model;
         try {
             AssetFileDescriptor fd = ctx.getAssets().openFd(MODEL);
@@ -85,6 +86,7 @@ final class NativeDetector {
             return "{\"ok\":false,\"error\":\"TensorFlow Lite could not start\"}";
         }
         shape(interp);
+        startGpu = msGpu; startCpu = msCpu;
         return info(null, msGpu, msCpu);
     }
 
