@@ -18,8 +18,10 @@
 <link rel="stylesheet" href="app.css">
 <style>
   body { background: var(--page-bg); color: var(--text); margin: 0; font-family: var(--ui); }
-  /* app.css locks the main screen (map); this is a normal long page: let it scroll */
-  html, body { height: auto; min-height: 100%; } body { overflow-y: auto; overscroll-behavior-y: auto; }
+  /* app.css locks the page itself (the map screen must not slide); like the app's own sub-pages, this page
+     scrolls inside a full-screen box instead */
+  .scroller { position: fixed; inset: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+              overscroll-behavior-y: contain; touch-action: pan-y; background: var(--page-bg); }
   .dt { max-width: 720px; margin: 0 auto; padding: calc(var(--safe-t) + 12px) 16px calc(var(--safe-b) + 24px); }
   .dt-top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
   .dt-top h1 { font: 700 var(--fs-m)/1.15 var(--display); margin: 0; flex: 1; }
@@ -61,11 +63,12 @@
 </style>
 </head>
 <body>
+<div class="scroller" id="scroller">
 <main class="dt">
   <div class="dt-top">
     <button class="dt-back" id="back" aria-label="Back to Pathik">‹</button>
     <h1>Phone detector</h1>
-    <span class="lab">lab</span>
+    <span class="lab">lab · fix 2</span>
   </div>
 
   <div class="seg" role="radiogroup" aria-label="Picture source">
@@ -107,6 +110,8 @@
   <b>Robot camera</b> uses the Pi camera's plain picture instead of the phone's; everything else stays the same.</p>
 </main>
 
+<p id="pagever" style="text-align:center;color:var(--dim);font-size:12px;margin:24px 0 8px">page 2026-11-01 · scroll fix 2</p>
+</div>
 <script src="vision.js"></script>
 <script src="vendor/ort/ort.wasm.min.js"></script>
 <script src="detector.js"></script>
