@@ -8,7 +8,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.app.ActivityManager;
 import android.os.BatteryManager;
-import android.os.Debug;
 import android.os.PowerManager;
 import android.content.pm.PackageManager;
 import android.speech.RecognitionListener;
@@ -380,8 +379,13 @@ public class MainActivity extends Activity {
                 ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
                 ActivityManager am = (ActivityManager) act.getSystemService(Context.ACTIVITY_SERVICE);
                 if (am != null) am.getMemoryInfo(mi);
-                Debug.MemoryInfo dm = new Debug.MemoryInfo();
-                Debug.getMemoryInfo(dm);
+                // app memory from /proc/self/statm (resident pages): instant. Debug.getMemoryInfo() blocked the page
+                // for 50+ ms per call, which the peak test then counted as its own stalls.
+                double appMb = -1;
+                try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader("/proc/self/statm"))) {
+                    String[] f = br.readLine().trim().split("\\s+");
+                    appMb = Long.parseLong(f[1]) * 4096.0 / 1048576.0;
+                } catch (Exception ignored) { /* stays -1 */ }
                 return String.format(Locale.US,
                         "{\"ok\":true,\"battery_pct\":%s,\"temp_c\":%s,\"charging\":%b,\"current_ma\":%s,\"thermal\":%d,"
                         + "\"app_mb\":%.0f,\"avail_mb\":%.0f,\"total_mb\":%.0f,\"low_memory\":%b,\"cores\":%d,\"model\":\"%s\",\"sdk\":%d}",
@@ -389,7 +393,7 @@ public class MainActivity extends Activity {
                         temp == Integer.MIN_VALUE ? "null" : String.format(Locale.US, "%.1f", temp / 10.0),
                         plugged != 0,
                         ua == Long.MIN_VALUE || ua == 0 ? "null" : String.valueOf(Math.abs(ua) > 20000 ? ua / 1000 : ua),
-                        thermal, dm.getTotalPss() / 1024.0, mi.availMem / 1048576.0, mi.totalMem / 1048576.0, mi.lowMemory,
+                        thermal, appMb, mi.availMem / 1048576.0, mi.totalMem / 1048576.0, mi.lowMemory,
                         Runtime.getRuntime().availableProcessors(), NativeDetector.esc(Build.MANUFACTURER + " " + Build.MODEL),
                         Build.VERSION.SDK_INT);
             } catch (Throwable t) {
