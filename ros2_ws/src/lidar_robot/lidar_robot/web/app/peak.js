@@ -4,7 +4,7 @@
  */
 (function () {
   'use strict';
-  const DT = window.PathikDetector, F = window.PathikFace, DOOR = window.PathikDoor, PK = window.PathikPeak;
+  const V = window.PathikVision, DT = window.PathikDetector, F = window.PathikFace, DOOR = window.PathikDoor, PK = window.PathikPeak;
   const $ = id => document.getElementById(id);
   const N = window.PathikNative;
   const hash = new URLSearchParams(location.hash.slice(1));
@@ -56,7 +56,7 @@
     $('err').textContent = '';
     const cfg = { dur: +$('dur').value, src: $('src').value, rate: +$('rate').value, det: $('c-det').checked,
                   face: $('c-face').checked, door: $('c-door').checked, say: $('c-say').checked };
-    run = { cfg, on: true, t0: 0, samples: [], cur: { n: 0, ms: 0, frames: 0, long: 0 }, dev: {}, frame: null, engine: '' };
+    run = { cfg, on: true, t0: 0, samples: [], cur: { n: 0, ms: 0, frames: 0, long: 0 }, dev: {}, frame: null, engine: '', ids: new Set(), tracker: null };
     $('go').textContent = 'Stop'; $('go').classList.add('stop');
     $('live').hidden = false; $('result').hidden = true;
     $('status').textContent = 'Loading the detector…';
@@ -85,12 +85,25 @@
         const f = await r.src.frame();
         if (!f) { await sleep(20); continue; }
         if (cv.width !== 320) { cv.width = 320; cv.height = 240; }
-        ctx.drawImage(f.img, 0, 0, f.w, f.h, 0, 0, 320, 240);
+        let people = null;
         if (r.cfg.det) {
           const res = await DT.run(f, 0.25);
           r.cur.n++; r.cur.ms += res.ms;
-          ctx.strokeStyle = '#ff9f2e'; ctx.lineWidth = 2;
-          for (const b of res.boxes) ctx.strokeRect(b[0] * 320 / f.w, b[1] * 240 / f.h, (b[2] - b[0]) * 320 / f.w, (b[3] - b[1]) * 240 / f.h);
+          // what the robot uses: tracked people (weak boxes only continue a person, never flicker in on their own)
+          people = (r.tracker = r.tracker || new V.PersonTracker()).update(res.boxes, performance.now() / 1000);
+          for (const p of people) r.ids.add(p.id);
+        }
+        // picture and its boxes drawn together, so the boxes stay on screen until the next result
+        ctx.drawImage(f.img, 0, 0, f.w, f.h, 0, 0, 320, 240);
+        if (people) {
+          const sx = 320 / f.w, sy = 240 / f.h;
+          ctx.lineWidth = 2; ctx.font = 'bold 12px system-ui, sans-serif';
+          for (const p of people) {
+            const [x1, y1, x2, y2] = p.box;
+            ctx.strokeStyle = '#ff9f2e'; ctx.strokeRect(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy);
+            ctx.fillStyle = '#ff9f2e'; ctx.fillRect(x1 * sx, Math.max(0, y1 * sy - 15), 30, 15);
+            ctx.fillStyle = '#111'; ctx.fillText(`#${p.id}`, x1 * sx + 3, Math.max(11, y1 * sy - 3));
+          }
         }
         const now = performance.now();
         if (r.cfg.door && now - lastDoor > 2000) { lastDoor = now; DOOR.check('__peak test__', f); r.cur.doors = (r.cur.doors || 0) + 1; }
@@ -156,8 +169,8 @@
     set('v-ms', L.det_ms == null ? null : Math.round(L.det_ms), 'ms');
     set('v-fps', L.det_n, '/s');
     set('v-face', L.face_fps, 'fps');
-    set('v-temp', L.temp_c, '°C');
-    set('v-bat', L.battery_pct, '%' + (L.charging ? ' ⚡' : ''));
+    set('v-temp', L.temp_c == null ? null : L.temp_c.toFixed(1), '°C');
+    set('v-bat', L.battery_pct == null ? null : Math.round(L.battery_pct), '%' + (L.charging ? ' ⚡' : ''));
     set('v-mem', L.app_mb == null ? null : Math.round(L.app_mb), 'MB');
     spark('g-ms', pick('det_ms'), '#ff9f2e', v => Math.round(v));
     spark('g-fps', pick('det_n'), '#2fbfa8', v => v.toFixed(1));
@@ -192,7 +205,10 @@
                 engine: r.engine || DT.backend || '', model: (r.dev && r.dev.model) || '' });
     try { localStorage.setItem('pathik.peak', JSON.stringify(h.slice(0, 8))); } catch (e) { /* private */ }
     showHist();
+    const inf = DT.info || {};
     r.shareText = `Pathik peak test ${res.verdict}\n${res.line}\nDetector: ${r.engine || DT.backend}` +
+      (inf.ms_gpu != null ? ` (start test: GPU ${inf.ms_gpu < 0 ? 'not available' : Math.round(inf.ms_gpu) + ' ms'}, CPU ${Math.round(inf.ms_cpu)} ms)` : '') +
+      `\nPeople ids used: ${r.ids.size}` +
       (r.dev && r.dev.model ? `\nPhone: ${r.dev.model} (Android SDK ${r.dev.sdk}, ${r.dev.cores} cores)` : '') + '\n\n' +
       res.checks.map(c => `${{ ok: '✓', warn: '!', bad: '✗', na: '–' }[c.status]} ${c.name}: ${c.value} (target ${c.target})`).join('\n');
     window.__peakResult = { res, samples: r.samples, text: r.shareText };

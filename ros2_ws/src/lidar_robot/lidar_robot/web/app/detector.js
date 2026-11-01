@@ -129,10 +129,24 @@
   }
 
   // the letterboxed 320 x 320 picture as a JPEG -> Java -> person candidates in 320 px -> frame pixels + NMS
+  // JPEG for the Java side: toBlob encodes off the page's thread (toDataURL froze the page ~15 ms a frame)
+  function jpegB64(canvas) {
+    return new Promise((resolve, reject) => {
+      if (!canvas.toBlob) { resolve(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]); return; }
+      canvas.toBlob(blob => {
+        if (!blob) { resolve(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]); return; }
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result).split(',')[1]);
+        fr.onerror = () => reject(new Error('could not read the picture'));
+        fr.readAsDataURL(blob);
+      }, 'image/jpeg', 0.92);
+    });
+  }
+
   async function runNative(f, conf) {
     const t0 = performance.now();
     letterbox(f);
-    const b64 = pre.toDataURL('image/jpeg', 0.92).slice('data:image/jpeg;base64,'.length);
+    const b64 = await jpegB64(pre);
     const r = await nativeCall('detect', b64, conf);
     const [s, px, py] = V.letterboxParams(f.w, f.h, SIZE);
     const boxes = r.boxes.map(b => [Math.max(0, (b[0] - px) / s), Math.max(0, (b[1] - py) / s),
