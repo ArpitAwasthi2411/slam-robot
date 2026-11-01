@@ -25,7 +25,9 @@
   async function loadModel() { st.backend = await DT.load(); }
 
   async function detect(f) {
-    const { boxes, ms } = await DT.run(f, +$('conf').value);
+    const conf = +$('conf').value;
+    st.tracker.highConf = conf;                    // weaker boxes (down to 0.25) only continue a person's track
+    const { boxes, ms } = await DT.run(f, Math.min(0.25, conf));
     st.ms = ms;
     const hfov = +$('fov').value;
     const people = st.tracker.update(boxes, performance.now() / 1000);
@@ -55,7 +57,7 @@
       const [x1, y1, x2, y2] = p.box, inPath = Math.abs(p.bearing_deg) <= V.DEFAULTS.path_half_angle_deg;
       const c = inPath && dec.action === 'STOP' ? COL.STOP : inPath ? COL.SLOW_DOWN : '#00c8ff';
       ctx.strokeStyle = c; ctx.lineWidth = Math.max(2, w / 220); ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-      const label = `${p.bearing_deg > 0 ? '+' : ''}${Math.round(p.bearing_deg)}°  ~${p.estimate_m ? p.estimate_m.toFixed(1) : '?'} m${p.approaching ? '  >>' : ''}`;
+      const label = `#${p.id}  ${p.bearing_deg > 0 ? '+' : ''}${Math.round(p.bearing_deg)}°  ~${p.estimate_m ? p.estimate_m.toFixed(1) : '?'} m${p.approaching ? '  >>' : ''}`;
       ctx.fillStyle = 'rgba(0,0,0,.6)';
       const tw = ctx.measureText(label).width + 10, th = Math.max(16, w / 32);
       ctx.fillRect(x1, Math.max(0, y1 - th), tw, th);

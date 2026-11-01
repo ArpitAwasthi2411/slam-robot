@@ -126,6 +126,7 @@ vision:
     model_dir: ~/models/yolo11n_ncnn_model   # made by scripts/setup_vision.sh
     imgsz: 320
     conf: 0.45
+    track_conf: 0.25             # boxes down to this only CONTINUE a tracked person (half hidden)
     threads: 1                   # YOLO threads: a Pi 4 needs the other 3 cores for SLAM + driving
     det_rate: 2.0                # detections per second (175 ms each on a Pi 4)
     stream_rate: 5.0             # app camera picture, frames per second (only while the camera view is open)

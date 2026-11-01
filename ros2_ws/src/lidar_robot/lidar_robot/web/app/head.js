@@ -4,12 +4,16 @@
  *   kiosk       tap the face -> PIN -> places, rooms, typed or spoken command, go home, cancel
  *   detection   people detection ON THE PHONE on the Pi camera's plain picture, boxes POSTed to the robot
  *               (/api/vision/phone): the Pi then skips its own YOLO; only while the robot is busy
+ *   greeting    first touch after a quiet minute: "Hi, I'm Pathik! Where would you like to go?" (robot speaker)
+ *   errands     kiosk: go to a place, check its door, say a message, wait, come back, speak a report (mission.js)
+ *   doors       settings: teach a door closed / open with the camera, check it (doorcheck.js)
  *   no robot    demo state (moods cycle) + optional detection test with the phone's own camera
  * Robot address + login arrive in the URL hash from the Pathik app: head.html#base=http://..:8080&token=...
  */
 (function () {
   'use strict';
   const V = window.PathikVision, DT = window.PathikDetector, F = window.PathikFace;
+  const M = window.PathikMission, DOOR = window.PathikDoor;
   const $ = id => document.getElementById(id);
   const hash = new URLSearchParams(location.hash.slice(1));
   const R = { base: (hash.get('base') || '').replace(/\/$/, ''), token: hash.get('token') || '' };
@@ -20,7 +24,10 @@
     set(k, v) { try { localStorage.setItem('pathik.head.' + k, JSON.stringify(v)); } catch (e) { /* private mode */ } },
   };
   const S = { st: null, fails: 0, busyT: -1e12, faceT: performance.now(), face: new F.Face($('face')), model: false,
-              det: { on: store.get('detect', true), test: false, running: false, ms: 0, fps: 0, last: 0, err: '' } };
+              det: { on: store.get('detect', true), test: false, running: false, ms: 0, fps: 0, last: 0, err: '' },
+              ov: null, errand: null, lastGreet: -1e12, waitEnd: null };
+  const MOVING = ['PLANNING', 'DRIVING', 'WAITING', 'SCANNING', 'DOCKING', 'UNDOCKING', 'RECOVERING'];
+  const robotName = () => store.get('name', 'Pathik') || 'Pathik';
 
   // ------------------------------------------------------------------ robot API
   async function api(method, path, body) {
@@ -40,19 +47,21 @@
   const DEMO_PLACES = { places: [{ name: 'HOD office' }, { name: 'Lab 2' }, { name: 'Seminar hall' }, { name: 'Library' }],
                         rooms: [{ name: 'Lab 3', contents: ['3D printer'] }, { name: 'Store', contents: ['tools'] }] };
   const DEMO_STEPS = [['PLANNING', 2], ['DRIVING', 5], ['DRIVING-STOP', 3], ['DRIVING', 4], ['CONFIRM', 6]];
+  const DEMO_TRIP = [['PLANNING', 1.5], ['DRIVING', 4], ['DRIVING-STOP', 2], ['DRIVING', 3]];   // errand legs: no OK stop
   function demoState() {
     let state = 'IDLE', vision = null, n = {};
     if (demo.goal) {
       let t = (performance.now() - demo.t0) / 1000, i = 0;
-      while (i < DEMO_STEPS.length && t > DEMO_STEPS[i][1]) { t -= DEMO_STEPS[i][1]; i++; }
-      if (i >= DEMO_STEPS.length) { demo.goal = null; } else {
-        state = DEMO_STEPS[i][0];
+      const steps = demo.steps || DEMO_STEPS;
+      while (i < steps.length && t > steps[i][1]) { t -= steps[i][1]; i++; }
+      if (i >= steps.length) { demo.goal = null; } else {
+        state = steps[i][0];
         if (state === 'DRIVING-STOP') { state = 'DRIVING'; vision = { action: 'STOP', reason: 'person 0.7 m ahead: too close, waiting' }; }
         n = { goal: { label: demo.goal }, distance: Math.max(0.5, 18 - i * 4 - t), eta_s: Math.max(3, 60 - i * 12) };
         if (state === 'CONFIRM') n.confirm = { label: demo.goal };
       }
     }
-    return { estop: demo.estop, vision, places: DEMO_PLACES, nav: Object.assign({ state, localized: true, message: '',
+    return { estop: demo.estop, vision, places: DEMO_PLACES, pose: { x: 1.2, y: 0.4, yaw: 0 }, nav: Object.assign({ state, localized: true, message: '',
       battery: { pct: 78, level: 'ok', charging: false } }, n), net: { kind: 'demo' } };
   }
   async function demoApi(method, path, body) {
@@ -60,7 +69,10 @@
     if (path === '/api/estop') { demo.estop = !!body.on; return { ok: true }; }
     if (path === '/api/nav') {
       const t = body.type;
+      demo.steps = body.source === 'errand' ? DEMO_TRIP : DEMO_STEPS;
       if (['goto_place', 'goto_room'].includes(t)) { demo.goal = body.name; demo.t0 = performance.now(); }
+      else if (t === 'goto_pose') { demo.goal = body.label || 'there'; demo.t0 = performance.now(); }
+      else if (t === 'say') { /* the phone speaks it (say() below) */ }
       else if (t === 'command') { demo.goal = body.text.replace(/^(take me to|go to)\s+(the\s+)?/i, '') || 'there'; demo.t0 = performance.now(); }
       else if (t === 'go_home') { demo.goal = 'Home'; demo.t0 = performance.now(); }
       else if (t === 'cancel' || t === 'confirm') { demo.goal = null; }
@@ -87,12 +99,20 @@
 
   function render() {
     const st = S.st, idleS = (performance.now() - S.faceT) / 1000;
-    const f = F.faceFor(st, { idleS });
+    let f = F.faceFor(st, { idleS });
+    const moving = st && st.nav && MOVING.includes(st.nav.state);
+    if (S.ov && !(st && st.estop) && !(moving && !S.ov.always)) f = Object.assign({}, f, S.ov);
+    else if (S.errand && moving) f = Object.assign({}, f, { sub: `Errand ${S.errand.i + 1}/${S.errand.n} · ${f.sub || ''}` });
+    else if (S.errand && !(st && st.estop) && !(st && st.nav && st.nav.recovery && st.nav.recovery.status === 'asking')) {
+      f = Object.assign({}, f, { mood: 'happy', line: S.errand.line || 'On an errand', sub: `Errand ${S.errand.i + 1}/${S.errand.n}`, ok: false });
+    }
+    if (S.saying && !(st && st.estop)) f = Object.assign({}, f, { sub: `🔊 ${S.saying}` });
     S.face.set(f.mood);
     $('line').textContent = f.line;
     $('sub').textContent = f.sub || '';
     document.body.classList.toggle('estop', !!(st && st.estop));
     renderActs(f);
+    renderErrand();
     const bat = st && st.nav && st.nav.battery;
     $('c-bat').textContent = bat && bat.pct != null ? `🔋 ${bat.pct} %${bat.charging ? ' ⚡' : ''}` : '🔋 –';
     $('c-bat').className = 'h-chip ' + (!bat || bat.pct == null ? '' : bat.level === 'ok' ? 'ok' : 'warn');
@@ -114,7 +134,7 @@
 
   let actsKey = '';
   function renderActs(f) {
-    const key = f.mood + (f.ok ? 'ok' : '') + (f.ask ? JSON.stringify(f.ask) : '');
+    const key = f.mood + (f.ok ? 'ok' : '') + (f.okErrand ? 'oke' : '') + (f.ask ? JSON.stringify(f.ask) : '');
     if (key === actsKey) return;
     actsKey = key;
     const box = $('acts');
@@ -123,7 +143,8 @@
       const b = document.createElement('button'); b.className = 'h-b ' + cls; b.textContent = label;
       b.onclick = e => { e.stopPropagation(); fn(); }; box.appendChild(b);
     };
-    if (f.ok) btn('OK', 'go', () => nav({ type: 'confirm' }).catch(toastErr));
+    if (f.okErrand) btn('OK, done', 'go', () => { if (S.waitEnd) S.waitEnd('ok'); });
+    else if (f.ok) btn('OK', 'go', () => nav({ type: 'confirm' }).catch(toastErr));
     if (f.ask && f.ask.options) {
       f.ask.options.forEach(o => btn(o.label, o.primary ? 'go' : '', () =>
         nav({ type: 'recovery_answer', id: f.recId, choice: o.id }).catch(toastErr)));
@@ -196,6 +217,11 @@
     $('k-rooms').replaceChildren(...(pl.rooms || []).map(r => tile(r.name, (r.contents || []).slice(0, 3).join(', '), { type: 'goto_room', name: r.name })));
     if (!(pl.places || []).length) $('k-places').innerHTML = '<p class="h-muted">No places saved yet.</p>';
     if (!(pl.rooms || []).length) $('k-rooms').innerHTML = '<p class="h-muted">No rooms saved yet.</p>';
+    const opts = [].concat((pl.places || []).map(p => ({ name: p.name, req: { type: 'goto_place', name: p.name } })),
+                           (pl.rooms || []).map(r => ({ name: r.name, req: { type: 'goto_room', name: r.name } })));
+    S.targets = opts;
+    $('e-to').innerHTML = opts.map((o, i) => `<option value="${i}">${esc(o.name)}</option>`).join('') ||
+      '<option value="">no places saved</option>';
     $('k-msg').textContent = ''; $('k-text').value = '';
     $('kiosk').hidden = false; kioskIdle();
   }
@@ -205,10 +231,23 @@
     try {
       await nav(Object.assign({ priority: 1, source: 'head' }, req));
       $('k-msg').textContent = `On my way${label ? ' to ' + label : ''}!`;
+      if (req.type === 'goto_place' || req.type === 'goto_room') say(`Okay, going to ${label}. Please follow me.`);
+      else if (req.type === 'go_home') say('Okay, going home.');
       setTimeout(() => { $('kiosk').hidden = true; }, 900);
     } catch (e) { $('k-msg').textContent = e.message; }
   }
-  $('face-wrap').onclick = () => { S.faceT = performance.now(); openKiosk(); };
+  $('face-wrap').onclick = () => {
+    const now = performance.now(), st = S.st, idle = !st || !st.nav || ['IDLE', 'CHARGING'].includes(st.nav.state);
+    S.faceT = now;
+    if (idle && !S.errand && store.get('greet', true) && now - S.lastGreet > 60000) {
+      S.lastGreet = now;
+      const name = robotName();
+      S.ov = { mood: 'happy', line: `Hi, I'm ${name}!`, sub: 'Where would you like to go?', greet: true };
+      setTimeout(() => { if (S.ov && S.ov.greet) S.ov = null; }, 6000);
+      say(`Hi, I'm ${name}! Where would you like to go?`);
+    }
+    openKiosk();
+  };
   $('k-send').onclick = () => { const t = $('k-text').value.trim(); if (t) send({ type: 'command', text: t }, ''); };
   $('k-text').onkeydown = e => { kioskIdle(); if (e.key === 'Enter') $('k-send').click(); };
   $('k-home').onclick = () => send({ type: 'go_home' }, 'home');
@@ -231,12 +270,50 @@
     $('s-robot').textContent = DEMO ? 'Demo: no robot connected (open head mode from the app while connected).'
       : `Robot: ${R.base}`;
     $('s-detect').checked = S.det.on; $('s-test').checked = S.det.test;
+    $('s-greet').checked = store.get('greet', true); $('s-name').value = robotName();
+    const pl = (S.st && S.st.places) || { places: [], rooms: [] };
+    const names = [...new Set([].concat((pl.places || []).map(p => p.name), (pl.rooms || []).map(r => r.name),
+                                        DOOR.places().map(d => d.name)))];
+    $('d-place').innerHTML = names.map(n => `<option>${esc(n)}</option>`).join('');
+    $('d-demo').value = store.get('doorDemo', 'camera');
+    $('d-demo-l').hidden = !DEMO;
+    $('d-src').textContent = DEMO ? '(Demo: uses this phone\'s camera.)' : '(Uses the robot\'s camera.)';
+    doorShow();
     $('set').hidden = false;
   }
   $('gear').onclick = openSettings;
   $('s-close').onclick = () => { $('set').hidden = true; };
   $('s-detect').onchange = e => { S.det.on = e.target.checked; store.set('detect', S.det.on); };
   $('s-test').onchange = e => { S.det.test = e.target.checked; stopDetect(); };
+  $('s-greet').onchange = e => store.set('greet', e.target.checked);
+  $('s-name').onchange = e => store.set('name', e.target.value.trim() || 'Pathik');
+  $('d-demo').onchange = e => store.set('doorDemo', e.target.value);
+  $('d-place').onchange = () => doorShow();
+  function doorShow(res) {
+    const p = $('d-place').value, t = p ? DOOR.taught(p) : { open: 0, closed: 0 };
+    $('d-taught').textContent = p ? `taught: closed ×${t.closed}, open ×${t.open}` : 'no places yet';
+    $('d-res').textContent = res ? res.state.toUpperCase() : ''; $('d-res').className = res ? res.state : '';
+    $('d-why').textContent = res ? `${res.why} (closed ${res.closed}, open ${res.open})` : '';
+  }
+  async function doorFrame() {
+    const src = DEMO ? new DT.PhoneCamera('environment') : new DT.RobotCamera(R.base, R.token, true);
+    await src.start();
+    try {
+      for (let k = 0; k < 40; k++) { const f = await src.frame(); if (f) { await sleep(250); return (await src.frame()) || f; } await sleep(100); }
+      throw new Error('no camera picture');
+    } finally { setTimeout(() => src.stop(), 50); }
+  }
+  async function doorBtn(fn) {
+    const p = $('d-place').value;
+    if (!p) return;
+    $('d-why').textContent = 'Looking…'; $('d-res').textContent = '';
+    try { const f = await doorFrame(); doorShow(fn(p, f)); }
+    catch (e) { $('d-why').textContent = e.message || String(e); }
+  }
+  $('d-closed').onclick = () => doorBtn((p, f) => { DOOR.teach(p, 'closed', f); return null; });
+  $('d-open').onclick = () => doorBtn((p, f) => { DOOR.teach(p, 'open', f); return null; });
+  $('d-check').onclick = () => doorBtn((p, f) => DOOR.check(p, f));
+  $('d-forget').onclick = () => { DOOR.forget($('d-place').value); doorShow(); };
   $('s-pin').onclick = async () => { $('set').hidden = true; await pinPad('New PIN', 'Choose a new PIN (4–8 digits).', 'setup'); };
   $('s-release').onclick = async () => {
     try { await api('POST', '/api/estop', { on: false }); await nav({ type: 'resume' }).catch(() => {}); $('set').hidden = true; }
@@ -251,6 +328,120 @@
   }
   $('s-exit').onclick = leave;
   window.__pathikBack = () => { openSettings(); return true; };   // Android back -> PIN -> settings (exit there)
+
+  // ------------------------------------------------------------------ speaking + errands
+  async function say(text) {
+    S.saying = text; render();
+    try {
+      if (DEMO) {
+        if (window.PathikNative && PathikNative.speak) PathikNative.speak(text);
+        else if (window.speechSynthesis) { const u = new SpeechSynthesisUtterance(text); u.lang = 'en-IN'; speechSynthesis.speak(u); }
+      } else await nav({ type: 'say', text });
+    } catch (e) { /* the robot can't speak: the subtitle still shows it */ }
+    await sleep(700 + 62 * text.length);                     // let it finish before the next line
+    if (S.saying === text) S.saying = '';
+  }
+  const lastFail = () => JSON.stringify(((S.st || {}).nav || {}).last_failure || null);
+  async function trip(req, label) {
+    const E = S.errand, before = lastFail();
+    await nav(Object.assign({ priority: 1, source: 'errand', replace: true }, req));
+    const t0 = performance.now();
+    let started = false;
+    for (;;) {
+      await sleep(400);
+      if (E.cancel) { await nav({ type: 'cancel' }).catch(() => {}); return { result: 'cancelled' }; }
+      const n = (S.st || {}).nav || {}, st = n.state;
+      if (S.st && S.st.estop) continue;
+      if (!started) {
+        if (st && st !== 'IDLE') started = true;
+        else if (performance.now() - t0 > 8000) return { result: 'failed', why: n.message || 'the robot did not start' };
+        continue;
+      }
+      if (st === 'CONFIRM') { await nav({ type: 'confirm' }).catch(() => {}); return { result: 'arrived' }; }
+      if (st === 'IDLE' || st === 'DWELL' || st === 'CHARGING') {
+        const lf = lastFail();
+        if (lf !== before && lf !== 'null') {
+          const f = n.last_failure || {};
+          return { result: 'failed', why: f.message || f.reason || f.code || 'the trip failed' };
+        }
+        return { result: 'arrived' };
+      }
+      if (performance.now() - t0 > 15 * 60000) return { result: 'failed', why: 'it took too long' };
+    }
+  }
+  function waitHere(seconds, label) {
+    return new Promise(res => {
+      const end = performance.now() + seconds * 1000, E = S.errand;
+      const fin = how => { clearInterval(iv); S.waitEnd = null; S.ov = null; res(how); };
+      S.waitEnd = fin;
+      const tick = () => {
+        if (E.cancel) return fin('cancelled');
+        const left = Math.max(0, Math.ceil((end - performance.now()) / 1000));
+        S.ov = { mood: 'happy', line: label, sub: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left · press OK when you are done`,
+                 okErrand: true, always: true };
+        if (left <= 0) fin('done');
+      };
+      const iv = setInterval(tick, 250); tick();
+    });
+  }
+  async function checkDoor(place) {
+    const mode = DEMO ? store.get('doorDemo', 'camera') : 'camera';
+    S.ov = { mood: 'thinking', line: `Is the door of ${place} open?`, sub: 'Looking…', always: true };
+    try {
+      if (mode === 'open' || mode === 'closed') { await sleep(1200); return { state: mode, why: 'demo setting' }; }
+      if (mode === 'random') { await sleep(1200); return { state: Math.random() < 0.5 ? 'open' : 'closed', why: 'demo: random' }; }
+      const t = DOOR.taught(place);
+      if (!t.open && !t.closed) return { state: 'unknown', why: 'this door was not taught (head settings → Doors)' };
+      const votes = { open: 0, closed: 0, unknown: 0 };
+      let last = null;
+      for (let k = 0; k < 3; k++) { last = DOOR.check(place, await doorFrame()); votes[last.state]++; }
+      const state = votes.closed >= 2 ? 'closed' : votes.open >= 2 ? 'open' : 'unknown';
+      return { state, why: last.why };
+    } catch (e) { return { state: 'unknown', why: e.message || String(e) }; }
+    finally { S.ov = null; }
+  }
+  async function startErrand() {
+    if (S.errand) return;
+    const tgt = (S.targets || [])[+$('e-to').value];
+    if (!tgt) { $('k-msg').textContent = 'No place to go to yet.'; return; }
+    const e = { to: tgt.name, waitS: +$('e-wait').value, message: $('e-msg').value, back: $('e-back').value };
+    const steps = M.plan(e), start = (S.st && S.st.pose) || null;
+    const E = S.errand = { i: 0, n: steps.length, cancel: false, steps, plan: e };
+    if (S.ov && S.ov.greet) S.ov = null;
+    $('kiosk').hidden = true;
+    const ops = {
+      say, cancelled: () => E.cancel,
+      go: () => trip(tgt.req, tgt.name),
+      goBack: back => back === 'home' ? trip({ type: 'go_home' }, 'home')
+        : back === 'here' && start ? trip({ type: 'goto_pose', x: start.x, y: start.y, yaw: start.yaw || 0, label: 'where I started' }, 'where I started')
+          : back === 'here' ? trip({ type: 'go_home' }, 'home') : trip({ type: 'goto_place', name: back }, back),
+      door: checkDoor,
+      wait: (sec, label) => waitHere(sec, label),
+    };
+    let r;
+    try { r = await new M.Errand(ops).run(steps, u => { E.i = u.i; E.line = u.line; }); }
+    catch (err) { r = { ok: false, report: `Errand stopped: ${err.message || err}` }; }
+    S.errand = null;
+    S.ov = { mood: r.ok ? 'happy' : 'help', line: r.ok ? 'Errand done' : 'Errand ended', sub: r.report, always: false };
+    setTimeout(() => { if (S.ov && !S.ov.greet && !S.waitEnd) S.ov = null; }, 20000);
+  }
+  function renderErrand() {
+    const E = S.errand;
+    $('c-err').hidden = !E;
+    $('e-new').hidden = !!E; $('e-run').hidden = !E;
+    const bar = (el, E) => {
+      el.hidden = !E;
+      if (E) el.innerHTML = E.steps.map((_, k) => `<i class="${k < E.i ? 'done' : k === E.i ? 'now' : ''}"></i>`).join('');
+    };
+    bar($('steps'), E);
+    if (!E) return;
+    $('c-err').textContent = `errand ${E.i + 1}/${E.n}`;
+    bar($('e-steps'), E);
+    $('e-now').textContent = E.line || 'Errand running';
+    $('e-plan').textContent = `${E.plan.to} · wait ${M.fmtWait(E.plan.waitS)} · then ${E.plan.back === 'here' ? 'come back' : E.plan.back === 'home' ? 'go home' : 'stay'}`;
+  }
+  $('e-start').onclick = () => { kioskIdle(); startErrand(); };
+  $('e-cancel').onclick = () => { if (S.errand) { S.errand.cancel = true; if (S.waitEnd) S.waitEnd('cancelled'); } $('kiosk').hidden = true; };
 
   // ------------------------------------------------------------------ detection on the phone
   function wantDetect() {
@@ -279,7 +470,7 @@
         }
         const f = await d.src.frame();
         if (!f) { await sleep(30); continue; }
-        const r = await DT.run(f, 0.45);
+        const r = await DT.run(f, 0.25);   // 0.25-0.45: only continues a tracked person (PersonTracker)
         d.ms = r.ms; d.err = '';
         const now = performance.now();
         if (d.last) { const inst = 1000 / (now - d.last); d.fps = d.fps ? d.fps * 0.8 + inst * 0.2 : inst; }
@@ -315,6 +506,6 @@
     DT.load().then(() => { S.model = true; }).catch(e => { S.det.err = e.message; S.model = false; render(); });
     detectLoop();
   }
-  window.__head = { S, faceFor: F.faceFor, demo };            // for tests
+  window.__head = { S, faceFor: F.faceFor, demo, store };            // for tests
   start();
 })();

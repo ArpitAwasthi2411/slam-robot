@@ -78,38 +78,97 @@ def decode_yolo(out, frame_w, frame_h, size, conf=0.4, cls=0):
 
 # ------------------------------------------------------------------ tracking
 class PersonTracker:
-    """Gives each person an id across frames (greedy IoU match) and says whether the box is
-    growing (approaching) or shrinking (moving away) over the last ~0.5 s."""
+    """Gives each person an id across frames and says whether the box is growing (approaching) or
+    shrinking (moving away) over the last ~0.5 s.
 
-    def __init__(self, iou_thr=0.3, forget_s=2.0, window_s=0.5, change=0.08):
+    Matching (kept identical in web/app/vision.js):
+      - every track's box is PREDICTED forward with its own velocity (centre and size, smoothed), so a person
+        walking across the picture still matches next frame;
+      - a pair matches on IoU with the prediction >= iou_thr, or, failing that, on a centre within 0.5 x the
+        track's height and a similar height (people crossing, a box that jumped);
+      - all pairs are taken best first (not box by box), so two people crossing don't swap ids;
+      - two stages: confident boxes (>= high_conf) first; weaker boxes may only CONTINUE a track that lost its
+        match (someone half hidden), never start one;
+      - a track not seen is kept, still predicted, for forget_s (1.0 s of prediction at most), so a person who
+        is hidden for a moment comes back with the same id.
+    """
+
+    def __init__(self, iou_thr=0.3, forget_s=2.0, window_s=0.5, change=0.08, high_conf=0.45):
         self.iou_thr, self.forget_s, self.window_s, self.change = iou_thr, forget_s, window_s, change
-        self.tracks = {}          # id -> {'box', 'seen', 'hist': [(t, height)]}
+        self.high_conf = high_conf
+        self.tracks = {}          # id -> {'box', 'seen', 'vel': [vcx, vcy, vw, vh] per s, 'hist': [(t, height)]}
         self.next_id = 1
+
+    def _predict(self, t, now):
+        dt = min(max(now - t['seen'], 0.0), 1.0)
+        b, v = t['box'], t['vel']
+        cx = (b[0] + b[2]) / 2 + v[0] * dt
+        cy = (b[1] + b[3]) / 2 + v[1] * dt
+        w = max(1.0, (b[2] - b[0]) + v[2] * dt)
+        h = max(1.0, (b[3] - b[1]) + v[3] * dt)
+        return (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+
+    def _score(self, b, p):
+        """Match quality of box b against predicted box p, or None."""
+        v = _iou(b, p)
+        if v >= self.iou_thr:
+            return v
+        ph, bh = p[3] - p[1], b[3] - b[1]
+        d = math.hypot((b[0] + b[2]) / 2 - (p[0] + p[2]) / 2, (b[1] + b[3]) / 2 - (p[1] + p[3]) / 2)
+        if ph > 0 and bh > 0 and d <= 0.5 * ph and 0.7 <= bh / ph <= 1.43:
+            return self.iou_thr * (1.0 - d / (0.5 * ph)) * 0.99
+        return None
+
+    def _assign(self, boxes, tids, now):
+        pred = {tid: self._predict(self.tracks[tid], now) for tid in tids}
+        pairs = []
+        for bi, b in enumerate(boxes):
+            for tid in tids:
+                sc = self._score(b, pred[tid])
+                if sc is not None:
+                    pairs.append((-sc, bi, tid))
+        pairs.sort()
+        used_b, used_t, got = set(), set(), {}
+        for _, bi, tid in pairs:
+            if bi in used_b or tid in used_t:
+                continue
+            used_b.add(bi)
+            used_t.add(tid)
+            got[bi] = tid
+        return got
 
     def update(self, boxes, now=None):
         now = time.monotonic() if now is None else now
-        free = dict(self.tracks)
+        boxes = sorted(boxes, key=lambda b: -b[4])
+        high = [b for b in boxes if b[4] >= self.high_conf]
+        low = [b for b in boxes if b[4] < self.high_conf]
+        live = sorted(self.tracks)
+        m1 = self._assign(high, live, now)
+        rest = [tid for tid in live if tid not in m1.values()]
+        m2 = self._assign(low, rest, now)
+        chosen = [(b, m1.get(i)) for i, b in enumerate(high)] + [(low[i], tid) for i, tid in sorted(m2.items())]
         out = []
-        for b in sorted(boxes, key=lambda b: -b[4]):
-            best, best_iou = None, self.iou_thr
-            for tid, t in free.items():
-                iou = _iou(b, t['box'])
-                if iou >= best_iou:
-                    best, best_iou = tid, iou
-            if best is None:
-                best = self.next_id
+        for b, tid in chosen:
+            if tid is None:
+                tid = self.next_id
                 self.next_id += 1
-                self.tracks[best] = {'hist': []}
+                self.tracks[tid] = {'hist': [], 'vel': [0.0, 0.0, 0.0, 0.0]}
             else:
-                free.pop(best)
-            t = self.tracks[best]
+                t = self.tracks[tid]
+                dt = now - t['seen']
+                if dt > 1e-3:
+                    o = t['box']
+                    raw = [((b[0] + b[2]) - (o[0] + o[2])) / 2 / dt, ((b[1] + b[3]) - (o[1] + o[3])) / 2 / dt,
+                           ((b[2] - b[0]) - (o[2] - o[0])) / dt, ((b[3] - b[1]) - (o[3] - o[1])) / dt]
+                    t['vel'] = [0.5 * p + 0.5 * r for p, r in zip(t['vel'], raw)]
+            t = self.tracks[tid]
             h = b[3] - b[1]
             t['box'], t['seen'] = b, now
             t['hist'] = [p for p in t['hist'] if now - p[0] <= self.window_s * 2] + [(now, h)]
             old = [p for p in t['hist'] if now - p[0] >= self.window_s]
             ref = old[-1][1] if old else t['hist'][0][1]
             growth = (h - ref) / ref if ref > 0 else 0.0
-            out.append({'id': best, 'box': [int(v) for v in b[:4]], 'conf': round(b[4], 2),
+            out.append({'id': tid, 'box': [int(v) for v in b[:4]], 'conf': round(b[4], 2),
                         'approaching': growth > self.change, 'moving_away': growth < -self.change})
         for tid in [k for k, t in self.tracks.items() if now - t.get('seen', now) > self.forget_s]:
             del self.tracks[tid]

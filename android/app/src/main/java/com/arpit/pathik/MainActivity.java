@@ -5,6 +5,11 @@ import android.app.Activity;
 import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.app.ActivityManager;
+import android.os.BatteryManager;
+import android.os.Debug;
+import android.os.PowerManager;
 import android.content.pm.PackageManager;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
@@ -51,6 +56,7 @@ public class MainActivity extends Activity {
     static final String ASSET_HOST = "appassets.androidplatform.net";
     static final String DETECTOR_URL = "https://" + ASSET_HOST + "/app/detect.html";
     static final String HEAD_URL = "https://" + ASSET_HOST + "/app/head.html";
+    static final String PEAK_URL = "https://" + ASSET_HOST + "/app/peak.html";
     private PermissionRequest pendingCam = null;
     /** People detection in TensorFlow Lite (GPU / all CPU cores); runs off the UI thread, one job at a time. */
     final NativeDetector detector = new NativeDetector();
@@ -347,6 +353,48 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void openHead(final String hash) {
             act.runOnUiThread(() -> act.web.loadUrl(HEAD_URL + (hash == null || hash.isEmpty() ? "" : "#" + hash)));
+        }
+
+        /** The peak-load test page (same secure origin as the detector: camera + native detector). */
+        @JavascriptInterface
+        public void openPeak(final String hash) {
+            act.runOnUiThread(() -> act.web.loadUrl(PEAK_URL + (hash == null || hash.isEmpty() ? "" : "#" + hash)));
+        }
+
+        /** Phone health for the peak test: battery, temperature, thermal state, memory. JSON, never throws. */
+        @JavascriptInterface
+        public String deviceStats() {
+            try {
+                Intent b = act.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+                int level = b == null ? -1 : b.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int scale = b == null ? 100 : b.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
+                int temp = b == null ? Integer.MIN_VALUE : b.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+                int plugged = b == null ? 0 : b.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0);
+                BatteryManager bm = (BatteryManager) act.getSystemService(Context.BATTERY_SERVICE);
+                long ua = bm == null ? Long.MIN_VALUE : bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+                int thermal = -1;
+                if (Build.VERSION.SDK_INT >= 29) {
+                    PowerManager pm = (PowerManager) act.getSystemService(Context.POWER_SERVICE);
+                    if (pm != null) thermal = pm.getCurrentThermalStatus();
+                }
+                ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+                ActivityManager am = (ActivityManager) act.getSystemService(Context.ACTIVITY_SERVICE);
+                if (am != null) am.getMemoryInfo(mi);
+                Debug.MemoryInfo dm = new Debug.MemoryInfo();
+                Debug.getMemoryInfo(dm);
+                return String.format(Locale.US,
+                        "{\"ok\":true,\"battery_pct\":%s,\"temp_c\":%s,\"charging\":%b,\"current_ma\":%s,\"thermal\":%d,"
+                        + "\"app_mb\":%.0f,\"avail_mb\":%.0f,\"total_mb\":%.0f,\"low_memory\":%b,\"cores\":%d,\"model\":\"%s\",\"sdk\":%d}",
+                        level < 0 ? "null" : String.format(Locale.US, "%.1f", 100.0 * level / Math.max(1, scale)),
+                        temp == Integer.MIN_VALUE ? "null" : String.format(Locale.US, "%.1f", temp / 10.0),
+                        plugged != 0,
+                        ua == Long.MIN_VALUE || ua == 0 ? "null" : String.valueOf(Math.abs(ua) > 20000 ? ua / 1000 : ua),
+                        thermal, dm.getTotalPss() / 1024.0, mi.availMem / 1048576.0, mi.totalMem / 1048576.0, mi.lowMemory,
+                        Runtime.getRuntime().availableProcessors(), NativeDetector.esc(Build.MANUFACTURER + " " + Build.MODEL),
+                        Build.VERSION.SDK_INT);
+            } catch (Throwable t) {
+                return "{\"ok\":false,\"error\":\"" + NativeDetector.esc(String.valueOf(t.getMessage())) + "\"}";
+            }
         }
 
         /** Back from the detector to the app. */

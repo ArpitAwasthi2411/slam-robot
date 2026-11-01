@@ -125,6 +125,13 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-01: head mode greeting (first touch, navigator `say` -> robot speaker) + errands (mission.js: go, door
+  check, message, wait / until OK, back here (goto_pose of the start) / home / stay, spoken report; test_errand.py)
+  + camera door check (doorcheck.js, teach closed/open per place, test_door_check.py) + peak test (peak.html,
+  peak.js, peakcheck.js verdict, Android deviceStats/openPeak; test_peak_check.py). PersonTracker: prediction,
+  best-pairs-first, low-conf boxes (track_conf 0.25) only continue tracks, same in vision.js (test_tracker.py).
+  Web YOLO now in a worker (detworker.js): face 60 fps instead of 23 on the 1-thread engine.
+
 - 2026-10-31 (late): native phone detector: android NativeDetector.java (TensorFlow Lite 2.16.1, GPU delegate vs
   XNNPACK on cores-1 threads, benchmarked at start, faster kept), bridge detectorInit/detect/hasNativeDetector ->
   window.__pathikDetDone(id, json); detector.js tries native first, else ONNX Runtime Web (1 thread in a WebView).

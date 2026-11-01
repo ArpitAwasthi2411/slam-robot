@@ -43,9 +43,39 @@
     }
   }
 
+  // ---- web engine in a worker (detworker.js): the page's thread stays free for the face
+  let worker = null, wjobs = new Map(), wid = 1;
+  function loadWorker() {
+    return new Promise((resolve, reject) => {
+      let w;
+      try { w = new Worker('detworker.js'); } catch (e) { reject(e); return; }
+      const t = setTimeout(() => { w.terminate(); reject(new Error('worker timed out')); }, 60000);
+      w.onmessage = ({ data }) => {
+        if (data.ready) { clearTimeout(t); worker = w; resolve(); return; }
+        if (data.error && data.id == null) { clearTimeout(t); w.terminate(); reject(new Error(data.error)); return; }
+        const j = wjobs.get(data.id); if (!j) return;
+        wjobs.delete(data.id);
+        if (data.error) j.reject(new Error(data.error)); else j.resolve(data);
+      };
+      w.onerror = e => { clearTimeout(t); reject(new Error(e.message || 'worker failed')); };
+      w.postMessage({ init: { model: new URL(MODEL, location.href).href, wasmPaths: new URL('vendor/ort/', location.href).href } });
+    });
+  }
+  function workerRun(chwCopy) {
+    return new Promise((resolve, reject) => {
+      const id = wid++;
+      wjobs.set(id, { resolve, reject });
+      worker.postMessage({ id, run: chwCopy }, [chwCopy.buffer]);
+    });
+  }
+
   async function load() {
-    if (st.session || st.native) return st.backend;
+    if (st.session || st.native || worker) return st.backend;
     if (await loadNative()) return st.backend;
+    if (root.Worker && !root.crossOriginIsolated) {
+      try { await loadWorker(); st.backend = 'phone CPU, 1 thread (background)'; return st.backend; }
+      catch (e) { st.workerError = e.message; }          // fall back to the page's own thread
+    }
     if (!root.ort) throw new Error('Detector files are missing (vendor/ort). Use the Pathik app (APK).');
     const threads = root.crossOriginIsolated ? Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)) : 1;
     ort.env.wasm.wasmPaths = new URL('vendor/ort/', location.href).href;
@@ -75,17 +105,23 @@
     pctx.drawImage(f.img, 0, 0, f.w, f.h, px, py, nw, nh);
   }
 
-  function toTensor(f) {
+  function toTensor(f, raw) {
     letterbox(f);
     const d = pctx.getImageData(0, 0, SIZE, SIZE).data, n = SIZE * SIZE;
     for (let i = 0, j = 0; i < n; i++, j += 4) {
       chw[i] = d[j] / 255; chw[n + i] = d[j + 1] / 255; chw[2 * n + i] = d[j + 2] / 255;
     }
-    return new ort.Tensor('float32', chw, [1, 3, SIZE, SIZE]);
+    return raw ? chw : new ort.Tensor('float32', chw, [1, 3, SIZE, SIZE]);
   }
 
   async function run(f, conf = 0.45) {
     if (st.native) return runNative(f, conf);
+    if (worker) {
+      const t0 = performance.now();
+      toTensor(f, true);
+      const r = await workerRun(new Float32Array(chw));
+      return { boxes: V.decodeYolo(r.out, r.dims[2], f.w, f.h, SIZE, conf, 0), ms: performance.now() - t0, inferMs: r.ms };
+    }
     const t0 = performance.now();
     const out = (await st.session.run({ [st.input]: toTensor(f) }))[st.output];
     const boxes = V.decodeYolo(out.data, out.dims[2], f.w, f.h, SIZE, conf, 0);

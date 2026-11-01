@@ -53,28 +53,76 @@
     return nms(boxes);
   }
 
+  // same matching as vision_rules.PersonTracker (prediction, best pairs first, weak boxes only continue a track)
   class PersonTracker {
-    constructor(iouThr = 0.3, forgetS = 2.0, windowS = 0.5, change = 0.08) {
-      Object.assign(this, { iouThr, forgetS, windowS, change, tracks: new Map(), nextId: 1 });
+    constructor(iouThr = 0.3, forgetS = 2.0, windowS = 0.5, change = 0.08, highConf = 0.45) {
+      Object.assign(this, { iouThr, forgetS, windowS, change, highConf, tracks: new Map(), nextId: 1 });
+    }
+
+    _predict(t, now) {
+      const dt = Math.min(Math.max(now - t.seen, 0), 1.0), b = t.box, v = t.vel;
+      const cx = (b[0] + b[2]) / 2 + v[0] * dt, cy = (b[1] + b[3]) / 2 + v[1] * dt;
+      const w = Math.max(1, (b[2] - b[0]) + v[2] * dt), h = Math.max(1, (b[3] - b[1]) + v[3] * dt);
+      return [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2];
+    }
+
+    _score(b, p) {
+      const v = iou(b, p);
+      if (v >= this.iouThr) return v;
+      const ph = p[3] - p[1], bh = b[3] - b[1];
+      const d = Math.hypot((b[0] + b[2]) / 2 - (p[0] + p[2]) / 2, (b[1] + b[3]) / 2 - (p[1] + p[3]) / 2);
+      if (ph > 0 && bh > 0 && d <= 0.5 * ph && bh / ph >= 0.7 && bh / ph <= 1.43) {
+        return this.iouThr * (1 - d / (0.5 * ph)) * 0.99;
+      }
+      return null;
+    }
+
+    _assign(boxes, tids, now) {
+      const pred = new Map(tids.map(tid => [tid, this._predict(this.tracks.get(tid), now)]));
+      const pairs = [];
+      boxes.forEach((b, bi) => tids.forEach(tid => {
+        const sc = this._score(b, pred.get(tid));
+        if (sc !== null) pairs.push([-sc, bi, tid]);
+      }));
+      pairs.sort((p, q) => p[0] - q[0] || p[1] - q[1] || p[2] - q[2]);
+      const usedB = new Set(), usedT = new Set(), got = new Map();
+      for (const [, bi, tid] of pairs) {
+        if (usedB.has(bi) || usedT.has(tid)) continue;
+        usedB.add(bi); usedT.add(tid); got.set(bi, tid);
+      }
+      return got;
     }
 
     update(boxes, now) {
-      const free = new Map(this.tracks), out = [];
-      for (const b of [...boxes].sort((p, q) => q[4] - p[4])) {
-        let best = null, bestIou = this.iouThr;
-        for (const [tid, t] of free) {
-          const v = iou(b, t.box);
-          if (v >= bestIou) { best = tid; bestIou = v; }
+      boxes = [...boxes].sort((p, q) => q[4] - p[4]);
+      const high = boxes.filter(b => b[4] >= this.highConf), low = boxes.filter(b => b[4] < this.highConf);
+      const live = [...this.tracks.keys()].sort((a, b) => a - b);
+      const m1 = this._assign(high, live, now);
+      const taken = new Set(m1.values());
+      const m2 = this._assign(low, live.filter(t => !taken.has(t)), now);
+      const chosen = high.map((b, i) => [b, m1.has(i) ? m1.get(i) : null])
+        .concat([...m2.entries()].sort((a, b) => a[0] - b[0]).map(([i, tid]) => [low[i], tid]));
+      const out = [];
+      for (let [b, tid] of chosen) {
+        if (tid === null) {
+          tid = this.nextId++;
+          this.tracks.set(tid, { hist: [], vel: [0, 0, 0, 0] });
+        } else {
+          const t = this.tracks.get(tid), dt = now - t.seen;
+          if (dt > 1e-3) {
+            const o = t.box;
+            const raw = [((b[0] + b[2]) - (o[0] + o[2])) / 2 / dt, ((b[1] + b[3]) - (o[1] + o[3])) / 2 / dt,
+                         ((b[2] - b[0]) - (o[2] - o[0])) / dt, ((b[3] - b[1]) - (o[3] - o[1])) / dt];
+            t.vel = t.vel.map((p, k) => 0.5 * p + 0.5 * raw[k]);
+          }
         }
-        if (best === null) { best = this.nextId++; this.tracks.set(best, { hist: [] }); }
-        else free.delete(best);
-        const t = this.tracks.get(best), h = b[3] - b[1];
+        const t = this.tracks.get(tid), h = b[3] - b[1];
         t.box = b; t.seen = now;
         t.hist = t.hist.filter(p => now - p[0] <= this.windowS * 2).concat([[now, h]]);
         const old = t.hist.filter(p => now - p[0] >= this.windowS);
         const ref = old.length ? old[old.length - 1][1] : t.hist[0][1];
         const growth = ref > 0 ? (h - ref) / ref : 0;
-        out.push({ id: best, box: b.slice(0, 4).map(v => Math.trunc(v)), conf: Math.round(b[4] * 100) / 100,
+        out.push({ id: tid, box: b.slice(0, 4).map(v => Math.trunc(v)), conf: Math.round(b[4] * 100) / 100,
                    approaching: growth > this.change, moving_away: growth < -this.change });
       }
       for (const [tid, t] of this.tracks) if (now - (t.seen ?? now) > this.forgetS) this.tracks.delete(tid);

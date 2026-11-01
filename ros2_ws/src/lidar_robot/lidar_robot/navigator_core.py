@@ -392,6 +392,12 @@ class NavigatorCore:
                 self._set(DWELL, 'confirmed')
                 self._dwell_until = self.clock()
                 return {'ok': True}
+            if t == 'say':                                  # head mode / missions: the robot's own speaker
+                text = ' '.join(str(req.get('text', '')).split())[:200]
+                if not text:
+                    return {'ok': False, 'error': 'nothing to say'}
+                self.say_queue.append(('voice_reply', text))
+                return {'ok': True}
             if t == 'explain':
                 r = explain(self)
                 if req.get('speak'):

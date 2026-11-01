@@ -61,9 +61,23 @@
                 color: var(--text); font: 700 26px var(--display); cursor: pointer; }
   .h-err { color: var(--bad-text); text-align: center; min-height: 1.3em; }
   .h-row { display: flex; gap: 10px; flex-wrap: wrap; } .h-row > * { flex: 1 1 140px; }
-  label.tg { display: flex; gap: 10px; align-items: center; padding: 10px 0; font-size: 16px; }
-  label.tg input { width: 22px; height: 22px; accent-color: var(--orange); }
+  label.h-tg { display: flex; gap: 10px; align-items: center; padding: 10px 0; font-size: 16px; }
+  label.h-tg input { width: 22px; height: 22px; accent-color: var(--orange); }
   .h-muted { color: var(--dim); font-size: 14px; }
+  .h-card { border: 1px solid var(--line-2); border-radius: var(--r-l, 18px); padding: 14px; margin: 8px 0 14px;
+            background: linear-gradient(180deg, rgba(255,255,255,.035), transparent); }
+  .h-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px; }
+  .h-form label { display: flex; flex-direction: column; gap: 6px; color: var(--dim); font-size: 13px; font-weight: 600;
+                  text-transform: uppercase; letter-spacing: .06em; }
+  .h-form select, .h-form input { min-height: 52px; border-radius: var(--r-m); border: 1px solid var(--line-2);
+                  background: var(--surface-2); color: var(--text); font: 600 17px var(--ui); padding: 0 12px;
+                  text-transform: none; letter-spacing: 0; }
+  .h-steps { display: flex; gap: 6px; margin: 10px 0 4px; }
+  .h-steps i { flex: 1; height: 6px; border-radius: 3px; background: var(--line-2); }
+  .h-steps i.done { background: var(--good); } .h-steps i.now { background: var(--orange); }
+  .h-chip.err { color: var(--orange); }
+  .h-door { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+  .h-door b { font: 800 22px var(--display); } .h-door b.open { color: var(--good); } .h-door b.closed { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -72,6 +86,7 @@
     <button class="h-corner" id="gear" aria-label="Head settings (PIN)">⚙</button>
     <span class="h-chip" id="c-bat">–</span>
     <span class="h-chip" id="c-net">–</span>
+    <span class="h-chip err" id="c-err" hidden>errand</span>
     <span class="h-grow"></span>
     <span class="h-chip" id="c-det">detection –</span>
   </div>
@@ -80,6 +95,7 @@
     <div class="h-line" id="line">…</div>
     <div class="h-sub" id="sub"></div>
     <div class="h-acts" id="acts"></div>
+    <div class="h-steps" id="steps" hidden style="width:min(520px,80vw)"></div>
   </div>
 </div>
 <button class="h-stop" id="stop" aria-label="Stop the robot">STOP</button>
@@ -100,6 +116,23 @@
     <button class="h-b" id="k-mic" hidden aria-label="Speak">🎤</button><button class="h-b go" id="k-send">Go</button></div>
   <div class="h-h3">Places</div><div class="h-grid" id="k-places"></div>
   <div class="h-h3">Rooms</div><div class="h-grid" id="k-rooms"></div>
+  <div class="h-h3">Errand: go, wait, come back</div>
+  <div class="h-card" id="e-new">
+    <div class="h-form">
+      <label>Go to<select id="e-to"></select></label>
+      <label>Wait there<select id="e-wait"><option value="30">30 seconds</option><option value="60">1 minute</option>
+        <option value="120" selected>2 minutes</option><option value="300">5 minutes</option><option value="0">until someone presses OK</option></select></label>
+      <label>Then<select id="e-back"><option value="here">come back here</option><option value="home">go home</option>
+        <option value="stay">stay there</option></select></label>
+      <label>Say there<input id="e-msg" placeholder="e.g. Ravi sir sent me with the file" maxlength="140" autocomplete="off"></label>
+    </div>
+    <button class="h-b go" id="e-start">Start errand</button>
+  </div>
+  <div class="h-card" id="e-run" hidden>
+    <b id="e-now">Errand running</b><div class="h-steps" id="e-steps"></div>
+    <p class="h-muted" id="e-plan"></p>
+    <button class="h-b" id="e-cancel">Cancel errand</button>
+  </div>
   <div class="h-row"><button class="h-b" id="k-home">Go home</button><button class="h-b" id="k-cancel">Cancel my trip</button>
     <button class="h-b" id="k-close">Close</button></div>
   <p class="h-muted" id="k-msg" style="margin-top:10px"></p>
@@ -112,6 +145,18 @@
   <label class="h-tg"><input type="checkbox" id="s-test"> Test detection with this phone's camera (no robot needed)</label>
   <p class="h-muted">While this phone detects, the robot's Pi skips its own YOLO. If the phone stops for 1 s, the Pi detects
   again by itself. The LiDAR and ultrasonic stops never depend on the phone.</p>
+  <div class="h-h3" style="margin-top:12px">Greeting</div>
+  <label class="h-tg"><input type="checkbox" id="s-greet" checked> Say hello on the first touch</label>
+  <label class="h-tg" style="gap:8px">My name <input id="s-name" maxlength="20" style="flex:1;min-height:44px;border-radius:12px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--text);font:600 16px var(--ui);padding:0 12px"></label>
+  <div class="h-h3" style="margin-top:12px">Doors (camera)</div>
+  <p class="h-muted">Stand where the robot stops in front of the door (or hold the phone there), then show it the door
+  closed and open, 2–3 times each. The robot then checks it on errands. <span id="d-src"></span></p>
+  <div class="h-form"><label>Door of<select id="d-place"></select></label>
+    <label id="d-demo-l">In demo the door is<select id="d-demo"><option value="camera">checked with this phone's camera</option>
+      <option value="open">open</option><option value="closed">closed</option><option value="random">random</option></select></label></div>
+  <div class="h-row"><button class="h-b" id="d-closed">This is CLOSED</button><button class="h-b" id="d-open">This is OPEN</button>
+    <button class="h-b go" id="d-check">Check now</button><button class="h-b" id="d-forget">Forget</button></div>
+  <div class="h-door"><span class="h-muted" id="d-taught"></span><b id="d-res"></b><span class="h-muted" id="d-why"></span></div>
   <div class="h-row" style="margin-top:12px"><button class="h-b" id="s-pin">Change PIN</button>
     <button class="h-b" id="s-release">Release STOP</button></div>
   <div class="h-row" style="margin-top:10px"><button class="h-b" id="s-exit">Leave head mode</button><button class="h-b go" id="s-close">Done</button></div>
@@ -121,6 +166,8 @@
 <script src="vendor/ort/ort.wasm.min.js"></script>
 <script src="detector.js"></script>
 <script src="face.js"></script>
+<script src="doorcheck.js"></script>
+<script src="mission.js"></script>
 <script src="head.js"></script>
 </body>
 </html>

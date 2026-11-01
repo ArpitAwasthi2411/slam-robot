@@ -10,6 +10,9 @@ A phone mounted on the robot runs the Pathik app in **Head mode** (Operate → H
 | **Answers** | the OK button at "wait for OK" stops and the error-recovery questions appear on the face (no PIN, like the app) |
 | **People detection** | YOLO11n on the **phone**, on the **Pi camera's plain picture**; the boxes go back to the robot |
 | Voice | stays on the **robot's speaker** (Piper); the phone's mic can be used to say a command in the kiosk |
+| **Greeting** | first touch after a quiet minute: "Hi, I'm Pathik! Where would you like to go?" (name in settings) |
+| **Errands** | kiosk → go to a place, check its door, say a message, wait (or until OK), come back; spoken report |
+| **Doors** | settings → teach each door closed / open with the camera; errands check it on arrival |
 
 ## How the detection is shared
 
@@ -38,6 +41,37 @@ At start the app times the GPU and the CPU engine on the model and keeps the fas
 *runs on* with both start-test times (e.g. "phone GPU (start test: GPU 22 ms, CPU 64 ms)"). The model in the APK is
 `vendor/yolo11n_320.tflite`, converted from the same ONNX file at build time (`scripts/fetch_phone_detector.sh`),
 so both engines give the same boxes.
+
+## Errands
+
+Kiosk → **Errand: go, wait, come back**: choose the place, how long to wait (30 s – 5 min, or until someone
+presses OK), what to do after (come back here / go home / stay) and an optional message. The robot then, speaking
+each step on its own speaker:
+
+1. "Going to Shashi sir cabin." → drives there (people, replanning and help questions as usual)
+2. checks the door with the camera → "The door of Shashi sir cabin is closed." (if it is)
+3. says the message ("Hello! Ravi sir sent me with the file.", or "I'll wait here outside…" when closed)
+4. waits with a countdown on the face; **OK, done** ends it early
+5. "Going back to where I started." → drives back (to the exact spot the errand started)
+6. report: "I went to Shashi sir cabin, the door was closed, I waited 2 minutes and I am back."
+
+If it cannot reach the place it says why and comes back. Cancel from the kiosk (PIN). Code: `mission.js`
+(steps, tested in `test_errand.py`), `head.js` (robot / demo operations).
+
+## Door check with the camera
+
+YOLO has no door class, so the robot learns **each door**: stop where the robot stops in front of it, head settings
+→ Doors → choose the place → **This is CLOSED** / **This is OPEN** (2–3 times each, different light if you can).
+On an errand it compares three pictures with what it learned (`doorcheck.js`: layout + edge directions, tolerant
+of light changes and a few cm of stopping error) and says open / closed / unknown. Unknown = it doesn't decide
+for you. The references live on the head phone. Planned: a LiDAR doorway check next to it.
+
+## Peak test
+
+Operate → **Peak test** runs detection flat out, the face, door checks and spoken lines together for 1–20 min and
+grades: detections ≥ 5/s, no more than 25 % slower at the end (heat), face ≥ 45 fps, phone ≤ 42 °C, Android heat
+state none/light, battery ≤ 25 %/h, page stalls ≤ 1 s/min. Run 10 min with the phone in its mount before trusting
+it on the robot. The web engine now runs YOLO in a worker (`detworker.js`), so the face no longer stutters on it.
 
 ## Set up
 

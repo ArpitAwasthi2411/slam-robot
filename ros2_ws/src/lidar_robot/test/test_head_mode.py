@@ -137,3 +137,15 @@ def test_phone_detections_endpoint_validation_and_roles():
             clean_phone_detections(bad)
     src = open(os.path.join(os.path.dirname(__file__), '..', 'lidar_robot', 'dashboard_server.py')).read()
     assert "'/api/vision/phone'" in src and "camera_jpeg', None)" in src and "fn(raw=True)" in src
+
+
+def test_navigator_say_command(tmp_path):
+    """Head mode's greeting and errand lines go to the robot's speaker through {"type": "say"}."""
+    sys.path.insert(0, os.path.dirname(__file__))
+    from test_navigator_core import make_setup
+    nav = make_setup(tmp_path)[0]
+    assert nav.handle({'type': 'say', 'text': "  Hi, I'm Pathik!\n Where would you like to go? "}) == {'ok': True}
+    assert nav.say_queue[-1] == ('voice_reply', "Hi, I'm Pathik! Where would you like to go?")
+    assert nav.handle({'type': 'say', 'text': '   '})['ok'] is False
+    nav.handle({'type': 'say', 'text': 'x' * 500})
+    assert len(nav.say_queue[-1][1]) == 200

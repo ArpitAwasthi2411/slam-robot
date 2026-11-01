@@ -224,6 +224,7 @@ class VisionNode(Node):
         d('model_dir', os.path.expanduser('~/models/yolo11n_ncnn_model'))
         d('imgsz', 320)
         d('conf', 0.45)
+        d('track_conf', 0.25)           # weaker boxes may continue a known person's track (never start one)
         d('threads', 1)                 # 1 core: Cartographer + bridge + navigator need the rest of a Pi 4
         d('det_rate', 2.0)
         d('stream_rate', 5.0)
@@ -244,7 +245,7 @@ class VisionNode(Node):
         d('phone_timeout', 1.0)         # s: phone detections older than this -> the Pi runs YOLO itself again
         d('idle_pause_s', 30.0)         # pause detection this long after the robot stopped being busy (0 = never)
         g = lambda n: self.get_parameter(n).value  # noqa: E731
-        self.p = {n: g(n) for n in ('hfov_deg', 'flip', 'conf', 'det_rate', 'stream_rate', 'jpeg_quality',
+        self.p = {n: g(n) for n in ('hfov_deg', 'flip', 'conf', 'track_conf', 'det_rate', 'stream_rate', 'jpeg_quality',
                                      'laser_yaw')}
         self.cfg = {'path_half_angle_deg': g('path_half_angle_deg'), 'stop_m': g('stop_m'), 'slow_m': g('slow_m')}
         try:
@@ -279,7 +280,7 @@ class VisionNode(Node):
         except Exception as e:          # ncnn not installed / model missing
             self.det_error = f'people detection off: {e}'
             self.get_logger().warn(self.det_error)
-        self.tracker = PersonTracker()
+        self.tracker = PersonTracker(high_conf=float(self.p['conf']))
         self.running = True
         threading.Thread(target=self._detect_loop, daemon=True).start()
         self.marker = None
@@ -411,7 +412,7 @@ class VisionNode(Node):
             else:
                 if by == 'pi':
                     try:
-                        boxes = self.detector.detect(frame, float(self.p['conf']))
+                        boxes = self.detector.detect(frame, min(float(self.p['conf']), float(self.p['track_conf'])))
                     except Exception as e:
                         boxes = []
                         self.get_logger().error(f'detection failed: {e}', throttle_duration_sec=10.0)

@@ -1664,6 +1664,12 @@ $('#hub-head').onclick = () => {
   if (window.PathikNative && PathikNative.openHead) PathikNative.openHead(h);
   else location.href = 'head.html' + (h ? '#' + h : '');
 };
+$('#hub-peak').onclick = () => {
+  haptic(8);
+  const h = BASE && BASE !== DEMO ? `base=${encodeURIComponent(BASE)}&token=${encodeURIComponent(TOKEN || '')}` : '';
+  if (window.PathikNative && PathikNative.openPeak) PathikNative.openPeak(h);
+  else location.href = 'peak.html' + (h ? '#' + h : '');
+};
 $('#hub-detector').onclick = () => {
   haptic(8);
   const h = BASE && BASE !== DEMO ? `base=${encodeURIComponent(BASE)}&token=${encodeURIComponent(TOKEN || '')}` : '';
