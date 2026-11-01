@@ -5,8 +5,8 @@ esp32_bridge:
     baud_rate: 115200
     wheel_radius: 0.0625         # 125 mm wheels
     wheel_separation: 0.30       # tune with the 360-degree spin test (docs/calibration.md)
-    ticks_per_rev_left: 4963.0   # measure: serial_probe.py --push --metres 5 (docs/mapping.md); was 2 x 1 m
-    ticks_per_rev_right: 4977.0
+    ticks_per_rev_left: 5048.0   # 31 Oct 2026 lab: 5 m drive, wheels said 4.669 m vs 4.590 m taped (was 4963/4977)
+    ticks_per_rev_right: 5063.0
     cmd_timeout: 0.5             # s, stale cmd_vel -> stop
     max_wheel_speed: 0.45        # m/s clamp sent to the ESP32
     cmd_rate: 20.0
