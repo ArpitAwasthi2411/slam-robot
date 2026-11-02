@@ -225,6 +225,17 @@
           </div>
           <p id="x-last" class="muted small" hidden></p>
         </div>
+        <div id="mm-card" class="card stack" data-min="operator">
+          <div class="row between"><b class="title-s">Map mode</b><span class="pill-tag" id="mm-tag">–</span></div>
+          <small class="muted block" id="mm-text">Freeze the map when it looks right: the robot then only finds itself on it and nothing new gets drawn in.</small>
+          <div class="row gap wrap" id="mm-btns">
+            <button id="mm-freeze" class="btn primary grow">Freeze map</button>
+            <button id="mm-continue" class="btn grow">Continue mapping</button>
+            <button id="mm-use" class="btn grow">Use a saved map</button>
+            <button id="mm-new" class="btn ghost grow">New map</button>
+          </div>
+          <p id="mm-switching" class="x-msg" role="status" hidden></p>
+        </div>
         <div class="row gap" data-min="operator">
           <button id="d-savemap" class="btn grow">Save map</button>
           <button id="d-locok" class="btn primary grow" hidden>Position OK</button>

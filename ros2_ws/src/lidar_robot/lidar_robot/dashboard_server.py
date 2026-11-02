@@ -8,6 +8,7 @@ The server knows nothing about ROS. It talks to a `backend` object:
     backend.send_goal(x, y, yaw)
     backend.cancel_goal()
     backend.save_map(name) -> str
+    backend.slam_info() / slam_switch(body) -> dict   (map mode: freeze / continue / new / use; optional)
     backend.nav_request(dict) -> dict     (navigator: places, routes, missions, commands)
   Tuning Lab / mobile app (optional; 404 if the backend lacks them):
     backend.ping() -> dict
@@ -309,6 +310,8 @@ def make_handler(backend, index_path, app_dir=None, users=None, public=None):
                     return self._optional('get_telemetry', int(q.get('since', ['0'])[0]))
                 if url.path == '/api/test':
                     return self._optional('test_status', int(q.get('since', ['0'])[0]))
+                if url.path == '/api/slam':
+                    return self._optional('slam_info')
                 if url.path == '/api/state':
                     return self._send(200, dict(backend.get_state(), net=self._net()))
                 if url.path == '/api/camera.jpg':
@@ -351,6 +354,8 @@ def make_handler(backend, index_path, app_dir=None, users=None, public=None):
                     return self._send(200, backend.nav_request(body))
                 elif url.path == '/api/save_map':
                     return self._send(200, {'ok': True, 'saved': backend.save_map(str(body.get('name', 'map')))})
+                elif url.path == '/api/slam':                   # map mode: freeze / continue / new / use
+                    return self._optional('slam_switch', body)
                 elif url.path == '/api/relocalize':
                     return self._optional('relocalize', body)
                 elif url.path == '/api/vision/phone':           # people boxes from the phone in the robot's head

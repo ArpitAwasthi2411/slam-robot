@@ -557,6 +557,34 @@ function demoVision() {                      // a person walks towards the robot
   return { action, speed_factor: speed, reason, steer: 'none', people: [p], people_in_path: 1, camera_ok: true,
            camera: 'demo', detector: true, fps: 4.0, lidar: true, frame_w: 640, frame_h: 360 };
 }
+// map mode (Map tab: freeze / continue / new / use); the demo "restarts" in 4 s instead of 20 s
+const MM = { mode: 'localization', map: 'demo_floor', maps: [{ name: 'demo_floor', size_kb: 812, mtime: Date.now() / 1000 - 86400, picture: true }], switching: null, until: 0 };
+function mmTick() {
+  if (MM.switching && now() > MM.until) { MM.mode = MM.switching.mode; MM.map = MM.switching.map; MM.switching = null; if (MM.mode === 'localization') N.localized = false; log(`Restarted: ${MM.mode === 'mapping' ? 'mapping' : 'frozen map ' + MM.map}`); }
+}
+function mmInfo() { mmTick(); return { mode: MM.mode, map: MM.map, map_name: MM.map, maps: MM.maps, can_switch: true, auto_restart: true, switching: MM.switching }; }
+function mmSwitch(b) {
+  mmTick();
+  if (MM.switching) throw new Error('Already switching: the robot is restarting.');
+  if (N.active || N.queue.length) throw new Error('Not now: it is busy: cancel the task first.');
+  const a = b.action; let mode, map, say;
+  if (a === 'freeze') {
+    if (MM.mode !== 'mapping') throw new Error('The map is already frozen. Use "Continue mapping" to change it.');
+    map = String(b.name || '').replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 60) || 'map_' + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    MM.maps = [{ name: map, size_kb: 640, mtime: Date.now() / 1000, picture: true }, ...MM.maps.filter(m => m.name !== map)];
+    mode = 'localization'; say = `Saving the map as ${map} and freezing it. The robot restarts in about 20 s; then check the position and tap Position OK.`;
+  } else if (a === 'new') { mode = 'mapping'; map = ''; say = 'Starting a new, empty map. The robot restarts in about 20 s.'; }
+  else if (a === 'continue') {
+    map = b.map || MM.map; if (!map) throw new Error('No saved map to continue. Freeze or save a map first, or start a new one.');
+    mode = 'mapping'; say = `Mapping again on top of ${map}. The robot restarts in about 20 s.`;
+  } else if (a === 'use') {
+    map = b.map; if (!MM.maps.some(m => m.name === map)) throw new Error('Choose one of the saved maps.');
+    mode = 'localization'; say = `Driving on ${map} (frozen). The robot restarts in about 20 s; then check the position and tap Position OK.`;
+  } else throw new Error('unknown action');
+  MM.switching = { mode, map, say }; MM.until = now() + 4;
+  return { ok: true, say, mode, map };
+}
+
 function state() {
   const moving = Math.abs(R.v) + Math.abs(R.w) > 0.001;
   return {
@@ -570,7 +598,7 @@ function state() {
     sensors: { us: [null, null, null], imu_ok: true, yaw_source: 'gyro', us_mounts: [[0.07, 0.12, 0.52], [0.07, 0, 0], [0.07, -0.12, -0.52]], bumper: false },
     pi: { temp_c: 58, cpu_pct: 46, load1: 1.9, cores: 4, throttled: '0x0', flags: [], level: 'ok', text: 'OK' },
     nav: navStatus(), places: { map: places.map, home: places.home, dock: places.dock, places: places.places, rooms: places.rooms, version: places.version },
-    tune: { ...tune }, fw: '2.4-demo', telemetry: false, turns: 0, sep: 0.3, test_running: false, autosave: {}, slam_mode: 'localization',
+    tune: { ...tune }, fw: '2.4-demo', telemetry: false, turns: 0, sep: 0.3, test_running: false, autosave: {}, slam_mode: (mmTick(), MM.mode), map_name: MM.map, switching: MM.switching,
     vision: demoVision(), camera: true,
     voice: { ok: true, mic: true, button: true, stt: 'demo', listening: VO.listening, thinking: VO.thinking,
              last_heard: VO.heard, last_reply: VO.reply, message: 'Demo: hold the button, the demo robot "hears" a sample command.' },
@@ -665,6 +693,7 @@ window.PathikDemo = {
     if (p.startsWith('/api/auth/') || p.startsWith('/api/users')) return authApi(p, body, me);
     if (p === '/api/nav' && body) body.by = n;
     if (p === '/api/state') return state();
+    if (p === '/api/slam') return method === 'GET' ? mmInfo() : mmSwitch(body || {});
     if (p === '/api/map') return path.includes('since=1') ? { unchanged: true } : { version: 1, width: W, height: H, resolution: RES, origin: [OX, OY, 0], data: mapData() };
     if (p === '/api/telemetry') return { seq: 0, samples: [] };
     if (p === '/api/cmd') { R.teleop = { v: Math.max(-0.3, Math.min(0.3, +body.v || 0)), w: Math.max(-1.2, Math.min(1.2, +body.w || 0)), t: now() }; return { ok: true }; }

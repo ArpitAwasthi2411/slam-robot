@@ -516,7 +516,7 @@ function onState(st) {
   renderWhere(st);
   renderVision(st);
   renderExplore(st);
-  renderMapStats(st);
+  renderMapStats(st); renderMapMode(st);
   if (S.tab === 'home' || S.tab === 'send') renderGo(st);
   renderHome(st);
   if (S.tab === 'more' && S.lab) { if (S.lab === 'health') renderStatus(st); labOnState(st); }
@@ -1310,6 +1310,73 @@ function renderExplore(st) {
   // one toast when a save finishes (not for saves that happened before we connected)
   if (xSeenSave === null) xSeenSave = a.name || '';
   else if (a.state === 'saved' && a.name !== xSeenSave) { xSeenSave = a.name; toast(`Mapping done. Map saved as ${a.name}`); haptic(40); }
+}
+
+// ------------------------------------------------------------------ map mode: freeze / continue / new / use
+let mmMaps = [], mmMapsAt = 0;
+async function mmLoadMaps(force) {
+  if (!force && Date.now() - mmMapsAt < 15000) return mmMaps;
+  try { const r = await get('/api/slam'); mmMaps = r.maps || []; mmMapsAt = Date.now(); } catch (e) { /* older robot */ }
+  return mmMaps;
+}
+async function mmSwitch(body, okText) {
+  try {
+    const r = await post('/api/slam', body, { timeout: 90000 });
+    toast(r.say || okText); haptic(30); mmMapsAt = 0;
+  } catch (e) { toast(e.message, true); }
+}
+function mmPick(title, maps, okText) {
+  if (!maps.length) { toast('No saved maps yet. Freeze or save one first.', true); return Promise.resolve(null); }
+  const opts = maps.map((m, i) => `<label class="switch"><input type="radio" name="map" value="${esc(m.name)}" ${i ? '' : 'checked'}>` +
+    `<span>${esc(m.name)} <small>${new Date(m.mtime * 1000).toLocaleString()} · ${m.size_kb} kB</small></span></label>`).join('');
+  return formBox(title, `<div class="stack">${opts}</div>`, okText).then(r => r && r.map);
+}
+$('#mm-freeze').onclick = async () => {
+  const st = S.st || {};
+  if (st.slam_mode !== 'mapping') return toast('Already frozen. Use Continue mapping to change it.', true);
+  const name = await ask('Freeze this map', 'name, e.g. cse_floor (empty = date)');
+  if (name === null) return;
+  const ok = await confirmBox('Freeze the map?',
+    'The map is saved as it looks now and locked. The robot software restarts (about 20 s), then only finds itself on this map: ' +
+    'people and chairs are never drawn into it. Afterwards check the position and tap Position OK.', 'Freeze and restart');
+  if (ok) mmSwitch({ action: 'freeze', name }, 'Freezing the map…');
+};
+$('#mm-continue').onclick = async () => {
+  const st = S.st || {};
+  let map = st.map_name;
+  if (!map) { map = await mmPick('Continue which map?', await mmLoadMaps(true), 'Continue mapping'); if (!map) return; }
+  const ok = await confirmBox(`Add to ${map}?`,
+    'Mapping is switched on again, on top of this map: new areas are added and your places stay where they are. ' +
+    'The robot restarts (about 20 s). Freeze it again when you are done.', 'Continue mapping');
+  if (ok) mmSwitch({ action: 'continue', map }, 'Switching to mapping…');
+};
+$('#mm-use').onclick = async () => {
+  const map = await mmPick('Drive on which map?', await mmLoadMaps(true), 'Use this map');
+  if (!map) return;
+  mmSwitch({ action: 'use', map }, 'Switching map…');
+};
+$('#mm-new').onclick = async () => {
+  const ok = await confirmBox('Start a new, empty map?',
+    'The robot forgets the current map and starts mapping from zero (saved maps stay in the list). ' +
+    'Places saved on the old map will not line up with the new one.', 'Start a new map');
+  if (ok) mmSwitch({ action: 'new' }, 'Starting a new map…');
+};
+function renderMapMode(st) {
+  const card = $('#mm-card'); if (!card) return;
+  const sw = st.switching, mode = st.slam_mode;
+  card.hidden = !['mapping', 'localization'].includes(mode) && !sw;
+  const frozen = mode === 'localization';
+  $('#mm-tag').textContent = sw ? 'Restarting…' : frozen ? 'Frozen' : 'Mapping live';
+  $('#mm-tag').classList.toggle('go', frozen && !sw);
+  $('#mm-text').textContent = sw ? '' : frozen
+    ? `Driving on the frozen map ${st.map_name || ''}. Nothing new is added to it.`
+    : st.map_name ? `Mapping live, on top of ${st.map_name}. Freeze it when it looks right.`
+      : 'Mapping live. Freeze the map when it looks right: the robot then only finds itself on it and nothing new gets drawn in.';
+  $('#mm-switching').hidden = !sw;
+  if (sw) $('#mm-switching').textContent = sw.say || 'Restarting…';
+  $('#mm-btns').hidden = !!sw;
+  $('#mm-freeze').hidden = frozen;
+  $('#mm-continue').hidden = !frozen;
 }
 
 function renderMapStats(st) {

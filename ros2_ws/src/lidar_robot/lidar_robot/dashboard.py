@@ -32,6 +32,7 @@ from lidar_robot.auth import UserStore
 from lidar_robot.dashboard_server import DashboardServer
 from lidar_robot.explorer import MapAutoSaver
 from lidar_robot.kinematics import yaw_from_quaternion, quaternion_from_yaw, wrap_angle
+from lidar_robot import map_mode
 from lidar_robot.mapsave import save_map
 from lidar_robot.pihealth import PiHealth
 from lidar_robot.vision_rules import clean_phone_detections
@@ -59,6 +60,8 @@ class DashboardNode(Node):
         self.declare_parameter('nav_mode', 'planner')
         self.declare_parameter('slam_mode', 'mapping')           # bringup passes the real one
         self.declare_parameter('carto_config_dir', '')
+        self.declare_parameter('map_file', '')                 # the saved map in use (bringup passes it)
+        self.declare_parameter('map_mode_file', '')            # app's map-mode choice (map_mode.py)
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
         self.global_frame = gp('global_frame')
         self.fallback_frame = gp('fallback_frame')
@@ -139,6 +142,9 @@ class DashboardNode(Node):
             self._WriteState = None
         self.slam_mode = str(self.get_parameter('slam_mode').value)
         self.carto_config_dir = str(self.get_parameter('carto_config_dir').value)
+        self.map_file = str(self.get_parameter('map_file').value)
+        self.map_mode_file = str(self.get_parameter('map_mode_file').value)
+        self.switching = None              # {'mode', 'map', 'say'} once a map-mode switch started
         self._carto = None
         try:                                # Cartographer trajectory services, for "Set position"
             from cartographer_ros_msgs.srv import FinishTrajectory, GetTrajectoryStates, StartTrajectory
@@ -376,6 +382,8 @@ class DashboardNode(Node):
             'turns': odom.get('turns'), 'sep': rs.get('sep'), 'gyro_scale': rs.get('gyro_scale'), 'test_running': bool(self.tests.result.get('running')),
             'autosave': self.autosave.info,
             'slam_mode': self.slam_mode,
+            'map_name': os.path.basename(self.map_file)[:-9] if self.map_file.endswith('.pbstream') else '',
+            'switching': self.switching,
             'places': self.places,
             'vision': self.vision if time.monotonic() - self.vision_t < 2.0 else None,
             'camera': time.monotonic() - self.camera_t < 2.0,
@@ -559,6 +567,65 @@ class DashboardNode(Node):
         self.get_logger().info(f'Set position: x={x:.2f} y={y:.2f} yaw={math.degrees(yaw):.0f}° '
                                f'(new trajectory {res.trajectory_id})')
         return {'ok': True, 'trajectory': int(res.trajectory_id)}
+
+    # ---------------------------------------------------------------- map mode (app: Map tab)
+    def slam_info(self):
+        return {'mode': self.slam_mode, 'map': self.map_file,
+                'map_name': os.path.basename(self.map_file)[:-9] if self.map_file.endswith('.pbstream') else '',
+                'maps': [{k: m[k] for k in ('name', 'size_kb', 'mtime', 'picture')}
+                         for m in map_mode.list_maps(self.map_dir)],
+                'can_switch': bool(self.map_mode_file) and self.slam_mode in map_mode.MODES,
+                'auto_restart': bool(os.environ.get('INVOCATION_ID')),     # started by systemd (robot.service)
+                'switching': self.switching}
+
+    def _busy(self):
+        n = self.nav_status if time.monotonic() - self.nav_status_t < 2.0 else {}
+        if (n.get('explore') or {}).get('active'):
+            return 'it is exploring (stop "Map by itself" first)'
+        if (n.get('missions') or {}).get('active') or n.get('state') not in (None, 'IDLE'):
+            return f'it is busy ({str(n.get("state", "")).lower()}): cancel the task first'
+        return None
+
+    def slam_switch(self, body):
+        """Freeze the map / continue mapping / new map / drive on a saved map, then restart."""
+        if not self.map_mode_file or self.slam_mode not in map_mode.MODES:
+            raise ValueError('Map mode switching needs SLAM running from bringup (map_mode_file set).')
+        if self.switching:
+            raise ValueError('Already switching: the robot is restarting.')
+        why = self._busy()
+        if why:
+            raise ValueError(f'Not now: {why}.')
+        plan = map_mode.plan_switch(str(body.get('action', '')), self.slam_mode, self.map_file, self.map_dir,
+                                    name=body.get('name'), map_name=body.get('map'))
+        if plan['save_as']:
+            self._finish_active_trajectories()           # final optimisation: the saved map is the best one
+            saved = self.save_map(plan['save_as'])
+            if 'WARNING' in saved or not os.path.isfile(plan['map']):
+                raise ValueError('Could not save the .pbstream (Cartographer not answering), the map was not '
+                                 'frozen. Try again in a few seconds.')
+        map_mode.write_mode(self.map_mode_file, plan['mode'], plan['map'])
+        auto = bool(os.environ.get('INVOCATION_ID'))
+        say = plan['say'] + ('' if auto else ' (Started by hand, not by robot.service: start it again yourself.)')
+        self.switching = {'mode': plan['mode'], 'map': os.path.basename(plan['map']), 'say': say}
+        self.get_logger().warn(f'map mode -> {plan["mode"]} {plan["map"] or "(new map)"}: restarting')
+        threading.Thread(target=self._exit_for_restart, daemon=True).start()
+        return {'ok': True, 'say': say, 'mode': plan['mode'], 'map': os.path.basename(plan['map'])}
+
+    def _finish_active_trajectories(self):
+        if not self._carto:
+            return
+        try:
+            FinishTrajectory, GetTrajectoryStates, _ = self._carto['types']
+            st = self._call(self._carto['states'], GetTrajectoryStates.Request()).trajectory_states
+            for i, s_ in zip(list(st.trajectory_id), list(st.trajectory_state)):
+                if s_ == 0:                                  # ACTIVE
+                    self._call(self._carto['finish'], FinishTrajectory.Request(trajectory_id=int(i)), timeout=60.0)
+        except ValueError as e:                            # still save: write_state works without it
+            self.get_logger().warn(f'finish_trajectory before freezing: {e}')
+
+    def _exit_for_restart(self):
+        time.sleep(2.0)                     # let the app get its answer and show the message
+        os._exit(map_mode.RESTART_CODE)     # launch sees this code, shuts down, systemd restarts it
 
     def _write_pbstream(self, path):
         """Ask Cartographer to save its full state (needed for slam_mode:=localization)."""

@@ -125,6 +125,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-02 (later): map mode in the app (Map tab card, map_mode.py): Freeze map (finish trajectory + write_state ->
+  ~/maps/<name>.pbstream, then localization on it), Continue mapping (load the map unfrozen, keeps the frame),
+  Use a saved map, New map. Choice in ~/maps/map_mode.json, read by bringup (wins over ROBOT_ARGS; missing map ->
+  mapping). Switch = dashboard exits 42 -> launch Shutdown -> robot.service Restart=always. GET/POST /api/slam
+  (operator, idle only), demo mode, test_map_mode.py. Pi needs the new robot.service copied once.
+
 - 2026-11-02: lab: LiDAR 14 cm behind the axle (laser_x -0.14), spin test says wheel_separation 0.294 (set on the Pi).
   Ultrasonic-only blockers: replans used only the LiDAR scan, so a low box stopped the robot, every new route went
   straight back into it, and the errand gave up and came home. Navigator now remembers the ultrasonic echoes across

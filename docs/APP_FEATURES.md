@@ -125,6 +125,7 @@ shrink to a strip, Android back button (dialog → sub-page → Home), phone fon
 | P4 | Last run summary (area, areas, time, saved as / saving / not saved) + one toast when the auto-save finishes | O | `st.autosave` || Map tab sheet → Map by itself (operator) |
 | P5 | Save map (name) | O | `POST /api/save_map` || Map tab sheet (operator) |
 | P6 | Position OK (only when the localisation needs a confirm) | O | `nav confirm_localization` || Map tab sheet (operator) |
+| P7 | Map mode: Freeze map / Continue mapping / Use a saved map / New map (robot restarts in the new mode) | O | `GET/POST /api/slam` || Map tab sheet, Map mode card (operator) |
 | P7 | Mode note (running on a saved map / building a new map) | O | `st.slam_mode` || Map tab sheet (operator) |
 
 ## 8. Lab tab (operator)

@@ -16,7 +16,9 @@ Environment=ROS_LOCALHOST_ONLY=0
 #   echo 'ROBOT_ARGS=slam_mode:=localization map:=/home/arpit/maps/lab.pbstream' > /home/arpit/robot.env
 EnvironmentFile=-/home/arpit/robot.env
 ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/arpit/ros2_ws/install/setup.bash && exec ros2 launch lidar_robot bringup.launch.py $ROBOT_ARGS'
-Restart=on-failure
+# always: the app's map-mode switch (freeze / continue / new map) ends the launch on purpose and
+# relies on this to start it again in the new mode. "sudo systemctl stop robot" still stops it.
+Restart=always
 RestartSec=5
 KillSignal=SIGINT
 TimeoutStopSec=15

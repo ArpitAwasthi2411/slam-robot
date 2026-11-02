@@ -14,6 +14,8 @@ Arguments
   slam          true        start Cartographer + occupancy grid
   slam_mode     mapping     mapping | localization (needs map:=<file>.pbstream, odometry on)
   map           ''          saved Cartographer state for localization
+  map_mode_file ~/maps/map_mode.json   the app's choice (Map tab: freeze / continue / new map): wins over
+                            slam_mode/map when the file exists ('' or off = ignore it). See map_mode.py
   nav_mode      planner     planner (navigator: A* routes, places, missions) | direct (goal_controller) | none
   dashboard     true        web dashboard on http://<pi>:8080
   places        ~/maps/places.json
@@ -37,7 +39,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, LogInfo
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, LogInfo, RegisterEventHandler, Shutdown
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -55,6 +58,12 @@ def _setup(context):
     slam = _truthy(cfg('slam'))
     slam_mode = cfg('slam_mode')
     map_file = os.path.expanduser(cfg('map'))
+    # the app's map mode (Map tab: freeze / continue / new / use) wins over ROBOT_ARGS (map_mode.py)
+    from lidar_robot.map_mode import RESTART_CODE, resolve
+    mode_file = os.path.expanduser(cfg('map_mode_file')) if cfg('map_mode_file') not in ('', 'off') else ''
+    mode_note = ''
+    if slam and mode_file:
+        slam_mode, map_file, mode_note = resolve(slam_mode, map_file, mode_file)
     nav_mode = cfg('nav_mode')
     places = os.path.expanduser(cfg('places'))
     vision = _truthy(cfg('vision'))
@@ -89,7 +98,8 @@ def _setup(context):
                          'launch/serial_probe is holding the port. The bridge keeps searching.')
     actions_ports = [LogInfo(msg=f'[bringup] ports: ESP32={esp_port}  LiDAR={lidar_port}{port_msg}')]
 
-    actions = actions_ports + [LogInfo(msg=f'[bringup] odom={use_odom} slam={slam} slam_mode={slam_mode} '
+    actions = actions_ports + ([LogInfo(msg=f'[bringup] {mode_note}')] if mode_note else []) + [
+        LogInfo(msg=f'[bringup] odom={use_odom} slam={slam} slam_mode={slam_mode} '
                            f'map={map_file or "-"} nav_mode={nav_mode} dashboard={cfg("dashboard")} '
                            f'vision={vision} camera={cfg("camera")} voice={voice} cpu_plan={plan}')]
 
@@ -145,7 +155,9 @@ def _setup(context):
             extra = [f'-load_state_filename={map_file}', '-load_frozen_state=true']
         else:
             lua = 'cartographer_odom.lua' if use_odom else 'cartographer_lidar_only.lua'
-            extra = []
+            # "Continue mapping" in the app: load the saved map unfrozen, new areas are added to it
+            extra = ([f'-load_state_filename={map_file}', '-load_frozen_state=false']
+                     if map_file and os.path.isfile(map_file) else [])
         actions.append(Node(
             package='cartographer_ros', executable='cartographer_node', name='cartographer_node',
             output='screen',
@@ -187,18 +199,29 @@ def _setup(context):
                             prefix=pre('voice'), parameters=[params]))
 
     if _truthy(cfg('dashboard')):
-        actions.append(Node(
+        dash = Node(
             package='lidar_robot', executable='dashboard', name='dashboard', output='screen',
             prefix=pre('dashboard'),
             parameters=[params, {'global_frame': goal_frame, 'nav_mode': nav_mode,
                                  'slam_mode': slam_mode if slam else 'off',
-                                 'carto_config_dir': os.path.join(share, 'config')}]))
+                                 'map_file': map_file if slam else '',
+                                 'map_mode_file': mode_file,
+                                 'carto_config_dir': os.path.join(share, 'config')}])
+        actions.append(dash)
+        # app map-mode switch: the dashboard exits with RESTART_CODE -> stop everything; systemd
+        # (robot.service, Restart=always) starts the robot again in the new mode
+        actions.append(RegisterEventHandler(OnProcessExit(
+            target_action=dash,
+            on_exit=lambda ev, ctx: ([LogInfo(msg='[bringup] map mode changed in the app: restarting'),
+                                      Shutdown(reason='map mode switch')]
+                                     if ev.returncode == RESTART_CODE else []))))
     return actions
 
 
 def generate_launch_description():
     args = [
         ('use_odometry', 'true'), ('slam', 'true'), ('slam_mode', 'mapping'), ('map', ''),
+        ('map_mode_file', '~/maps/map_mode.json'),
         ('nav_mode', 'planner'), ('dashboard', 'true'), ('places', '~/maps/places.json'),
         ('lidar_port', 'auto'),
         ('esp32_port', 'auto'),

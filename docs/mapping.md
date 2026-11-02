@@ -86,7 +86,21 @@ rebuild it any time with different settings.
 
 ## Step 5. Run on it (frozen)
 
-Put the line the build printed into `~/robot.env`:
+**From the app (easiest):** Map tab → **Map mode** card:
+- **Freeze map**: saves the live map (`~/maps/<name>.pbstream` + picture), the robot software restarts (~20 s)
+  in localization on it. Nothing is added to a frozen map: people and chairs never become walls.
+- **Use a saved map**: pick any `.pbstream` in `~/maps` (e.g. the one `map_offline.sh build` made) and drive on it frozen.
+- **Continue mapping**: unfreezes the current map and keeps mapping on top of it (same coordinates, places stay valid);
+  freeze it again afterwards.
+- **New map**: mapping from empty (places from the old map won't line up).
+
+The choice is kept in `~/maps/map_mode.json` and the robot boots into it; it **wins over** `slam_mode`/`map` in
+`ROBOT_ARGS` (delete that file to go back to `ROBOT_ARGS`). Needs `robot.service` with `Restart=always`
+(copy the new one: `sudo cp ~/slam-robot/scripts/robot.service /etc/systemd/system/ && sudo systemctl daemon-reload`).
+The robot must be idle (no task, not exploring) to switch. Why not AMCL: Cartographer's pure localization does the
+same job on the same map frame, uses the wheel odometry, and is already running.
+
+**By hand (old way):** put the line the build printed into `~/robot.env` (and delete `~/maps/map_mode.json`):
 
 ```
 ROBOT_ARGS=esp32_port:=/dev/ttyAMA0 lidar_port:=/dev/ttyUSB0 slam_mode:=localization map:=/home/arpit/maps/cse_floor.pbstream

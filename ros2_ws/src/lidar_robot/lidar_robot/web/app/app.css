@@ -636,3 +636,5 @@ body:not(.role-staff) [data-max="staff"] { display: none !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+#mm-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#mm-btns[hidden], #mm-btns > [hidden] { display: none; }
