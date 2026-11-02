@@ -141,7 +141,7 @@ Checks:
 1. `ros2 topic echo /robot_description --once | head` prints the model.
 2. `ros2 run tf2_tools view_frames` → `frames.pdf`: base_link → laser, us_*, imu_link, camera_link,
    wheels (and odom → base_link from the bridge, map → odom from Cartographer as before).
-3. `ros2 run tf2_ros tf2_echo base_link laser` → the same `laser_x/y/z` as before (-0.13, 0, 0.10 by default).
+3. `ros2 run tf2_ros tf2_echo base_link laser` → the same `laser_x/y/z` as before (-0.14, 0, 0.10 by default).
 4. RViz with `rviz/robot.rviz`: the robot model is drawn (magenta box with the wheels and sensors). Mapping and
    driving behave exactly as before.
 5. After you measure the real footprint / LiDAR / camera positions, change them in `robot_params.yaml` or the

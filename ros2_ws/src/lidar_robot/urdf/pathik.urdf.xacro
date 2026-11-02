@@ -6,7 +6,7 @@
      Every number comes in as a xacro arg from bringup.launch.py (launch args + config/robot_params.yaml).
      Kept to xacro:arg / xacro:property / ${...} only, so lidar_robot/urdf_model.py can render it without xacro. -->
 <robot name="pathik" xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <xacro:arg name="laser_x" default="-0.13"/>
+  <xacro:arg name="laser_x" default="-0.14"/>
   <xacro:arg name="laser_y" default="0.0"/>
   <xacro:arg name="laser_z" default="0.10"/>
   <xacro:arg name="laser_yaw" default="0.0"/>

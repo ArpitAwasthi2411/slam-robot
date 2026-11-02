@@ -208,7 +208,7 @@ Option 5 step by step: `docs/remote_access.md`.
 | Pathik doesn't find the robot | phone and robot on the same network? `setup_wifi.sh status`; type the address by hand |
 | Firmware shows 2.2 in Status | step A not done or a different ESP32 port: re-flash |
 | One wheel runs away | an `*_ENC_DIR` is wrong: check with `serial_probe.py --push` (stop the robot first) |
-| Map smears / doubles | drive slower; use Map by itself on Careful; check `laser_x` is -0.13 |
+| Map smears / doubles | drive slower; use Map by itself on Careful; check `laser_x` is -0.14 |
 
 ---
 
