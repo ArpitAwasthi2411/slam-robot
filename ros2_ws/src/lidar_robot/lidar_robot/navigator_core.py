@@ -110,6 +110,14 @@ class NavigatorCore:
         self.state = IDLE
         self.message = 'ready'
         self.scan_world = []
+        # ultrasonic blockers: the LiDAR can't see things below its plane (boxes, chair legs), so when the
+        # ultrasonics stop the robot we remember what they saw (world points across the beam) for the
+        # replans, and forget it after us_memory_s so a moved box doesn't leave a fake wall.
+        self.us_world = []
+        self._us_memory = []               # [(t, [(x, y), ...])]
+        self.us_memory_s = 60.0
+        self.us_depth_m = 0.3              # assumed depth of an ultrasonic-only blocker
+        self.us_margin_m = 0.15            # extra berth around it (on top of the robot radius)
         self.preview = None
         self.events = []
         self.estopped = False
@@ -183,6 +191,41 @@ class NavigatorCore:
 
     def update_scan_world(self, pts):
         self.scan_world = pts
+
+    def update_us_world(self, pts):
+        """Live ultrasonic echoes (nearer than ~1.2 m) as world points across each beam."""
+        self.us_world = pts
+
+    def remember_us(self, now=None):
+        """Keep what the ultrasonics see right now as a temporary obstacle for the replans."""
+        now = self.clock() if now is None else now
+        if self.us_world:
+            pts = list(self.us_world)
+            if self._pose is not None:
+                # an echo only gives the near face; assume the thing is ~us_depth_m deep and keep a
+                # us_margin_m berth around it, so the side sensors don't stop the robot again while it
+                # passes (they would see the corner and report it as straight ahead)
+                rx, ry = self._pose[0], self._pose[1]
+                grown = []
+                for x, y in pts:
+                    d = math.hypot(x - rx, y - ry) or 1.0
+                    ux, uy = (x - rx) / d, (y - ry) / d
+                    for k in range(int(self.us_depth_m / 0.1) + 1):
+                        cx, cy = x + ux * 0.1 * k, y + uy * 0.1 * k
+                        grown.append((cx, cy))
+                        if self.us_margin_m > 0:
+                            for j in range(8):
+                                a = j * math.pi / 4
+                                grown.append((cx + self.us_margin_m * math.cos(a),
+                                              cy + self.us_margin_m * math.sin(a)))
+                pts = grown
+            self._us_memory.append((now, pts))
+            self._log(f'ultrasonic blocker remembered ({len(self.us_world)} points) for the new route')
+
+    def us_memory(self, now=None):
+        now = self.clock() if now is None else now
+        self._us_memory = [(t, p) for t, p in self._us_memory if now - t < self.us_memory_s]
+        return [pt for _, p in self._us_memory for pt in p]
 
     def update_scan_base(self, pts):
         """Scan / ultrasonic points in base_link (robot frame) for the body-shape checks."""
@@ -757,7 +800,7 @@ class NavigatorCore:
         return {'ok': True, **self.preview}
 
     def _dynamic_obstacles(self):
-        return self.scan_world
+        return list(self.scan_world) + self.us_memory()
 
     # ---------------------------------------------------------------- control loop
     def step(self, pose, front_clearance, dt):
@@ -920,6 +963,8 @@ class NavigatorCore:
                 self._set(SCANNING, 'scanning the area')
             return 0.0, 0.0
         if event in ('BLOCKED', 'OFF_PATH'):
+            if event == 'BLOCKED':
+                self.remember_us(now)
             self.mlog.bump(m, 'replans')
             self._replans += 1
             if self._replans > self.max_replans:
@@ -943,7 +988,9 @@ class NavigatorCore:
 
     def _plan_current(self, m, pose, now):
         stop = m.current
-        extra = self._dynamic_obstacles() if self._replans else ()
+        # replans see the live scan; every plan (also the first one after a recovery wait) sees the
+        # remembered ultrasonic blockers, so it never sends the robot straight back into the same box
+        extra = self._dynamic_obstacles() if self._replans else self.us_memory()
         bad = []
         if stop.path:
             path = drawn_path.route_from_pose(self.planner, pose, stop.path,

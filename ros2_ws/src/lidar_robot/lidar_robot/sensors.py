@@ -12,6 +12,18 @@ def range_point(rng, mount):
     return mx + rng * math.cos(myaw), my + rng * math.sin(myaw)
 
 
+def range_arc(rng, mount, half_angle=math.radians(15.0), step=0.05):
+    """Points in base_link across an ultrasonic beam at this range (an HC-SR04 sees a ~30 deg cone, so the
+    echo can come from anywhere on that arc, not only the axis). Used to remember a blocker for replans."""
+    mx, my, myaw = mount
+    n = max(1, int(math.ceil(2.0 * half_angle * rng / max(step, 1e-3))))
+    out = []
+    for i in range(n + 1):
+        a = myaw - half_angle + 2.0 * half_angle * i / n
+        out.append((mx + rng * math.cos(a), my + rng * math.sin(a)))
+    return out
+
+
 def front_clearance_from_ranges(readings, half_width, max_age=None):
     """readings: iterable of (range_m_or_None, mount). Returns the forward distance (from the robot
     centre) to the nearest ultrasonic obstacle that lies inside the robot's corridor, or inf."""

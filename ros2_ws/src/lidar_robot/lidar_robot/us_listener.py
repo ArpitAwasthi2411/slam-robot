@@ -11,7 +11,7 @@ from sensor_msgs.msg import Range
 from tf2_ros import TransformException
 
 from lidar_robot.kinematics import yaw_from_quaternion
-from lidar_robot.sensors import front_clearance_from_ranges, range_point
+from lidar_robot.sensors import front_clearance_from_ranges, range_arc, range_point
 
 NAMES = ('left', 'center', 'right')
 
@@ -58,3 +58,12 @@ class UltrasonicListener:
 
     def points_base(self):
         return [range_point(r, m) for r, m in self.readings() if r is not None and m is not None]
+
+    def arc_base(self, half_angle_deg=15.0, max_range=1.2):
+        """Points across each beam (base_link) for echoes nearer than max_range: the blocker's likely extent."""
+        ha = math.radians(half_angle_deg)
+        out = []
+        for r, m in self.readings():
+            if r is not None and m is not None and r <= max_range:
+                out += range_arc(r, m, ha)
+        return out

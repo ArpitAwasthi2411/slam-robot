@@ -79,6 +79,8 @@ class NavigatorNode(Node):
         d('rotate_exit_below', 0.30)
         d('stop_distance', 0.38)
         d('slow_distance', 0.80)
+        d('blocked_after', 5.0)            # s stopped by an obstacle before planning around it
+        d('us_memory_s', 60.0)             # s an ultrasonic-only blocker stays on the plan
         d('robot_half_width', 0.25)
         # the body: a rectangle around the drive axle (base_link). MEASURE YOUR ROBOT:
         d('footprint_front', 0.07)         # axle -> front bumper (m)
@@ -163,7 +165,8 @@ class NavigatorNode(Node):
                            linear_accel=float(g('linear_accel')), angular_accel=float(g('angular_accel')),
                            rotate_in_place_above=float(g('rotate_in_place_above')),
                            rotate_exit_below=float(g('rotate_exit_below')),
-                           stop_distance=float(g('stop_distance')), slow_distance=float(g('slow_distance'))),
+                           stop_distance=float(g('stop_distance')), slow_distance=float(g('slow_distance')),
+                           blocked_after=float(g('blocked_after'))),
             parser=parser, dwell_s=float(g('dwell_s')), auto_return_s=float(g('auto_return_s')),
             max_replans=int(g('max_replans')),
             tuning_path=os.path.join(os.path.dirname(g('places_file')), 'tuning.json'),
@@ -183,6 +186,7 @@ class NavigatorNode(Node):
             button_enabled=bool(g('button_enabled')), button_home_radius=float(g('button_home_radius')),
             button_gap_s=float(g('button_gap_s')), offline_home_s=float(g('offline_home_s')))
         self.core.localized = not bool(g('require_localization_confirm'))
+        self.core.us_memory_s = float(g('us_memory_s'))
         self.vision = VisionGate(enabled=bool(g('use_vision')), timeout_s=float(g('vision_timeout')))
         self.create_subscription(String, 'vision/decision', self._on_vision, 10)
         self.create_subscription(String, 'vision/dock_marker', self._on_marker, 10)
@@ -337,8 +341,10 @@ class NavigatorNode(Node):
                                                     msg.angle_increment, msg.range_min, pose, laser=laser)
             us = self.us.points_base()
             pts += to_world(us, pose)                          # things below the LiDAR plane
+            us_arc = to_world(self.us.arc_base(), pose)       # the whole beam, for the blocker memory
             with self.core_lock:
                 self.core.update_scan_world(pts)
+                self.core.update_us_world(us_arc)
                 self.core.update_scan_base(near + list(us))
 
     def _on_goal(self, msg: PoseStamped):

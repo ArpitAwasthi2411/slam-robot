@@ -125,6 +125,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-02: lab: LiDAR 14 cm behind the axle (laser_x -0.14), spin test says wheel_separation 0.294 (set on the Pi).
+  Ultrasonic-only blockers: replans used only the LiDAR scan, so a low box stopped the robot, every new route went
+  straight back into it, and the errand gave up and came home. Navigator now remembers the ultrasonic echoes across
+  each beam when blocked (grown 0.3 m deep + 0.15 m berth, kept `us_memory_s` 60 s) for every plan; `blocked_after`
+  5 s before replanning (YAML). test_us_blocker.py (box invisible to the LiDAR: drives around it; without the memory it fails).
+
 - 2026-11-01: head mode greeting (first touch, navigator `say` -> robot speaker) + errands (mission.js: go, door
   check, message, wait / until OK, back here (goto_pose of the start) / home / stay, spoken report; test_errand.py)
   + camera door check (doorcheck.js, teach closed/open per place, test_door_check.py) + peak test (peak.html,

@@ -60,6 +60,8 @@ navigator:
     rotate_exit_below: 0.30      # rad (~17 deg): ...until it's below this, then drive
     stop_distance: 0.38
     slow_distance: 0.80
+    blocked_after: 5.0           # s stopped by an obstacle before planning a route around it (people usually move by then)
+    us_memory_s: 60.0            # s an obstacle seen only by the ultrasonics stays on the plan (LiDAR can't see low boxes)
     robot_half_width: 0.25
     front_cone_deg: 25.0
     # The body shape (v2.4). base_link = centre of the drive axle. MEASURE these on your robot:
