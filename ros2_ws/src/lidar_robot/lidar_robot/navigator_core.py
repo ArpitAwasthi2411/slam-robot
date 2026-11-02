@@ -114,7 +114,11 @@ class NavigatorCore:
         # ultrasonics stop the robot we remember what they saw (world points across the beam) for the
         # replans, and forget it after us_memory_s so a moved box doesn't leave a fake wall.
         self.us_world = []
-        self._us_memory = []               # [(t, [(x, y), ...])]
+        self._us_cells = {}                # 5 cm cell -> time seen (bounded, deduplicated)
+        self.us_wall_skip_m = 0.12         # echoes this close to a mapped wall are the wall itself
+        self.us_watch_s = 15.0             # after a block, keep adding what the sensors see while going round
+        self._us_watch_until = 0.0
+        self._us_next = 0.0
         self.us_memory_s = 60.0
         self.us_depth_m = 0.3              # assumed depth of an ultrasonic-only blocker
         self.us_margin_m = 0.15            # extra berth around it (on top of the robot radius)
@@ -196,36 +200,47 @@ class NavigatorCore:
         """Live ultrasonic echoes (nearer than ~1.2 m) as world points across each beam."""
         self.us_world = pts
 
-    def remember_us(self, now=None):
-        """Keep what the ultrasonics see right now as a temporary obstacle for the replans."""
+    def remember_us(self, now=None, log=True):
+        """Keep what the ultrasonics see right now as a temporary obstacle for the plans.
+
+        Each sensor's echo is placed along that sensor's own beam, so the left / centre / right sensors
+        put the obstacle on the side where it really is and the planner goes round the free side.
+        Echoes on mapped walls are dropped (the map has them; growing them would narrow corridors)."""
         now = self.clock() if now is None else now
-        if self.us_world:
-            pts = list(self.us_world)
-            if self._pose is not None:
-                # an echo only gives the near face; assume the thing is ~us_depth_m deep and keep a
-                # us_margin_m berth around it, so the side sensors don't stop the robot again while it
-                # passes (they would see the corner and report it as straight ahead)
-                rx, ry = self._pose[0], self._pose[1]
-                grown = []
-                for x, y in pts:
-                    d = math.hypot(x - rx, y - ry) or 1.0
-                    ux, uy = (x - rx) / d, (y - ry) / d
-                    for k in range(int(self.us_depth_m / 0.1) + 1):
-                        cx, cy = x + ux * 0.1 * k, y + uy * 0.1 * k
-                        grown.append((cx, cy))
-                        if self.us_margin_m > 0:
-                            for j in range(8):
-                                a = j * math.pi / 4
-                                grown.append((cx + self.us_margin_m * math.cos(a),
-                                              cy + self.us_margin_m * math.sin(a)))
-                pts = grown
-            self._us_memory.append((now, pts))
-            self._log(f'ultrasonic blocker remembered ({len(self.us_world)} points) for the new route')
+        if not self.us_world or self._pose is None:
+            return 0
+        rx, ry, ryaw = self._pose
+        q = 0.05
+        new_echoes = []
+        for x, y in self.us_world:
+            if self.planner.has_map() and self.planner.clearance(x, y) < self.us_wall_skip_m:
+                continue                                   # that's a wall already on the map
+            new_echoes.append((x, y))
+            d = math.hypot(x - rx, y - ry) or 1.0
+            ux, uy = (x - rx) / d, (y - ry) / d
+            # an echo only gives the near face: assume the thing is us_depth_m deep, keep us_margin_m
+            # berth so the angled side sensors don't stop the robot again while it passes the corner
+            for k in range(int(self.us_depth_m / 0.1) + 1):
+                cx, cy = x + ux * 0.1 * k, y + uy * 0.1 * k
+                ring = [(cx, cy)] + ([(cx + self.us_margin_m * math.cos(j * math.pi / 4),
+                                       cy + self.us_margin_m * math.sin(j * math.pi / 4)) for j in range(8)]
+                                     if self.us_margin_m > 0 else [])
+                for px, py in ring:
+                    self._us_cells[(round(px / q), round(py / q))] = now
+        if new_echoes and log:
+            mx = sum(p[0] for p in new_echoes) / len(new_echoes) - rx
+            my = sum(p[1] for p in new_echoes) / len(new_echoes) - ry
+            side = math.degrees(math.atan2(my, mx) - ryaw)
+            side = (side + 180) % 360 - 180
+            where = 'ahead' if abs(side) < 12 else ('on the left' if side > 0 else 'on the right')
+            self._log(f'ultrasonic blocker {where} remembered ({len(new_echoes)} echoes): planning round it')
+        return len(new_echoes)
 
     def us_memory(self, now=None):
         now = self.clock() if now is None else now
-        self._us_memory = [(t, p) for t, p in self._us_memory if now - t < self.us_memory_s]
-        return [pt for _, p in self._us_memory for pt in p]
+        q = 0.05
+        self._us_cells = {c: t for c, t in self._us_cells.items() if now - t < self.us_memory_s}
+        return [(cx * q, cy * q) for cx, cy in self._us_cells]
 
     def update_scan_base(self, pts):
         """Scan / ultrasonic points in base_link (robot frame) for the body-shape checks."""
@@ -965,6 +980,7 @@ class NavigatorCore:
         if event in ('BLOCKED', 'OFF_PATH'):
             if event == 'BLOCKED':
                 self.remember_us(now)
+                self._us_watch_until = now + self.us_watch_s
             self.mlog.bump(m, 'replans')
             self._replans += 1
             if self._replans > self.max_replans:
@@ -975,6 +991,11 @@ class NavigatorCore:
             self.follower.clear()
             self._set(PLANNING, f'{why}, replanning')
             return 0.0, 0.0
+        if (self.follower.blocked or now < self._us_watch_until) and now >= self._us_next and self.us_world:
+            # while stopped, and while going round after a block, every sensor that sees the thing adds to
+            # its outline (e.g. the right sensor sees the corner after a small turn left -> stay left)
+            self._us_next = now + 0.5
+            self.remember_us(now, log=False)
         if self.follower.blocked:
             if self._blocked_since is None:
                 self._blocked_since = now

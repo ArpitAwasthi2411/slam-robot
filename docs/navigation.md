@@ -125,7 +125,7 @@ ros2 topic echo /navigator/status --once
 | `max_linear` | 0.22 m/s | cruise speed |
 | `stop_distance` | 0.38 m | front clearance from the robot centre that stops it (440 mm chassis) |
 | `blocked_after` | 5 s | stopped by an obstacle this long → plan a route around it (people usually move by then) |
-| `us_memory_s` | 60 s | an obstacle only the ultrasonics see (low box, chair legs: below the LiDAR plane) is kept on the plan this long. When the robot is blocked, the echoes across each ~30° beam are remembered, grown 0.3 m deep plus a 0.15 m berth, and every replan avoids them; after 60 s they're forgotten so a moved box leaves no fake wall |
+| `us_memory_s` | 60 s | an obstacle only the ultrasonics see (low box, chair legs: below the LiDAR plane) is kept on the plan this long. While the robot is blocked, and for 15 s while it goes round, every sensor's echoes are placed along that sensor's own ~30° beam (left / centre / right), so the obstacle lands on the side where it really is and the planner goes round the free side (log: `ultrasonic blocker on the right remembered`). Each echo is grown 0.3 m deep plus a 0.15 m berth; echoes on mapped walls are skipped (corridors stay usable); after 60 s it is forgotten so a moved box leaves no fake wall |
 | `dwell_s` | 3 s | wait at intermediate stops |
 | `auto_return_s` | 0 | above 0: drive home after this many idle seconds |
 | `allow_unknown` | false | plan only through mapped free space |

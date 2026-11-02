@@ -130,6 +130,8 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
   straight back into it, and the errand gave up and came home. Navigator now remembers the ultrasonic echoes across
   each beam when blocked (grown 0.3 m deep + 0.15 m berth, kept `us_memory_s` 60 s) for every plan; `blocked_after`
   5 s before replanning (YAML). test_us_blocker.py (box invisible to the LiDAR: drives around it; without the memory it fails).
+  Then: per-sensor side (each echo along its own beam -> log 'on the left/right/ahead'), outline keeps growing while
+  blocked and 15 s after (us_watch_s), echoes on mapped walls skipped, 5 cm cell memory (bounded); test: box on the right -> passes left.
 
 - 2026-11-01: head mode greeting (first touch, navigator `say` -> robot speaker) + errands (mission.js: go, door
   check, message, wait / until OK, back here (goto_pose of the start) / home / stay, spoken report; test_errand.py)

@@ -58,7 +58,7 @@ def make_nav(tmp_path, memory_s):
     return nav, clk
 
 
-def drive(nav, clk, pose, seconds, dt=0.05):
+def drive(nav, clk, pose, seconds, dt=0.05, track=None):
     x, y, yaw = pose
     v = w = 0.0
     closest = 9.0
@@ -76,6 +76,8 @@ def drive(nav, clk, pose, seconds, dt=0.05):
         y += v * math.sin(yaw) * dt
         yaw = wrap_angle(yaw + w * dt)
         clk.t += dt
+        if track is not None:
+            track.append((x, y))
         cx, cy = min(max(x, BOX[0]), BOX[2]), min(max(y, BOX[1]), BOX[3])
         closest = min(closest, math.hypot(x - cx, y - cy))
         if nav.state == 'IDLE' and not nav.queue.active and not nav.queue.queue:
@@ -92,11 +94,21 @@ def test_range_arc_spans_the_beam():
 
 def test_memory_expires(tmp_path):
     nav, clk = make_nav(tmp_path, 60.0)
+    nav._pose = (0.6, 1.0, 0.0)
     nav.update_us_world([(1.0, 1.0)])
-    nav.remember_us()
-    assert nav.us_memory() == [(1.0, 1.0)]
+    assert nav.remember_us() == 1
+    mem = nav.us_memory()
+    assert any(abs(x - 1.0) < 0.03 and abs(y - 1.0) < 0.03 for x, y in mem)
+    assert max(x for x, _ in mem) > 1.25                  # grown ~0.3 m deep, away from the robot
     clk.t = 61.0
     assert nav.us_memory() == []
+
+
+def test_echoes_on_mapped_walls_are_not_remembered(tmp_path):
+    nav, clk = make_nav(tmp_path, 60.0)
+    nav._pose = (4.6, 0.6, -math.pi / 2)
+    nav.update_us_world([(4.6, 0.06), (4.7, 0.07)])      # the floor's bottom wall (y 0 .. 0.05)
+    assert nav.remember_us() == 0 and nav.us_memory() == []
 
 
 def test_drives_around_a_box_only_the_ultrasonics_see(tmp_path):
@@ -107,7 +119,7 @@ def test_drives_around_a_box_only_the_ultrasonics_see(tmp_path):
     texts = ' | '.join(e['text'] for e in nav.events)
     assert math.hypot(x - 7.3, y - 3.0) < 0.25, (x, y, texts)
     assert nav.queue.history[-1].state == 'DONE', texts
-    assert 'ultrasonic blocker remembered' in texts
+    assert 'ultrasonic blocker ahead remembered' in texts, texts
     assert closest > 0.1, closest                      # never drove into the box
 
 
@@ -118,3 +130,18 @@ def test_without_the_memory_it_keeps_hitting_the_same_box(tmp_path):
     (x, y, _), _ = drive(nav, clk, (4.6, 3.0, 0.0), 240)
     assert nav.queue.history[-1].state == 'FAILED'
     assert x < BOX[0]
+
+
+def test_box_on_the_right_goes_round_the_left(tmp_path, monkeypatch):
+    """Box mostly right of the straight line: the right / centre sensors see it, the robot passes left."""
+    monkeypatch.setattr(sys.modules[__name__], 'BOX', (5.7, 2.45, 6.1, 3.1))
+    nav, clk = make_nav(tmp_path, 60.0)
+    nav.handle({'type': 'command', 'text': 'go to window'}, (4.6, 3.0, 0.0))
+    track = []
+    (x, y, _), closest = drive(nav, clk, (4.6, 3.0, 0.0), 240, track=track)
+    texts = ' | '.join(e['text'] for e in nav.events)
+    assert math.hypot(x - 7.3, y - 3.0) < 0.25, texts
+    assert closest > 0.1, closest
+    beside = [ty for tx, ty in track if 5.7 <= tx <= 6.1]
+    assert beside and min(beside) > 3.1, beside           # went past on the left (y up), not the right
+    assert 'ultrasonic blocker' in texts and 'remembered' in texts
