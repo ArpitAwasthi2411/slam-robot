@@ -106,7 +106,7 @@ const get = (p, o) => req(p, o);
 const post = (p, b = {}, o = {}) => req(p, { ...o, method: 'POST', body: b });
 async function nav(body) {
   // a command may go to the language model (a few seconds on a slow link); the AI test checks Groq end to end
-  const timeout = body && body.type === 'llm_test' ? 35000 : body && body.type === 'command' ? 20000 : 4000;
+  const timeout = body && body.type === 'llm_test' ? 35000 : body && body.type === 'command' ? 25000 : 4000;
   const r = await post('/api/nav', body, { timeout });
   if (r.ok === false) throw new Error(r.error || 'navigator refused');
   return r;
@@ -1584,6 +1584,14 @@ async function planCommand(text, fromVoice) {
       : L.error ? 'Understood offline (AI failed)' : 'Understood offline';
     out.innerHTML = `<span class="src">${src}.</span> ${esc(it.reply || '')} ${it.notes && it.notes.length ? `<span class="muted">${esc(it.notes.join(' '))}</span>` : ''}`;
     if (L.error) toast(`AI ${L.error.kind}${L.error.status ? ' ' + L.error.status : ''}: ${L.error.hint}`, true);
+    if (it.intent === 'chat') {                  // a question, not a trip: answer it in the conversation
+      const done = await nav({ type: 'command', text });           // same answer (remembered on the robot), logged once
+      const c = (done.interpretation || it), info = c.chat || {};
+      out.textContent = ''; $('#g-cmd-in').value = '';
+      chatAdd(text, c.reply || '', info, c.llm || L);
+      say(c.reply);
+      return;
+    }
     if (['stop', 'status', 'explain', 'find', 'confirm'].includes(it.intent)) {   // act at once: never delay a stop
       const done = await nav({ type: 'command', text });
       const ans = done.status || done.answer || (done.interpretation && done.interpretation.reply) || '';
@@ -1619,6 +1627,22 @@ async function planCommand(text, fromVoice) {
     if (fromVoice) say(it.reply ? `${it.reply} Shall I go?` : 'Shall I go?');
   } catch (err) { out.textContent = err.message; }
 }
+// the talk with the robot: your question, its answer, and where the answer came from
+function chatAdd(q, a, info, L) {
+  const from = info.offline ? (info.basis === 'knowledge' ? 'from the notebook (offline)' : 'offline')
+    : info.basis === 'knowledge' ? 'from the notebook' + ((info.sources || []).length ? ': ' + info.sources.map(x => x.title).join(', ') : '')
+    : info.basis === 'robot' ? 'about the robot' : info.basis === 'general' ? 'general knowledge, not checked' : info.basis === 'unknown' ? 'not in the notebook' : '';
+  const ms = L && L.used && fin(L.ms) ? ` · ${fmt(L.ms / 1000, 1)} s` : '';
+  const list = $('#g-chat');
+  list.insertAdjacentHTML('beforeend', `<li class="me">${esc(q)}</li><li class="bot">${esc(a)}${from ? `<small>${esc(from + ms)}</small>` : ''}</li>`);
+  while (list.children.length > 40) list.firstChild.remove();
+  $('#g-chat-wrap').hidden = false;
+  list.scrollTop = list.scrollHeight;
+}
+$('#g-chat-new').onclick = async () => {
+  $('#g-chat').innerHTML = ''; $('#g-chat-wrap').hidden = true;
+  try { await nav({ type: 'chat_forget' }); } catch (e) { /* the list is cleared anyway */ }
+};
 $('#g-cmd').onsubmit = e => { e.preventDefault(); planCommand($('#g-cmd-in').value, false); };
 $('#g-cmd-in').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); planCommand($('#g-cmd-in').value, false); } });
 
@@ -1725,7 +1749,7 @@ const lab = { wheelRanges: null, wheel: {}, wheelEdit: 0, wheelDirty: false, fol
   live: false, seq: 0, samples: [], frozen: null, test: 'straight', testResult: null, telemT: null };
 
 // Operate area: a list (hub) of the robot-team tools; each opens as a sub-page with a back button
-const SUBS = ['health', 'wheels', 'path', 'tests', 'ai', 'log', 'people'];
+const SUBS = ['health', 'wheels', 'path', 'tests', 'ai', 'know', 'log', 'people'];
 $$('[data-sub]').forEach(b => b.onclick = () => { haptic(8); S.lab = b.dataset.sub; labEnter(); });
 // Phone detector (lab): detect.html runs YOLO on this phone. In the APK it opens on a secure asset origin
 // (camera + WebAssembly); the robot's address and login go along so it can also use the robot's camera.
@@ -1758,6 +1782,7 @@ function lab_set(which) {
   if (was !== which) $('#p-more').scrollTop = 0;
   if (which === 'log') loadLog();
   if (which === 'ai') loadAI();
+  if (which === 'know') loadKnow();
   if (which === 'health' && S.st) renderStatus(S.st);
   if (which === 'path') loadFollower();
   if (which === 'people') loadPeople();
@@ -2047,6 +2072,61 @@ let logRows = [];
 // ---- AI commands: language model status, test button, every call with its error (navigator llm_log / llm_test)
 const AI_KIND = { ok: 'worked', error: 'failed', skipped: 'rules were sure', cached: 'remembered' };
 function aiAgo(t) { const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? `${Math.round(s)} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : clock(t); }
+// ---- Knowledge: the notebook the robot answers college questions from (admin edits, team reads)
+let KN = { entries: [], edit: null };
+function knowRender(k) {
+  KN.entries = k.entries || [];
+  const c = k.chat || {};
+  $('#hub-know').textContent = `${k.count} entr${k.count === 1 ? 'y' : 'ies'} written · ${k.built_in} built in`;
+  $('#kn-stats').innerHTML = [['Entries', k.count], ['Questions', c.asked || 0], ['By the AI', c.llm || 0], ['Offline', c.offline || 0], ['Trips from talk', c.actions || 0], ['Answers blocked', c.guarded || 0]]
+    .map(([a, b]) => `<div class="tile"><dt>${a}</dt><dd>${b}</dd></div>`).join('');
+  const admin = can('admin');
+  $('#kn-list').innerHTML = KN.entries.length ? KN.entries.map((e, i) => `<li>
+      <div class="l-top"><span>${esc(e.title)}</span>${e.built_in ? '<span class="pill-tag">built in</span>' : ''}</div>
+      <div>${esc(e.text)}</div>
+      ${e.tags && e.tags.length ? `<div class="l-sub">${esc(e.tags.join(' · '))}</div>` : ''}
+      ${admin && !e.built_in ? `<div class="row gap"><button class="btn small ghost" data-kn="edit" data-i="${i}">Edit</button><button class="btn small ghost" data-kn="del" data-i="${i}">Delete</button></div>` : ''}
+    </li>`).join('') : '<li class="empty">Nothing written yet.</li>';
+}
+async function loadKnow() {
+  try { knowRender((await nav({ type: 'knowledge' })).knowledge); }
+  catch (e) { $('#kn-list').innerHTML = `<li class="empty">${esc(e.message)}</li>`; }
+}
+function knowEdit(e) {
+  KN.edit = e ? e.id : null;
+  $('#kn-form-t').textContent = e ? 'Change the entry' : 'Add an entry';
+  $('#kn-save').textContent = e ? 'Save' : 'Add';
+  $('#kn-cancel').hidden = !e;
+  $('#kn-title').value = e ? e.title : ''; $('#kn-text').value = e ? e.text : ''; $('#kn-tags').value = e ? (e.tags || []).join(', ') : '';
+  if (e) $('#kn-title').focus();
+}
+$('#kn-refresh').onclick = loadKnow;
+$('#kn-cancel').onclick = () => knowEdit(null);
+$('#kn-form').onsubmit = async ev => {
+  ev.preventDefault();
+  const body = { title: $('#kn-title').value, text: $('#kn-text').value, tags: $('#kn-tags').value.split(',').map(x => x.trim()).filter(Boolean) };
+  try {
+    const r = await nav(KN.edit ? { type: 'knowledge_update', id: KN.edit, ...body } : { type: 'knowledge_add', ...body });
+    toast(KN.edit ? 'Saved' : 'Added'); haptic(15); knowEdit(null); knowRender(r.knowledge);
+  } catch (e) { toast(e.message, true); }
+};
+$('#kn-list').onclick = async ev => {
+  const b = ev.target.closest('[data-kn]'); if (!b) return;
+  const e = KN.entries[+b.dataset.i]; if (!e) return;
+  if (b.dataset.kn === 'edit') { knowEdit(e); return; }
+  if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Tap again to delete'; setTimeout(() => { b.dataset.sure = ''; b.textContent = 'Delete'; }, 3000); return; }
+  try { knowRender((await nav({ type: 'knowledge_remove', id: e.id })).knowledge); toast('Deleted'); } catch (err) { toast(err.message, true); }
+};
+$('#kn-try').onclick = async () => {
+  const q = $('#kn-q').value.trim(), out = $('#kn-hits'); if (!q) return;
+  try {
+    const hits = (await nav({ type: 'knowledge', q })).hits || [];
+    out.hidden = false;
+    out.innerHTML = hits.length ? '<h3>The robot would look at</h3>' + hits.map(h => `<p class="small"><b>${esc(h.title)}</b> <span class="muted">match ${Math.round(h.score * 100)} %</span><br>${esc(h.text)}</p>`).join('')
+      : '<p class="small">No entry fits this question. The robot would say it does not know yet: add an entry, or add the words people use as tags.</p>';
+  } catch (e) { toast(e.message, true); }
+};
+
 async function loadAI() {
   try {
     const r = await nav({ type: 'llm_log', limit: 40 });

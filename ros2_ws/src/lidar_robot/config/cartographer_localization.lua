@@ -26,7 +26,12 @@ options = {
 
   num_laser_scans = 1,
   num_multi_echo_laser_scans = 0,
-  num_subdivisions_per_laser_scan = 1,
+  -- The A1 takes ~0.14 s per turn. Sent as ONE scan, Cartographer treats every ray as measured at the same
+  -- instant, so while the robot turns (0.3 rad/s = 2.4 degrees per scan) walls 5 m away are smeared by 20 cm
+  -- and the map drifts sideways in turns. Cut each scan into 10 slices: each slice is placed with the
+  -- odometry pose of its own moment, then the 10 are matched together (num_accumulated_range_data below).
+  -- If Cartographer ever logs "Ignored subdivision", set both numbers back to 1.
+  num_subdivisions_per_laser_scan = 10,
   num_point_clouds = 0,
 
   lookup_transform_timeout_sec = 0.2,
@@ -48,7 +53,7 @@ TRAJECTORY_BUILDER_2D.use_imu_data = false
 TRAJECTORY_BUILDER_2D.min_range = 0.15            -- ignore hits on the robot body
 TRAJECTORY_BUILDER_2D.max_range = 8.0
 TRAJECTORY_BUILDER_2D.missing_data_ray_length = 8.5
-TRAJECTORY_BUILDER_2D.num_accumulated_range_data = 1
+TRAJECTORY_BUILDER_2D.num_accumulated_range_data = 10   -- = num_subdivisions_per_laser_scan (one full turn per match)
 TRAJECTORY_BUILDER_2D.submaps.num_range_data = 60
 
 -- odometry is decent, so a small correlative search is enough to absorb wheel slip
@@ -71,7 +76,11 @@ TRAJECTORY_BUILDER.pure_localization_trimmer = {
 POSE_GRAPH.optimize_every_n_nodes = 20
 POSE_GRAPH.constraint_builder.sampling_ratio = 0.3
 POSE_GRAPH.global_sampling_ratio = 0.01
-POSE_GRAPH.constraint_builder.min_score = 0.60
-POSE_GRAPH.constraint_builder.global_localization_min_score = 0.60
+POSE_GRAPH.constraint_builder.min_score = 0.62
+-- A match against a far-away part of the frozen map moves the robot's position on the map in one jump.
+-- Corridors and rows of identical doors look alike, so a weak far match is usually WRONG (the map seems to
+-- "shift" under the robot). Accept far matches only when they are clearly good; near ones stay easy.
+POSE_GRAPH.constraint_builder.global_localization_min_score = 0.68
+POSE_GRAPH.constraint_builder.max_constraint_distance = 10.
 
 return options

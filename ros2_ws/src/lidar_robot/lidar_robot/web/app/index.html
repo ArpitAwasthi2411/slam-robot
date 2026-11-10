@@ -308,12 +308,12 @@
     <div class="page-in stack-l">
       <div>
         <h1 class="title-l">Where should Pathik go?</h1>
-        <p class="muted small">Type or say it. You see the plan before the robot moves.</p>
+        <p class="muted small">Type or say it. You see the plan before the robot moves. You can also just ask a question.</p>
       </div>
       <div class="stack">
         <form id="g-cmd" class="bubble">
           <label for="g-cmd-in" class="sr-only">Command</label>
-          <textarea id="g-cmd-in" rows="2" autocomplete="off" placeholder="take this to Lab 3, wait 2 mins, then come back"></textarea>
+          <textarea id="g-cmd-in" rows="2" autocomplete="off" placeholder="take this to Lab 3, wait 2 mins, then come back · or ask: library timings?"></textarea>
           <button class="send" type="submit" aria-label="Plan it"><svg><use href="#i-arrow"/></svg></button>
         </form>
         <button id="g-voice" class="companion" aria-label="Tap and speak a command">
@@ -322,6 +322,10 @@
           <small id="g-voice-s">Pathik understands places, waits and “come back”</small>
         </button>
         <p id="g-reply" class="reply" role="status" aria-live="polite"></p>
+        <div id="g-chat-wrap" hidden>
+          <div class="row gap"><h3 class="grow">Conversation</h3><button id="g-chat-new" class="btn small ghost">New</button></div>
+          <ol id="g-chat" class="chat" aria-live="polite"></ol>
+        </div>
         <div id="g-plan" class="plan card" hidden></div>
       </div>
 
@@ -368,6 +372,7 @@
         <button class="g-row" id="hub-peak"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg><span class="grow"><b>Peak test</b><small>Everything the head phone does at once: speed, heat, battery, pass / fail</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" id="hub-detector"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg><span class="grow"><b>Phone detector</b><small>Lab: people detection running on this phone's camera</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" data-sub="ai"><svg class="ic" aria-hidden="true"><use href="#i-why"/></svg><span class="grow"><b>AI commands</b><small id="hub-ai">Language model status, test, every call with its error</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="g-row" data-sub="know"><svg class="ic" aria-hidden="true"><use href="#i-why"/></svg><span class="grow"><b>Knowledge</b><small id="hub-know">What Pathik tells people about the college and the department</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" data-sub="log"><svg class="ic" aria-hidden="true"><use href="#i-log"/></svg><span class="grow"><b>Mission log</b><small>Success rate, times, CSV export</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" data-sub="people" data-min="admin"><svg class="ic" aria-hidden="true"><use href="#i-people"/></svg><span class="grow"><b>People</b><small id="hub-people">Approve sign-ups, roles, passwords</small></span><span class="badge" id="hub-people-badge" hidden>0</span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
       </section>
@@ -467,6 +472,22 @@
       <div class="row gap"><input id="ai-text" class="grow" type="text" placeholder="Test sentence (optional)" aria-label="Test sentence"><button id="ai-test" class="btn primary">Test AI</button></div>
       <div class="card" id="ai-test-out" hidden></div>
       <ol id="ai-list" class="list loglist"><li class="empty">Loading…</li></ol>
+    </div>
+
+    <div class="page-in stack-l sub" id="lab-know" hidden>
+      <div class="sub-h"><button class="back" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button><h1 class="title-m grow">Knowledge</h1><button id="kn-refresh" class="btn small ghost">Refresh</button></div>
+      <p class="muted small">Pathik's notebook. Questions about the college are answered only from these entries, so it cannot make up a name or a timing. Write short, true facts: who, where, when. This robot is used by everyone: no phone numbers or private details.</p>
+      <dl id="kn-stats" class="tiles stats"></dl>
+      <div class="row gap"><input id="kn-q" class="grow" type="text" placeholder="Try a question: who is the HOD?" aria-label="Try a question"><button id="kn-try" class="btn">Try</button></div>
+      <div class="card" id="kn-hits" hidden></div>
+      <form id="kn-form" class="card stack" data-min="admin">
+        <h3 id="kn-form-t">Add an entry</h3>
+        <input id="kn-title" type="text" maxlength="80" placeholder="Title: Library timings" aria-label="Title" required>
+        <textarea id="kn-text" rows="3" maxlength="1200" placeholder="The library is open from 9 am to 5 pm on working days." aria-label="Text" required></textarea>
+        <input id="kn-tags" type="text" placeholder="Other words people use, with commas: books, reading room" aria-label="Tags">
+        <div class="row gap"><button type="button" id="kn-cancel" class="btn ghost" hidden>Cancel</button><button class="btn primary grow" type="submit" id="kn-save">Add</button></div>
+      </form>
+      <ul id="kn-list" class="list loglist"><li class="empty">Loading…</li></ul>
     </div>
 
     <div class="page-in stack-l sub" id="lab-people" hidden>

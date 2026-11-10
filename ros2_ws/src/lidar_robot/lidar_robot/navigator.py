@@ -41,7 +41,9 @@ from std_msgs.msg import Bool, Empty, String
 from tf2_ros import Buffer, TransformListener, TransformException
 
 from lidar_robot.commands import CommandParser
-from lidar_robot.llm import LLMLog, clean_key
+from lidar_robot.llm import GroqClient, LLMLog, clean_key
+from lidar_robot.chat import ChatAgent
+from lidar_robot.knowledge import Knowledge
 from lidar_robot.recovery import Recovery, RecoveryLLM
 from lidar_robot.docking import DockParams
 from lidar_robot.battery import BatteryMonitor
@@ -130,6 +132,9 @@ class NavigatorNode(Node):
         d('llm_timeout', 6.0)
         d('recovery_mode', 'llm')       # llm (LLM first, rules if no key/network) | rules | off (old behaviour)
         d('recovery_llm_model', 'openai/gpt-oss-120b')
+        d('chat_enabled', True)         # talk to the robot: college notebook + general questions (chat.py)
+        d('chat_model', 'openai/gpt-oss-120b')   # the bigger model converses and follows the rules better
+        d('knowledge_file', '')         # '' = knowledge.json next to places.json
         d('recovery_max_per_mission', 4)
         d('recovery_ask_timeout_s', 120.0)
         d('use_vision', True)           # camera people detection may slow / stop autonomous driving
@@ -142,6 +147,8 @@ class NavigatorNode(Node):
         self.cone = math.radians(float(g('front_cone_deg')))
         self.pose_timeout = float(g('pose_timeout'))
         self.map_tf_timeout = float(g('map_tf_timeout'))
+        self._last_corr = None           # last map->odom correction: a sudden change = the map 'jumped'
+        self._corr_jumps = []
         self.odom_frame = g('odom_frame')
 
         self.places = PlaceStore(g('places_file'))
@@ -150,6 +157,11 @@ class NavigatorNode(Node):
         parser = CommandParser(self.places, groq_api_key=key, model=str(g('llm_model')),
                                timeout=float(g('llm_timeout')), policy=str(g('llm_policy')), log=self.llm_log)
         self.parser = parser
+        kfile = str(g('knowledge_file')) or os.path.join(os.path.dirname(g('places_file')), 'knowledge.json')
+        self.knowledge = Knowledge(kfile)
+        self.chat = ChatAgent(GroqClient(key, model=str(g('chat_model')), timeout=float(g('llm_timeout')) + 2.0,
+                                         log=self.llm_log),
+                              self.knowledge, self.places, enabled=bool(g('chat_enabled')))
         self.planner_params = PlannerParams(robot_radius=float(g('robot_radius')),
                                             soft_radius=float(g('soft_radius')),
                                             allow_unknown=bool(g('allow_unknown')))
@@ -190,6 +202,7 @@ class NavigatorNode(Node):
                               mode=str(g('recovery_mode')),
                               max_per_mission=int(g('recovery_max_per_mission')),
                               ask_timeout_s=float(g('recovery_ask_timeout_s'))),
+            knowledge=self.knowledge, chat=self.chat,
             button_enabled=bool(g('button_enabled')), button_home_radius=float(g('button_home_radius')),
             button_gap_s=float(g('button_gap_s')), offline_home_s=float(g('offline_home_s')))
         self.core.localized = not bool(g('require_localization_confirm'))
@@ -394,7 +407,12 @@ class NavigatorNode(Node):
                 res['req_id'] = req.get('req_id')
                 self.resp_pub.publish(String(data=json.dumps(res)))
                 return
-            parsed = self.parser.parse(req.get('text', ''))
+            text = str(req.get('text', ''))
+            who = 'robot button' if req.get('source') == 'button' else str(req.get('by') or '')[:32]
+            pose = self._pose()
+            with self.core_lock:                        # a few plain facts about the robot for the conversation
+                ctx = self.core.chat_context(pose)
+            parsed = self.chat.handle(text, self.parser, user=who, ctx=ctx)
             err = (parsed.get('llm') or {}).get('error')
             if err:
                 self.get_logger().warn(f'LLM failed ({err["kind"]} {err.get("status") or ""}): '
@@ -403,7 +421,15 @@ class NavigatorNode(Node):
         except Exception as e:                          # parse() never raises, but be safe
             self.get_logger().error(f'LLM step failed: {e}')
             req = dict(req, _parsed=None)
-        self._answer(req)
+        res = self._answer(req)
+        try:                                            # plain commands join the talk too ("take me there" later)
+            it = (res or {}).get('interpretation') or {}
+            if it.get('intent') not in (None, 'chat', 'stop', 'refused') and not req.get('dry_run'):
+                said = res.get('answer') or res.get('status') or it.get('reply')
+                self.chat.remember('robot button' if req.get('source') == 'button' else str(req.get('by') or '')[:32],
+                                   str(req.get('text', '')), str(said or ''))
+        except Exception:
+            pass
 
     def _llm_test(self, req):
         """App 'Test AI' button: key/network/model check, then one real command through the LLM."""
@@ -440,6 +466,7 @@ class NavigatorNode(Node):
         res['req_id'] = req.get('req_id')
         self.resp_pub.publish(String(data=json.dumps(res)))
         self._publish_places()
+        return res
 
     # ---------------------------------------------------------------- loop
     def _lookup(self, parent, child):
@@ -469,6 +496,15 @@ class NavigatorNode(Node):
                 self.get_logger().warn(f'SLAM correction (map->odom) is {map_age:.1f} s old: is Cartographer '
                                        'running and keeping up?', throttle_duration_sec=10.0)
                 return None
+            last, self._last_corr = self._last_corr, correction
+            if last is not None:
+                # where the robot stands now, with the old and the new correction: the difference is how far
+                # SLAM just moved the robot on the map in one step (wrong re-match, loop closure, bad odometry)
+                a, b = compose_2d(last, odom_pose), compose_2d(correction, odom_pose)
+                d = math.hypot(b[0] - a[0], b[1] - a[1])
+                dyaw = abs(math.atan2(math.sin(b[2] - a[2]), math.cos(b[2] - a[2])))
+                if d > 0.30 or dyaw > math.radians(12):
+                    self._corr_jumps.append((d, dyaw))
             return compose_2d(correction, odom_pose)
         except TransformException:
             return None
@@ -483,6 +519,9 @@ class NavigatorNode(Node):
         front = min(front, self.us.front_clearance(self.half_width))
         try:
             with self.core_lock:
+                jumps, self._corr_jumps = self._corr_jumps, []
+                for d, dyaw in jumps:
+                    self.core.note_map_jump(d, dyaw)
                 v, w = self.core.step(pose, front, self.dt)
                 active = bool(self.core.queue.active)
             v, w = self.vision.apply(v, w, time.monotonic())   # camera: people in the path

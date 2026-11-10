@@ -142,3 +142,30 @@ Also look at the picture: straight walls straight, corridors parallel, room wall
   map, so be strict.
 - Offline only: 4 threads, `optimize_every_n_nodes 20`, `constraint_builder.sampling_ratio 0.5`,
   `max_num_final_iterations 400`.
+
+
+## Why the map shifts, and what now guards against it (Nov 2026 review)
+
+Cartographer is set to trust the odometry strongly (that is what keeps corridors straight), so every odometry
+fault moves the map. The review found these, in the order they hurt:
+
+| Cause | What happened | Fix |
+|---|---|---|
+| Garbled serial line that still parses (`ODM,12,13` → `ODM,12,913`) | one packet = a 15 cm jump or a sudden turn | `odom_guard.py`: a packet faster than the robot can move (1.2 m/s, 6 rad/s) is dropped and counted |
+| Lost serial line | the ticks it carried are gone: the robot drove further than the map thinks | firmware **v2.8** sends running totals in every line; the bridge takes the change from the totals. Old firmware still works, without this protection |
+| Gyro zero drifts as the board warms up (measured once at power-up) | heading creeps while standing; the map rotates slowly | heading is held while the wheels are still; the leftover drift is learned and removed while driving |
+| Gyro glitch on I2C | one impossible turn rate | that packet's heading comes from the wheels; the firmware keeps the last rate through one bad read |
+| A1 scan takes 0.14 s but was treated as one instant | walls smear by ~20 cm at 5 m in turns | scan cut into 10 slices, each placed at its own moment (`num_subdivisions_per_laser_scan = 10`) |
+| Wrong far match in localization (look-alike corridors) | the robot's position on the map jumps | far matches need a higher score (0.68), search limited to 10 m |
+| Not visible in the app | nobody knew it happened | every jump over 0.3 m / 12° is logged ("my position on the map jumped…") and counted in the status (`map_jumps`) |
+
+Watch these on the robot: `ros2 topic echo /robot/status --once | grep odom_guard` shows `rejected`,
+`recovered_packets`, `gyro_glitches` and the learned `gyro_bias`. All zero = a clean link. `rejected` or
+`recovered_packets` climbing while driving = serial noise (motor wires next to the UART wires, weak ground).
+
+Still to do on the robot, not in code: wheel_separation 0.294 and laser_x measured in the lab must be in the
+YAML on the Pi; the IMU must answer on I2C (without it the heading comes from the wheels and every slip in a
+turn bends the map); `gyro_scale` from the Spin test.
+
+The Cartographer changes are **not tested on the robot yet**. If mapping gets worse or Cartographer logs
+"Ignored subdivision", set `num_subdivisions_per_laser_scan` and `num_accumulated_range_data` back to 1.

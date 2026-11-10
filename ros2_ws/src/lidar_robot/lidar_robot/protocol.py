@@ -1,6 +1,10 @@
 """ESP32 <-> Pi serial protocol (pure Python, no ROS imports, unit-tested).
 
 ESP32 -> Pi:  ODM,<dl>,<dr>,<dt_ms>,<mode>[,<dyaw_urad>]   (v1: 4 fields, v2.2+IMU: 6 fields)
+              v2.8 adds running totals so a lost line loses no motion:
+              ODM,<dl>,<dr>,<dt_ms>,<mode>,<dyaw_urad>,<total_l>,<total_r>,<total_yaw_urad>
+              (no IMU: dyaw and total_yaw are the letter x). Always 8 fields, so a cut-off line is never
+              mistaken for another layout.
               IMU,<gz_mrad_s>,<ax_mm_s2>,<ay_mm_s2>,<az_mm_s2>
               US,<left_mm>,<center_mm>,<right_mm>       (0 = no echo)
               INFO,<text>          (INFO,TUNE,<kp>,<ki>,<pwm_min>,<max_mms>,<accel> since v2.3)
@@ -29,6 +33,9 @@ class OdomPacket:
     dt_ms: int
     mode: int = -1
     dyaw: Optional[float] = None       # rad, from the gyro (None if no IMU)
+    tl: Optional[int] = None           # running tick totals (firmware v2.8+), int32, may wrap
+    tr: Optional[int] = None
+    tyaw: Optional[int] = None         # running gyro yaw, micro-rad, int32, may wrap
 
 
 @dataclass
@@ -83,17 +90,22 @@ def parse_line(line: str) -> Optional[Packet]:
         return None
     if line.startswith('ODM,'):
         parts = line.split(',')
-        if len(parts) not in (4, 5, 6):
+        n = len(parts) - 1                       # fields after 'ODM'
+        if n not in (3, 4, 5, 8):
             return None
         try:
             dl, dr, dt = int(parts[1]), int(parts[2]), int(parts[3])
-            mode = int(parts[4]) if len(parts) >= 5 else -1
-            dyaw = int(parts[5]) * 1e-6 if len(parts) == 6 else None
+            mode = int(parts[4]) if n >= 4 else -1
+            dyaw = int(parts[5]) * 1e-6 if (n in (5, 8) and parts[5] != 'x') else None
+            tl = tr = tyaw = None
+            if n == 8:
+                tl, tr = int(parts[6]), int(parts[7])
+                tyaw = int(parts[8]) if parts[8] != 'x' else None
         except ValueError:
             return None
         if dt <= 0 or dt > 60000:
             return None
-        return OdomPacket(dl, dr, dt, mode, dyaw)
+        return OdomPacket(dl, dr, dt, mode, dyaw, tl, tr, tyaw)
     if line.startswith('IMU,'):
         parts = line.split(',')
         if len(parts) != 5:

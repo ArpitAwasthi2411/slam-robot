@@ -204,7 +204,7 @@ class VoiceNode(Node):
         if kind == 'button':
             req['source'] = 'button'          # the navigator applies the home-spot rules to these
         self.req_pub.publish(String(data=json.dumps(req)))
-        ev[0].wait(6.0)
+        ev[0].wait(20.0)          # a spoken question may go to the language model
         self._waiting.pop(rid, None)
         return ev[1]
 

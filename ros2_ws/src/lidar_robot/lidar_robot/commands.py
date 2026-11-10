@@ -275,14 +275,19 @@ class CommandParser:
         d = self.client.chat_json('command', [{'role': 'system', 'content': system},
                                               {'role': 'user', 'content': text}],
                                   schema=self._schema(names), max_tokens=500, input_text=text)
+        return self.build(d, text, 'llm')
+
+    def build(self, d, text, source='llm'):
+        """Model output -> a checked command. Everything a model says passes through here (also the
+        conversation agent's actions): unknown places dropped, numbers clamped, urgent only with urgent words."""
         intent = d.get('intent', 'unknown')
         if intent not in INTENTS:
             intent = 'unknown'
         notes, names = [], []
         if intent in ('explain', 'confirm', 'dock'):
-            return self._result(intent, [], 1, str(d.get('reply', ''))[:200], 'llm', [])
+            return self._result(intent, [], 1, str(d.get('reply', ''))[:200], source, [])
         if intent == 'find':
-            res = self._result('find', [], 1, '', 'llm', [])
+            res = self._result('find', [], 1, '', source, [])
             res['query'] = str(d.get('query') or '')[:80]
             return res
         for raw in d.get('targets', []) or []:
@@ -304,7 +309,7 @@ class CommandParser:
             prio = 2                                            # only when the words say so
             notes.append('LLM asked for urgent priority without an urgent word; used high instead')
         reply = str(d.get('reply', ''))[:200]
-        res = self._result(intent, names, prio, reply, 'llm', notes)
+        res = self._result(intent, names, prio, reply, source, notes)
         if intent == 'navigate':
             from_text = self._steps_from_text(text, [self.places.target(n) for n in names])
             waits = d.get('waits') if isinstance(d.get('waits'), list) else []

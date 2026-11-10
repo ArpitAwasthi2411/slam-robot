@@ -93,7 +93,8 @@ class NavigatorCore:
                  clock=time.monotonic, tuning_path=None, footprint=None, data_dir=None, battery=None,
                  localtime=time.localtime, confirm_timeout_s=300.0, dock_offset=0.55, recovery=None,
                  dock_front=True, dock_params=None, dock_without_marker=False,
-                 button_enabled=True, button_home_radius=0.6, button_gap_s=30.0, offline_home_s=120.0):
+                 button_enabled=True, button_home_radius=0.6, button_gap_s=30.0, offline_home_s=120.0,
+                 knowledge=None, chat=None):
         self.places = places
         self.planner = Planner(planner_params or PlannerParams())
         self.follower = PathFollower(follower_params or FollowerParams())
@@ -163,6 +164,8 @@ class NavigatorCore:
         self.dock_without_marker = dock_without_marker   # no camera: use the map pose of the dock instead
         self._marker = (None, -1e9)
         self.localtime = localtime
+        self.knowledge = knowledge                       # the notebook the conversation agent answers from
+        self.chat = chat                                 # chat.ChatAgent (the node runs it off this thread)
         self.rec = recovery or Recovery(mode='off')      # error recovery (off unless the node/sim turns it on)
         self.rec.clock = clock
         # the push-to-talk button ON the robot: no login, so it only starts trips from the home spot
@@ -364,9 +367,21 @@ class NavigatorCore:
                 return r
             if t == 'command':
                 parsed = req.get('_parsed')            # the node parsed it off the control loop (LLM may be slow)
+                if parsed is None and self.chat is not None:      # simulator / tests: do it here
+                    who = 'robot button' if req.get('source') == 'button' else self._req_by
+                    parsed = self.chat.handle(req.get('text', ''), self.parser, user=who,
+                                              ctx=self.chat_context(pose))
                 if req.get('source') == 'button':
                     return self._button_command(req.get('text', ''), pose, parsed=parsed)
                 return self._command(req.get('text', ''), dry_run=bool(req.get('dry_run')), parsed=parsed)
+            if t == 'chat_context':                    # what the conversation agent may know about me right now
+                return {'ok': True, 'context': self.chat_context(pose)}
+            if t == 'chat_forget':
+                if self.chat:
+                    self.chat.forget(self._req_by)
+                return {'ok': True}
+            if t in ('knowledge', 'knowledge_add', 'knowledge_update', 'knowledge_remove'):
+                return self._knowledge_request(t, req)
             if t == 'llm_log':                         # app: Operate -> AI commands (staff+ see it)
                 return self._llm_log(int(req.get('limit', 30)))
             if t == 'button_settings':
@@ -658,9 +673,61 @@ class NavigatorCore:
                 self.handle({'type': 'confirm'})
             else:
                 res['interpretation']['reply'] = 'Nothing is waiting for an OK.' 
+        if c['intent'] == 'chat':
+            self._log(f'asked "{text[:80]}" -> answered from {(c.get("chat") or {}).get("basis") or "?"}'
+                      + (' (robot button)' if source == 'button' else ''))
+            return res
         self._log(f'command "{text}" -> {c["intent"]} {c["targets"]} via {c["source"]}'
                   + (' (robot button)' if source == 'button' else ''))
         return res
+
+    # ---------------------------------------------------------------- conversation (chat.py)
+    def chat_context(self, pose=None):
+        """The robot's own state in a few plain facts, for the conversation agent."""
+        pose = pose or self._pose
+        b = self.battery.info() if self.battery else {}
+        m = self.queue.active
+        robot = {'state': self.state, 'doing': self.status()['message'],
+                 'battery_pct': b.get('pct'), 'charging': b.get('charging') or None,
+                 'docked': self.docked or None,
+                 'going_to': m.current.label if (m and m.current) else None,
+                 'tasks_waiting': len(self.queue.queue) or None,
+                 'emergency_stop': self.estopped or None}
+        here = self.places.room_at(*pose[:2]) if pose else None
+        if here:
+            robot['in_room'] = here['name']
+        if self.state != IDLE or self.last_failure:
+            try:
+                robot['why'] = explain(self)['answer'][:300]
+            except Exception:
+                pass
+        places = []
+        for p in self.places.places:
+            d = round(math.hypot(p['x'] - pose[0], p['y'] - pose[1]), 1) if pose else None
+            places.append({'name': p['name'], 'm': d})
+        return {'robot': robot, 'places': places, 'pose': list(pose[:2]) if pose else None}
+
+    def _knowledge_request(self, t, req):
+        k = self.knowledge
+        if k is None:
+            return {'ok': False, 'error': 'the notebook is not available'}
+        try:
+            if t == 'knowledge_add':
+                e = k.add(req.get('title'), req.get('text'), req.get('tags') or [])
+                self._log(f'notebook: added "{e["title"]}"' + (f' by {self._req_by}' if self._req_by else ''))
+            elif t == 'knowledge_update':
+                e = k.update(str(req.get('id', '')), req.get('title'), req.get('text'), req.get('tags'))
+                self._log(f'notebook: changed "{e["title"]}"' + (f' by {self._req_by}' if self._req_by else ''))
+            elif t == 'knowledge_remove':
+                k.remove(str(req.get('id', '')))
+                self._log('notebook: deleted an entry' + (f' by {self._req_by}' if self._req_by else ''))
+            elif req.get('q'):                         # try a question against the notebook (the app's search box)
+                return {'ok': True, 'hits': [{'score': s, **e} for s, e in k.search(str(req['q']), limit=5)]}
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        out = k.summary()
+        out['chat'] = dict(self.chat.stats) if self.chat else None
+        return {'ok': True, 'knowledge': out}
 
     # ---------------------------------------------------------------- the voice button on the robot
     def _at_home(self, pose):
@@ -716,7 +783,7 @@ class NavigatorCore:
             if self.state == CONFIRM:
                 return self._command(text, parsed=c, source='button')
             return refuse('Nothing is waiting for an OK.')
-        if intent in ('status', 'explain', 'find', 'unknown'):  # answers only, nothing moves
+        if intent in ('status', 'explain', 'find', 'unknown', 'chat'):  # answers only, nothing moves
             return self._command(text, parsed=c, source='button')
         # navigate / return_home / dock: starts the robot moving
         if not self._at_home(pose):
@@ -1588,6 +1655,14 @@ class NavigatorCore:
     def _set(self, state, message):
         self.state, self.message = state, message
 
+    def note_map_jump(self, d, dyaw):
+        """SLAM moved the robot on the map in one step (from the node). Counted and shown: many of these
+        = the map is being displaced (bad odometry, look-alike corridors, a wrong start position)."""
+        self.map_jumps = getattr(self, 'map_jumps', 0) + 1
+        self.last_map_jump = {'t': time.time(), 'm': round(d, 2), 'deg': round(math.degrees(dyaw), 1)}
+        self._log(f'my position on the map jumped {d:.2f} m / {math.degrees(dyaw):.0f} deg '
+                  f'(SLAM re-matched the map; jump {self.map_jumps} this run)', 'warn')
+
     def _log(self, text, level='info'):
         self.events.insert(0, {'t': round(time.time(), 1), 'text': text, 'level': level})
         del self.events[40:]
@@ -1600,6 +1675,7 @@ class NavigatorCore:
         return {
             'state': self.state, 'message': self.message, 'estop': self.estopped, 'hold': self.hold,
             'localized': self.localized, 'last_failure': self.last_failure,
+            'map_jumps': getattr(self, 'map_jumps', 0), 'last_map_jump': getattr(self, 'last_map_jump', None),
             'goal': (None if not (m and m.current) else
                      {'label': m.current.label, 'x': m.current.x, 'y': m.current.y, 'yaw': m.current.yaw}),
             'path': _decimate(remaining), 'distance': None if dist is None else round(dist, 2),

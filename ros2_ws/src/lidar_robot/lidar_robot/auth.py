@@ -297,7 +297,9 @@ class UserStore:
 # /api/nav request types a staff member may send: go somewhere, call/stop, ask, look up
 STAFF_NAV = {'goto_place', 'goto_room', 'command', 'preview', 'cancel', 'resume', 'go_home', 'go_dock',
              'confirm', 'explain', 'find', 'search', 'schedule_list', 'mission_log',
-             'recovery_answer'}           # the robot asks whoever is there ("ask a person")
+             'recovery_answer',           # the robot asks whoever is there ("ask a person")
+             'knowledge', 'chat_forget'}  # read the robot's notebook; start a new conversation
+ADMIN_NAV = {'knowledge_add', 'knowledge_update', 'knowledge_remove'}   # what the robot tells people
 
 
 def required_role(method, path, body=None):
@@ -313,7 +315,8 @@ def required_role(method, path, body=None):
         # anyone logged in can STOP the robot; releasing the stop needs the robot team
         return 'staff' if (body or {}).get('on', True) else 'operator'
     if path == '/api/nav':
-        return 'staff' if (body or {}).get('type') in STAFF_NAV else 'operator'
+        t = (body or {}).get('type')
+        return 'admin' if t in ADMIN_NAV else ('staff' if t in STAFF_NAV else 'operator')
     if path == '/api/voice':
         return 'staff'         # "talk to the robot": the robot's own microphone, like the voice button on it
     return 'operator'          # driving, goals, maps, relocalize, ESP32 tuning, tests

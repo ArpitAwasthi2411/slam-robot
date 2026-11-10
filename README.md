@@ -11,7 +11,7 @@ internet) or RViz. Wheel-encoder odometry comes from an ESP32.
 |---|---|
 | Compute | Raspberry Pi 4, Ubuntu 22.04, ROS 2 Humble (headless) |
 | LiDAR | Slamtec RPLiDAR A1M8, 360°, 10 Hz, 12 m |
-| Low-level | ESP32-S3-DevKitC-1, firmware v2.7 (`firmware/robot_esp32s3`, on the Pi's GPIO UART `/dev/ttyAMA0`) or classic ESP32, v2.5 (`firmware/robot_esp32_classic`, USB): motor PWM, quadrature encoders, PI wheel-speed loop, RC input, docking mode, I2C scan |
+| Low-level | ESP32-S3-DevKitC-1, firmware v2.8 (`firmware/robot_esp32s3`, on the Pi's GPIO UART `/dev/ttyAMA0`) or classic ESP32, v2.5 (`firmware/robot_esp32_classic`, USB): motor PWM, quadrature encoders, PI wheel-speed loop, RC input, docking mode, I2C scan |
 | Drive | 2 × DC gear motors with encoders (~4970 ticks/rev), BTS7960 H-bridges, 125 mm wheels, 300 mm track |
 | Manual | FlySky FS-i6 + FS-iA6 receiver (always overrides software) |
 | Extra sensors (v2.2) | MPU-6050 gyro (heading), 3× HC-SR04 (low obstacles), mushroom e-stop (hardware cut + sense): [hardware/sensors.md](hardware/sensors.md) |
@@ -56,7 +56,7 @@ stale SLAM pose → goal controller stops in 0.6 s.
 ## Repository layout
 
 ```
-firmware/robot_esp32s3/      ESP32-S3 sketch v2.7 (the robot's board; Pi link on the GPIO UART)
+firmware/robot_esp32s3/      ESP32-S3 sketch v2.8 (the robot's board; Pi link on the GPIO UART)
 firmware/robot_esp32_classic/ classic ESP32 sketch v2.5 (USB link)   · firmware/robot_esp32/: legacy v2.2
 ros2_ws/src/lidar_robot/     ROS 2 package (ament_python)
   lidar_robot/               esp32_bridge, navigator, dashboard, goal_controller, vision, voice (+ pure-Python logic:

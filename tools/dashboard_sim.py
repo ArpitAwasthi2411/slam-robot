@@ -21,7 +21,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'ros2_ws', 'src', 'lidar_robot'))
 
 from lidar_robot.auth import UserStore                           # noqa: E402
+from lidar_robot.chat import ChatAgent                            # noqa: E402
 from lidar_robot.commands import CommandParser                    # noqa: E402
+from lidar_robot.knowledge import Knowledge                       # noqa: E402
+from lidar_robot.llm import GroqClient                            # noqa: E402
 from lidar_robot.docking import DockParams, synth_observation      # noqa: E402
 from lidar_robot.dashboard_server import DashboardServer          # noqa: E402
 from lidar_robot.explorer import MapAutoSaver                    # noqa: E402
@@ -53,6 +56,16 @@ ROOMS = [
     ('HOD office', [[0.1, 5.1], [5.0, 5.1], [5.0, 8.9], [0.1, 8.9]], ['printer', 'files']),
     ('Faculty room', [[5.1, 5.1], [10.0, 5.1], [10.0, 8.9], [5.1, 8.9]], ['coffee machine', 'lockers']),
     ('Seminar hall', [[10.1, 5.1], [13.9, 5.1], [13.9, 8.9], [10.1, 8.9]], ['stage', 'speakers', 'chairs']),
+]
+
+# Made-up notebook entries for the simulated floor (the real ones are written in the app: Operate -> Knowledge)
+SAMPLE_KNOWLEDGE = [
+    ('Department office timings', 'The department office on the simulated floor is open from 9:30 am to 4:30 pm, '
+     'Monday to Saturday. It is closed on the second Saturday of the month.', ['office', 'timing', 'open']),
+    ('Project lab rules', 'The project lab can be used by final-year students until 6 pm. Sign the register at the '
+     'door and switch off the soldering stations before leaving.', ['lab', 'rules', 'project']),
+    ('About the department', 'This is a simulated Computer Science floor used for testing Pathik. It has '
+     'classrooms, labs, a library corner and staff rooms.', ['department', 'cse', 'about']),
 ]
 
 PLACES = [
@@ -144,9 +157,20 @@ class SimBackend:
                                                 model=os.environ.get('RECOVERY_MODEL', 'openai/gpt-oss-120b')),
                                 mode=os.environ.get('RECOVERY_MODE', 'llm'))
         self.dock_params = DockParams()
+        # the notebook + conversation agent, with a few made-up entries for the simulated floor
+        kfile = os.path.join(sim_dir, 'knowledge.json')
+        if os.path.exists(kfile):
+            os.remove(kfile)
+        self.knowledge = Knowledge(kfile)
+        for title, text, tags in SAMPLE_KNOWLEDGE:
+            self.knowledge.add(title, text, tags)
+        self.chat = ChatAgent(GroqClient(os.environ.get('GROQ_API_KEY'),
+                                         model=os.environ.get('CHAT_MODEL', 'openai/gpt-oss-120b'),
+                                         log=parser.log),
+                              self.knowledge, self.places)
         self.nav = NavigatorCore(self.places, parser=parser, dwell_s=2.0, footprint=FP, data_dir=sim_dir, clock=clock,
                                  tuning_path=os.path.join(maps, 'sim_tuning.json'), recovery=recovery,
-                                 dock_params=self.dock_params)
+                                 dock_params=self.dock_params, knowledge=self.knowledge, chat=self.chat)
         # scripted trouble (tools/eval_recovery.py): [x, y, radius, until_t] obstacles, and position dropouts
         self.blocks = []
         self.pose_drop_until = -1.0

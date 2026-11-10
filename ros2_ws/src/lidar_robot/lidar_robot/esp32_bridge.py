@@ -44,6 +44,7 @@ from lidar_robot.protocol import (parse_line, OdomPacket, InfoPacket, ImuPacket,
                                   format_velocity, format_stop, format_estop, format_dock,
                                   format_i2c_scan)
 from lidar_robot.tuning import clamp_values, WHEEL_RANGES
+from lidar_robot.odom_guard import OdomGuard
 
 
 RESET_HINTS = {
@@ -90,6 +91,11 @@ class Esp32Bridge(Node):
         self.odom = DiffDriveOdometry(float(g('wheel_radius')), self.sep,
                                       float(g('ticks_per_rev_left')),
                                       float(g('ticks_per_rev_right')))
+
+        # cleans the packets before they become /odom: garbled lines, lost lines, gyro drift (odom_guard.py)
+        self.guard = OdomGuard(self.odom.wheel_radius, self.odom.ticks_per_rev_left,
+                               self.odom.ticks_per_rev_right, self.sep,
+                               gyro_scale=float(g('gyro_scale')))
 
         self.lock = threading.Lock()
         self.ser = None
@@ -310,6 +316,7 @@ class Esp32Bridge(Node):
             if pkt.text.startswith('READY'):
                 reason = pkt.text.split('reset=', 1)[1].split()[0] if 'reset=' in pkt.text else '?'
                 self.last_reset_reason = reason
+                self.guard.reset_totals()                    # its tick totals start again from zero
                 if time.monotonic() - self.opened_at > 2.0:   # not just the banner at our own open
                     self._event('resets', f'ESP32 rebooted while running (reset reason: {reason}). '
                                           + RESET_HINTS.get(reason, ''))
@@ -337,10 +344,21 @@ class Esp32Bridge(Node):
         if self.last_rx and now_t - self.last_rx > 1.0 and now_t - self.opened_at > 2.0:
             self._event('gaps', f'no data from the ESP32 for {now_t - self.last_rx:.1f} s, port stayed open '
                                 '(ESP32 busy/reset without banner, USB stall, or this Pi overloaded)')
+        if not self.use_imu_yaw:
+            pkt.dyaw = None
+        clean = self.guard.update(pkt, now_t)
+        if clean is None:                                   # faster than the robot can move: a garbled line
+            self.get_logger().warn(f'ignored an impossible odometry packet (dl={pkt.dl} dr={pkt.dr} '
+                                   f'dt={pkt.dt_ms} ms): serial noise on the ESP32 link',
+                                   throttle_duration_sec=5.0)
+            with self.lock:
+                self.rx_count += 1
+                self.last_rx = now_t
+            return
+        dl, dr, dt, gyro = clean
         with self.lock:
-            gyro = pkt.dyaw * self.gyro_scale if (self.use_imu_yaw and pkt.dyaw is not None) else None
             self.yaw_source = 'gyro' if gyro is not None else 'wheels'
-            x, y, th, v, w = self.odom.update(pkt.dl, pkt.dr, pkt.dt_ms / 1000.0, gyro)
+            x, y, th, v, w = self.odom.update(dl, dr, dt, gyro)
             self.rx_count += 1
             self.last_rx = now_t
             self.esp_mode = pkt.mode
@@ -571,6 +589,7 @@ class Esp32Bridge(Node):
                          'v': round(self.odom.v, 3), 'w': round(self.odom.w, 3),
                          'turns': round(self.odom.theta_total / (2 * math.pi), 3)},
                 'yaw_source': self.yaw_source,
+                'odom_guard': dict(self.guard.stats, gyro_bias=round(self.guard.bias, 5)),
                 'imu_ok': time.monotonic() - self.last_imu < 1.0,
                 'us': ([None if r is None else round(r, 3) for r in self.us]
                        if time.monotonic() - self.last_us < 1.0 else None),

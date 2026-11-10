@@ -89,7 +89,12 @@ class FakeEsp32:
 
     def drive_by_hand(self, metres):
         """Robot pushed forward by hand: raw ticks, no command."""
-        os.write(self.master, f'ODM,{round(metres * TICKS_PER_M)},{round(metres * TICKS_PER_M)},20,0\n'.encode())
+        # 0.5 m/s in 20 ms packets, like a real push (one 0.5 m packet is impossible: the bridge rejects it)
+        total, step = round(metres * TICKS_PER_M), round(0.01 * TICKS_PER_M)
+        while total > 0:
+            n = min(step, total)
+            os.write(self.master, f'ODM,{n},{n},20,0\n'.encode())
+            total -= n
 
     def unplug(self):
         self.running = False

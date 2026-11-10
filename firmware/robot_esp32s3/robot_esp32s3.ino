@@ -39,7 +39,7 @@
  *
  * SERIAL PROTOCOL (115200 baud, newline-terminated ASCII)
  *  ESP32 -> Pi
- *    ODM,<dl>,<dr>,<dt_ms>,<mode>[,<dyaw_urad>]   mode 0=IDLE 1=RC 2=PI 3=ESTOP
+ *    ODM,<dl>,<dr>,<dt_ms>,<mode>,<dyaw_urad|x>,<total_l>,<total_r>,<total_yaw_urad|x>   mode 0=IDLE 1=RC 2=PI 3=ESTOP
  *    IMU,<gz_mrad_s>,<ax_mm_s2>,<ay_mm_s2>,<az_mm_s2>
  *    US,<left_mm>,<center_mm>,<right_mm>   0 = no echo / out of range
  *    INFO,<text>
@@ -54,6 +54,8 @@
  *    W  save them to flash (kept after power-off)      X  back to factory defaults
  *    T,1 / T,0  stream / stop  SPD,<tgtL>,<measL>,<pwmL>,<tgtR>,<measR>,<pwmR>  (50 Hz)
  *    ESP32 -> Pi:  INFO,TUNE,<kp>,<ki>,<pwm_min>,<max_mms>,<accel>
+ *  v2.8 odometry totals: every ODM line also carries running tick totals (and the running gyro yaw), so a
+ *       line lost on the serial link loses no motion on the Pi; gyro keeps integrating through an I2C error.
  *  v2.7 front docking + IMU check:
  *    D,1 / D,0  docking mode: the front ultrasonic stop drops from US_STOP_MM to US_STOP_DOCK_MM, only while
  *               the Pi refreshes D,1 (every < 2 s) and only at <= DOCK_MAX_MMS forward (creep speed)
@@ -90,7 +92,7 @@
 #else
   #define USB_PORT Serial
 #endif
-#define FW_VERSION "2.7"
+#define FW_VERSION "2.8"
 #include <Wire.h>
 #include <Preferences.h>     // tuning values survive reboot (ESP32 flash)
 #include <esp_system.h>      // esp_reset_reason(): why the ESP32 restarted (sent in the READY line)
@@ -275,6 +277,7 @@ WheelLoop loopL, loopR;
 
 long prev_left = 0, prev_right = 0;
 long report_dl = 0, report_dr = 0;       // ticks not yet sent to the Pi
+int32_t total_l = 0, total_r = 0;        // running totals since boot (wrap is fine: the Pi takes differences)
 unsigned long report_dt = 0;
 
 unsigned long last_control_ms = 0;
@@ -296,6 +299,7 @@ uint8_t imu_whoami = 0;
 float gyro_bias_z = 0;          // raw LSB
 float gz_rad_s = 0, ax_ms2 = 0, ay_ms2 = 0, az_ms2 = 0;
 double yaw_accum = 0;           // rad integrated since last ODM
+double yaw_total = 0;           // rad integrated since boot
 unsigned long last_imu_us = 0;
 uint8_t imu_fail = 0;
 
@@ -407,6 +411,7 @@ void imuUpdate() {
   int16_t gz;
   if (!imuSample(gz)) {
     if (++imu_fail > 20) { imu_ok = false; LINK.printf("INFO,IMU lost (I2C errors)\n"); }
+    else { yaw_accum += gz_rad_s * dt; yaw_total += gz_rad_s * dt; }   // one bad read: keep turning at the last rate
     return;
   }
   imu_fail = 0;
@@ -414,6 +419,7 @@ void imuUpdate() {
   gz_rad_s = IMU_YAW_SIGN * (gz - gyro_bias_z) * LSB_TO_RAD;
   if (fabsf(gz_rad_s) < 0.003f) gz_rad_s = 0;    // tiny dead band against residual drift
   yaw_accum += gz_rad_s * dt;
+  yaw_total += gz_rad_s * dt;
 #endif
 }
 
@@ -1062,16 +1068,20 @@ void loop() {
   // ---- odometry to Pi (never blocks the control loop) ----
   report_dl += dl;
   report_dr += dr;
+  total_l += (int32_t)dl;
+  total_r += (int32_t)dr;
   report_dt += dt_ms;
-  if (LINK.availableForWrite() >= 80) {
+  if (LINK.availableForWrite() >= 112) {
     if (imu_ok) {
-      LINK.printf("ODM,%ld,%ld,%lu,%u,%ld\n", report_dl, report_dr, report_dt, (unsigned)mode,
-                  (long)(yaw_accum * 1e6));
+      LINK.printf("ODM,%ld,%ld,%lu,%u,%ld,%ld,%ld,%ld\n", report_dl, report_dr, report_dt, (unsigned)mode,
+                  (long)(yaw_accum * 1e6), (long)total_l, (long)total_r,
+                  (long)(int32_t)(int64_t)(yaw_total * 1e6));
       LINK.printf("IMU,%d,%d,%d,%d\n", (int)(gz_rad_s * 1000), (int)(ax_ms2 * 1000),
                   (int)(ay_ms2 * 1000), (int)(az_ms2 * 1000));
       yaw_accum = 0;
     } else {
-      LINK.printf("ODM,%ld,%ld,%lu,%u\n", report_dl, report_dr, report_dt, (unsigned)mode);
+      LINK.printf("ODM,%ld,%ld,%lu,%u,x,%ld,%ld,x\n", report_dl, report_dr, report_dt, (unsigned)mode,
+                  (long)total_l, (long)total_r);
     }
     report_dl = report_dr = 0;
     report_dt = 0;

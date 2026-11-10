@@ -385,6 +385,36 @@ function parse(text) {
   return { ...res, reply: 'I could not find a known place in that.' };
 }
 function target(name) { const p = places.places.find(q => q.name === name); if (p) return { label: p.name, x: p.x, y: p.y, yaw: p.yaw }; const r = places.rooms.find(q => q.name === name); return r ? roomTarget(r) : null; }
+// ---- demo notebook + a tiny offline "conversation" (the real robot uses the language model, chat.py)
+const KNOW_BUILT = [
+  { id: 'pathik-who', title: 'Who is Pathik', text: 'I am Pathik, an indoor campus service robot. I find my way with a laser scanner and a map of the building.', tags: ['name', 'robot'], built_in: true },
+  { id: 'pathik-can', title: 'What Pathik can do', text: 'I can guide you to a room, carry small things, visit several places in one trip, wait until someone presses OK, and tell you where a thing is kept.', tags: ['help', 'features'], built_in: true },
+];
+let KNOW = [
+  { id: 'k1', title: 'Department office timings', text: 'The department office on this demo floor is open from 9:30 am to 4:30 pm, Monday to Saturday.', tags: ['office', 'timing', 'open'] },
+  { id: 'k2', title: 'Project lab rules', text: 'The project lab can be used by final-year students until 6 pm. Sign the register at the door.', tags: ['lab', 'rules', 'project'] },
+], KNOW_N = 2, CHAT = { asked: 0, llm: 0, offline: 0, actions: 0, guarded: 0 };
+function knowSummary() { return { count: KNOW.length, built_in: KNOW_BUILT.length, entries: KNOW_BUILT.concat(KNOW.map(e => ({ ...e, built_in: false }))), chat: CHAT }; }
+function knowSearch(text) {
+  const words = norm(text).split(' ').filter(w => w.length > 2 && !['the', 'what', 'who', 'when', 'where', 'are', 'you', 'kya', 'hai', 'can', 'how'].includes(w));
+  return KNOW_BUILT.concat(KNOW).map(e => [words.filter(w => norm(e.title + ' ' + e.text + ' ' + (e.tags || []).join(' ')).includes(w)).length, e]).filter(x => x[0] > 0).sort((a, b) => b[0] - a[0]).slice(0, 3).map(x => x[1]);
+}
+function chatDemo(text, c) {
+  CHAT.asked++; CHAT.offline++;
+  const t = norm(text);
+  let reply, basis = 'robot', sources = [];
+  if (/^(hi|hello|hey|namaste)\b/.test(t)) reply = 'Hello! I am Pathik. Ask me about the college, or tell me where to go.';
+  else if (/who are you|your name|kaun ho/.test(t)) reply = KNOW_BUILT[0].text;
+  else if (/what can you do|kya kar sakte/.test(t)) { reply = KNOW_BUILT[1].text; basis = 'knowledge'; sources = [KNOW_BUILT[1]]; }
+  else {
+    const hit = knowSearch(text)[0];
+    if (hit) { reply = hit.text; basis = 'knowledge'; sources = [hit]; }
+    else { reply = "I don't know that yet. Someone from the robot team can add it to my notebook in the app (Operate, Knowledge)."; basis = 'unknown'; }
+  }
+  return { intent: 'chat', targets: [], priority: 1, reply, source: 'offline', notes: [], steps: [], then_home: false,
+    chat: { basis, sources: sources.map(e => ({ id: e.id, title: e.title })), offline: true, flags: [] }, llm: { used: false, why: 'demo: no language model' } };
+}
+
 function explain() {
   const m = N.active, goal = m ? m.stops[m.next].label : 'the goal';
   let a;
@@ -445,7 +475,8 @@ function navReq(q) {
     case 'check_path': { const pts = densify(q.points || []); const L = plen(pts); return { ok: true, path: pts.filter((_, i) => i % 2 === 0).map(p => [+p[0].toFixed(3), +p[1].toFixed(3)]), length: +L.toFixed(2), blocked: [], eta_s: Math.round(L / 0.16) }; }
     case 'follow_path': { const pts = densify(q.points || []); const e = pts[pts.length - 1]; const r = enqueue([{ label: q.label || 'drawn path', x: e[0], y: e[1], yaw: null, path: pts }], 1, 'dashboard', `drawn path ${plen(pts).toFixed(1)} m`, q.replace); const m = [N.active, ...N.queue].find(x => x && x.id === r.mission.id); m.repeat = +q.repeat || 0; return r; }
     case 'command': {
-      const c = parse(q.text);
+      let c = parse(q.text);
+      if (c.intent === 'unknown' || (/\?$|^(what|when|who|why|which|how|kya|kaun|kab)\b/i.test(q.text.trim()) && !/\b(go|take|bring|deliver)\b/i.test(q.text))) c = chatDemo(q.text, c);
       const res = { ok: true, interpretation: c };
       if (q.dry_run) {
         let steps = [];
@@ -477,6 +508,11 @@ function navReq(q) {
     case 'schedule_enable': N.schedules.forEach(s => { if (s.id === +q.id) s.enabled = !!q.on; }); return { ok: true, schedules: schedSummary() };
     case 'schedule_list': return { ok: true, schedules: schedSummary() };
     case 'mission_log': return { ok: true, missions: N.log.slice(-(q.n || 50)).reverse(), stats: stats() };
+    case 'knowledge': if (q.q) return { ok: true, hits: knowSearch(q.q).map(e => ({ score: 0.8, ...e })) }; return { ok: true, knowledge: knowSummary() };
+    case 'knowledge_add': { if (!(q.title || '').trim() || !(q.text || '').trim()) throw new Error('a title and some text are needed'); KNOW.push({ id: 'k' + (++KNOW_N), title: q.title.trim(), text: q.text.trim(), tags: q.tags || [] }); return { ok: true, knowledge: knowSummary() }; }
+    case 'knowledge_update': { const e = KNOW.find(x => x.id === q.id); if (!e) throw new Error('no such entry'); Object.assign(e, { title: q.title.trim(), text: q.text.trim(), tags: q.tags || [] }); return { ok: true, knowledge: knowSummary() }; }
+    case 'knowledge_remove': { KNOW = KNOW.filter(x => x.id !== q.id); return { ok: true, knowledge: knowSummary() }; }
+    case 'chat_forget': return { ok: true };
     case 'llm_log': {           // the demo robot has no Groq key: shows what the page looks like with a few calls
       const t = Date.now() / 1000;
       return { ok: true, llm: { policy: 'smart', recovery: { mode: 'llm', model: 'openai/gpt-oss-120b' },

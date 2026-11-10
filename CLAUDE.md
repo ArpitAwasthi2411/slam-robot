@@ -47,7 +47,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Software map
 
-- `firmware/robot_esp32s3/` **v2.7** (S3, RGB status LED `L,r,g,b,ms`, Pi link on UART1 pins 47/8 + echo on USB,
+- `firmware/robot_esp32s3/` **v2.8** (ODM lines carry running tick/yaw totals; S3, RGB status LED `L,r,g,b,ms`, Pi link on UART1 pins 47/8 + echo on USB,
   only well-formed command lines accepted, docking mode `D,1`, I2C scan `I`), `firmware/robot_esp32_classic/` v2.5.
   Serial protocol 115200 text: ESP→Pi `ODM, IMU, US, BAT, BMP, SPD, INFO`; Pi→ESP `V P S E R C G ? K W X T L D I`
   (`lidar_robot/protocol.py`).
@@ -121,10 +121,21 @@ Open problems / TODO (priority order):
 6. LLM (commands + recovery) fixed in code 2026-11-10 (`docs/llm.md`): deploy, then app Operate → AI commands →
    Test AI with the real key; run `tools/eval_commands.py` / `eval_recovery.py` with the key for the report.
 7. Install Docker on the Pi (make the GHCR package public first).
+8. Conversation agent + map fixes (2026-11-10): flash firmware v2.8, deploy, write the notebook in the app, run
+   `tools/eval_chat.py` with the key; map one corridor and check `odom_guard` in /robot/status and the jump log.
 
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-11-10 (later): conversation agent (chat.py, docs/chat.md): notebook of college facts (knowledge.py,
+  ~/maps/knowledge.json, app Operate → Knowledge, admin edits), questions routed away from the command path
+  ("library timings?" no longer drives), one strict-JSON call with notebook + places + robot state + 6 turns of
+  memory, optional second lookup, guards (source enum, numbers must be in the notes, trips via CommandParser.build),
+  offline read-out, app conversation thread on Send, tools/eval_chat.py, test_chat.py. Map displacement review
+  (docs/mapping.md last section): odom_guard.py (impossible packets dropped, lost lines recovered from totals,
+  heading held when still + gyro drift learned), firmware S3 **v2.8** (ODM totals; reflash), scan unwarping
+  (10 subdivisions) + stricter far matches in localization (untested on the robot), map-jump log + counter.
 
 - 2026-11-10: LLM never worked: Groq retired llama-3.x (16 Aug 2026) -> openai/gpt-oss-20b / -120b (old names
   remapped), Cloudflare 1010 blocked the Python-urllib User-Agent (now pathik-robot/1.0, voice too), errors hidden.
