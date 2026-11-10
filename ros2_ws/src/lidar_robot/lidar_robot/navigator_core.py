@@ -363,9 +363,12 @@ class NavigatorCore:
                 r['mission'] = m.summary()
                 return r
             if t == 'command':
+                parsed = req.get('_parsed')            # the node parsed it off the control loop (LLM may be slow)
                 if req.get('source') == 'button':
-                    return self._button_command(req.get('text', ''), pose)
-                return self._command(req.get('text', ''), dry_run=bool(req.get('dry_run')))
+                    return self._button_command(req.get('text', ''), pose, parsed=parsed)
+                return self._command(req.get('text', ''), dry_run=bool(req.get('dry_run')), parsed=parsed)
+            if t == 'llm_log':                         # app: Operate -> AI commands (staff+ see it)
+                return self._llm_log(int(req.get('limit', 30)))
             if t == 'button_settings':
                 if 'enabled' in req:
                     self.button_enabled = bool(req['enabled'])
@@ -686,7 +689,17 @@ class NavigatorCore:
             why = 'stop and OK only (trips start from the home spot)'
         return {'enabled': self.button_enabled, 'at_home': at_home, 'message': why}
 
-    def _button_command(self, text, pose):
+    def _llm_log(self, limit=30):
+        log = getattr(self.parser, 'log', None)
+        client = getattr(self.parser, 'client', None)
+        out = log.snapshot(max(1, min(60, limit))) if log else {'totals': {}, 'calls': [], 'last_error': None}
+        out['config'] = client.config() if client else {'key': None, 'key_problem': 'no_key'}
+        out['policy'] = getattr(self.parser, 'policy', 'off')
+        rec = getattr(self.rec, 'llm', None)
+        out['recovery'] = {'mode': self.rec.mode, 'model': getattr(rec, 'model', None)}
+        return {'ok': True, 'llm': out}
+
+    def _button_command(self, text, pose, parsed=None):
         """Spoken through the button on the robot (no login). Anywhere: stop, OK at a 'wait for OK' stop,
         questions. Trips: only from the home spot, normal priority, one per button_gap_s."""
         def refuse(reply):
@@ -695,7 +708,7 @@ class NavigatorCore:
                                                                      'reply': reply, 'source': 'policy'}}
         if not self.button_enabled:
             return refuse("My voice button is turned off. Please use the Pathik app.")
-        c = self.parser.parse(text)
+        c = parsed or self.parser.parse(text)
         intent = c['intent']
         if intent == 'stop':                                   # safety: always
             return self._command(text, parsed=c, source='button')

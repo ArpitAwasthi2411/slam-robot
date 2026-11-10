@@ -24,8 +24,8 @@ sudo systemctl restart robot
 | `ROBOT_USER=...` / `ROBOT_PASSWORD=...` | the **MCP server** logs in to the robot with this account (`scripts/mcp_server.py`); put them in the MCP client's config on the laptop, not on the Pi | a Pathik account (staff is enough to send/ask; operator to drive) | the MCP tools report "login needed" |
 | `PATHIK_PORT=8080` (optional) | dashboard port used by the scripts | – | 8080 |
 
-Model names are settings, not secrets: `llm_model` (default `llama-3.1-8b-instant`), `recovery_llm_model`
-(`llama-3.3-70b-versatile`) in `config/robot_params.yaml`, `stt_model` (`whisper-large-v3-turbo`) in the voice
+Model names are settings, not secrets: `llm_model` (default `openai/gpt-oss-20b`; Groq retired llama-3.x on 16 Aug 2026), `recovery_llm_model`
+(`openai/gpt-oss-120b`) in `config/robot_params.yaml`, `stt_model` (`whisper-large-v3-turbo`) in the voice
 section; `RECOVERY_MODEL` / `RECOVERY_MODE` env vars for `tools/eval_recovery.py` and the simulator.
 
 ## Accounts (not keys)

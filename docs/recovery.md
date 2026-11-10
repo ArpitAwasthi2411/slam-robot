@@ -13,7 +13,7 @@ Code: `lidar_robot/recovery.py` (menu, validation, rules, LLM client), `navigato
    battery (% and level), time of day, robot position and room, **history of this place** (earlier failures
    there and what worked), tries already used, detour candidates (saved places from which the stop is
    reachable, with route lengths), and the list of actions that are possible right now.
-3. **Decide** (`recovery_mode: llm`): the LLM (Groq, `recovery_llm_model`, default `llama-3.3-70b-versatile`)
+3. **Decide** (`recovery_mode: llm`): the LLM (Groq, `recovery_llm_model`, default `openai/gpt-oss-120b`)
    gets the context and must answer JSON `{"action", "params", "reason", "say"}`. It runs in a thread, so the
    control loop keeps running (robot stopped). If there is no key, no internet, a timeout (6 s + 2 s), an
    action that is not on the menu or not possible now, or bad JSON, the **rules** decide instead and the
@@ -58,7 +58,7 @@ recovery at the same stop takes the n-th possible step:
 
 ```bash
 python3 tools/eval_recovery.py                     # none vs rules (vs llm when GROQ_API_KEY is set)
-GROQ_API_KEY=... python3 tools/eval_recovery.py --rounds 3 --model llama-3.3-70b-versatile
+GROQ_API_KEY=... python3 tools/eval_recovery.py --rounds 3 --model openai/gpt-oss-120b
 ```
 Six scripted failures on the simulated floor (person in the corridor 25 s, trolley parked in a door, door
 blocked 100 s, a saved place inside furniture, position lost 40 s, blocked corridor with a low battery).
@@ -73,7 +73,7 @@ fill the LLM column (Arpit, before the report / ROSCon numbers).
 
 ```yaml
 recovery_mode: llm                 # llm | rules | off
-recovery_llm_model: llama-3.3-70b-versatile
+recovery_llm_model: openai/gpt-oss-120b
 recovery_max_per_mission: 4
 recovery_ask_timeout_s: 120.0
 ```

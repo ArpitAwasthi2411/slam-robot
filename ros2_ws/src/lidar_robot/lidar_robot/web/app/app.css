@@ -638,3 +638,6 @@ body:not(.role-staff) [data-max="staff"] { display: none !important; }
 }
 #mm-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 #mm-btns[hidden], #mm-btns > [hidden] { display: none; }
+
+/* AI commands page: raw model output */
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-word; }

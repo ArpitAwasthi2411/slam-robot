@@ -3,8 +3,13 @@
 
     python3 tools/eval_commands.py                         # offline rule parser only
     GROQ_API_KEY=gsk_... python3 tools/eval_commands.py    # also the LLM (needs internet)
-    GROQ_API_KEY=... python3 tools/eval_commands.py --model llama-3.3-70b-versatile
+    GROQ_API_KEY=... python3 tools/eval_commands.py --model openai/gpt-oss-120b
     python3 tools/eval_commands.py --tests my_tests.json --csv results.csv
+    GROQ_API_KEY=... python3 tools/eval_commands.py --policies always,smart     # LLM-only vs the robot's mix
+
+Runs: offline rules; LLM "always" (every command to the LLM, rules only on failure); and "smart"
+(what the robot does: rules first, LLM only when the rules are unsure). Compare accuracy and latency.
+Every LLM error is printed with its reason (retired model, bad key, blocked, timeout ...).
 
 Uses the simulator's floor (places + rooms with contents, same as the app's demo) and the REAL
 parser from the robot (ros2_ws/src/lidar_robot/lidar_robot/commands.py). Each test says what the
@@ -85,18 +90,25 @@ def run(name, parser, tests, rows):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--tests', default=os.path.join(HERE, 'commands_test.json'))
-    ap.add_argument('--model', default='llama-3.1-8b-instant', help='Groq model name')
+    ap.add_argument('--model', default='openai/gpt-oss-20b', help='Groq model name')
     ap.add_argument('--csv')
+    ap.add_argument('--policies', default='always,smart', help='LLM runs: always, smart')
     args = ap.parse_args()
     tests = json.load(open(args.tests))
     places = floor()
     rows = []
-    run('offline rules', CommandParser(places), tests, rows)
+    run('offline rules', CommandParser(places, policy='off'), tests, rows)
     key = os.environ.get('GROQ_API_KEY')
     if key:
-        run(f'LLM {args.model}', CommandParser(places, groq_api_key=key, model=args.model), tests, rows)
-        print('\nNote: lines marked [rules] in the LLM run mean the LLM failed (no internet, quota, '
-              'bad JSON) and the robot fell back to the offline parser.')
+        for pol in args.policies.split(','):
+            p = CommandParser(places, groq_api_key=key, model=args.model, policy=pol.strip())
+            run(f'LLM {args.model} ({pol.strip()})', p, tests, rows)
+            errs = [c for c in p.log.items if c.get('outcome') == 'error']
+            if errs:
+                print(f'    {len(errs)} LLM errors, last: {errs[0]["kind"]} {errs[0].get("status") or ""} '
+                      f'{errs[0].get("detail", "")[:120]}\n    -> {errs[0]["hint"]}')
+        print('\nNote: lines marked [rules] in an LLM run mean the rules answered: in "smart" because they were '
+              'sure, otherwise because the LLM failed (see the errors above).')
     else:
         print('\n(Set GROQ_API_KEY to also test the LLM.)')
     if args.csv:

@@ -477,6 +477,22 @@ function navReq(q) {
     case 'schedule_enable': N.schedules.forEach(s => { if (s.id === +q.id) s.enabled = !!q.on; }); return { ok: true, schedules: schedSummary() };
     case 'schedule_list': return { ok: true, schedules: schedSummary() };
     case 'mission_log': return { ok: true, missions: N.log.slice(-(q.n || 50)).reverse(), stats: stats() };
+    case 'llm_log': {           // the demo robot has no Groq key: shows what the page looks like with a few calls
+      const t = Date.now() / 1000;
+      return { ok: true, llm: { policy: 'smart', recovery: { mode: 'llm', model: 'openai/gpt-oss-120b' },
+        config: { key: 'gsk_…demo', key_problem: null, model: 'openai/gpt-oss-20b', requested_model: 'llama-3.1-8b-instant', retired_model_replaced: true, fallbacks: ['openai/gpt-oss-120b'], timeout_s: 6 },
+        totals: { calls: 3, ok: 2, failed: 1, skipped: 4, cached: 1, avg_ms: 840 },
+        last_error: { t: t - 600, purpose: 'command', model: 'llama-3.1-8b-instant', kind: 'model', status: 404, detail: 'The model `llama-3.1-8b-instant` has been decommissioned', hint: 'The model is retired or unknown on Groq. Set llm_model / recovery_llm_model in robot_params.yaml (see console.groq.com/docs/models). The robot tried the fallback models.' },
+        last_test: null,
+        calls: [
+          { id: 4, t: t - 30, purpose: 'command', model: 'openai/gpt-oss-20b', outcome: 'skipped', input: 'go to the library', output: "rules: navigate ['Library']", ms: 0 },
+          { id: 3, t: t - 90, purpose: 'command', model: 'openai/gpt-oss-20b', outcome: 'ok', ms: 790, tokens: 612, input: 'yeh file HOD sir ko de do aur wapas aao', output: '{"intent":"navigate","targets":["HOD office"],"then_home":true,"priority":1}' },
+          { id: 2, t: t - 400, purpose: 'recovery', model: 'openai/gpt-oss-120b', outcome: 'ok', ms: 890, tokens: 840, input: 'blocked at Lab 3', output: '{"action":"wait_retry","params":{"wait_s":20}}' },
+          { id: 1, t: t - 600, purpose: 'command', model: 'llama-3.1-8b-instant', outcome: 'error', kind: 'model', status: 404, detail: 'The model `llama-3.1-8b-instant` has been decommissioned', hint: 'The model is retired or unknown on Groq.', ms: 210, input: 'drop this at the canteen' },
+        ] } };
+    }
+    case 'llm_test': return { ok: true, test: { ok: false, summary: 'Demo robot: no internet from the demo. On the real robot this checks the key, api.groq.com and the model, then runs one sample command.',
+      steps: [{ name: 'key', ok: true, text: 'key gsk_…demo found in the environment' }, { name: 'reach Groq', ok: false, text: 'demo mode: no network calls' }] } };
     case 'get_tune': return { ok: true, follower: { ...FOLLOW }, ranges: FOLLOW_R };
     case 'tune': Object.assign(FOLLOW, q.follower || {}); return { ok: true, follower: { ...FOLLOW }, saved: !!q.save };
     case 'search': { const n = norm(q.q); return { ok: true, results: places.places.filter(p => [p.name, ...p.aliases].some(a => norm(a).includes(n))).map(p => ({ score: 0.9, ...p })) }; }

@@ -367,6 +367,7 @@
         <button class="g-row" id="hub-head"><svg class="ic" aria-hidden="true"><use href="#i-bot"/></svg><span class="grow"><b>Head mode</b><small>This phone becomes the robot's face: kiosk with PIN, people detection for the Pi</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" id="hub-peak"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg><span class="grow"><b>Peak test</b><small>Everything the head phone does at once: speed, heat, battery, pass / fail</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" id="hub-detector"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg><span class="grow"><b>Phone detector</b><small>Lab: people detection running on this phone's camera</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="g-row" data-sub="ai"><svg class="ic" aria-hidden="true"><use href="#i-why"/></svg><span class="grow"><b>AI commands</b><small id="hub-ai">Language model status, test, every call with its error</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" data-sub="log"><svg class="ic" aria-hidden="true"><use href="#i-log"/></svg><span class="grow"><b>Mission log</b><small>Success rate, times, CSV export</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" data-sub="people" data-min="admin"><svg class="ic" aria-hidden="true"><use href="#i-people"/></svg><span class="grow"><b>People</b><small id="hub-people">Approve sign-ups, roles, passwords</small></span><span class="badge" id="hub-people-badge" hidden>0</span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
       </section>
@@ -456,6 +457,16 @@
       <dl id="l-stats" class="tiles stats"></dl>
       <ol id="l-list" class="list loglist"><li class="empty">Loading…</li></ol>
       <div class="row gap"><button id="l-refresh" class="btn grow">Refresh</button><button id="l-csv" class="btn primary grow">Export CSV</button></div>
+    </div>
+
+    <div class="page-in stack-l sub" id="lab-ai" hidden>
+      <div class="sub-h"><button class="back" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button><h1 class="title-m grow">AI commands</h1><button id="ai-refresh" class="btn small ghost">Refresh</button></div>
+      <p class="muted small">Commands go to the language model (Groq) only when the offline rules are unsure; "stop" never waits for it. Every call is listed here with its exact error and what to do.</p>
+      <div class="card" id="ai-status"><p class="muted">Loading…</p></div>
+      <dl id="ai-stats" class="tiles stats"></dl>
+      <div class="row gap"><input id="ai-text" class="grow" type="text" placeholder="Test sentence (optional)" aria-label="Test sentence"><button id="ai-test" class="btn primary">Test AI</button></div>
+      <div class="card" id="ai-test-out" hidden></div>
+      <ol id="ai-list" class="list loglist"><li class="empty">Loading…</li></ol>
     </div>
 
     <div class="page-in stack-l sub" id="lab-people" hidden>

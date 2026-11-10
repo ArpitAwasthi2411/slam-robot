@@ -70,7 +70,7 @@ def test_llm_path_and_hallucination_guard(tmp_path):
 def test_llm_failure_falls_back_to_rules(tmp_path):
     def broken(*a, **k):
         raise TimeoutError('no internet')
-    c = CommandParser(store(tmp_path), groq_api_key='x', http_post=broken).parse('go to library')
+    c = CommandParser(store(tmp_path), groq_api_key='x', http_post=broken, policy='always').parse('go to library')
     assert c['source'] == 'rules' and c['targets'] == ['Library']
     assert 'offline' in c['notes'][0]
 

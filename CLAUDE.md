@@ -84,7 +84,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-10-30**
+**Last updated: 2026-11-10**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -118,12 +118,20 @@ Open problems / TODO (priority order):
 4. Camera + people avoidance done in code (`docs/STEPS_camera.md`): run the two setup scripts on the Pi, tune stop_m/slow_m.
 5. Front docking with the ArUco marker done in code (`docs/docking.md`, firmware v2.7 `D` mode): measure
    `dock_contact_dist_m` + the camera mount, calibrate the camera, try on Yogit's dock.
-6. LLM error recovery: done in code (`docs/recovery.md`); needs the Groq-key eval run + a robot test.
+6. LLM (commands + recovery) fixed in code 2026-11-10 (`docs/llm.md`): deploy, then app Operate → AI commands →
+   Test AI with the real key; run `tools/eval_commands.py` / `eval_recovery.py` with the key for the report.
 7. Install Docker on the Pi (make the GHCR package public first).
 
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-11-10: LLM never worked: Groq retired llama-3.x (16 Aug 2026) -> openai/gpt-oss-20b / -120b (old names
+  remapped), Cloudflare 1010 blocked the Python-urllib User-Agent (now pathik-robot/1.0, voice too), errors hidden.
+  New llm.py (GroqClient: classified errors + hints, model fallback, strict json_schema with place enum, LLMLog,
+  diagnose()); commands.py llm_policy smart|always|off (rules first, stop never sent, 10 min cache, urgent clamp);
+  parse in a worker thread off the core lock; dashboard/app timeouts 16/20 s; app Operate → AI commands page
+  (status, last error, counters, Test AI, call log); test_llm.py; docs/llm.md.
 
 - 2026-11-02 (later): map mode in the app (Map tab card, map_mode.py): Freeze map (finish trajectory + write_state ->
   ~/maps/<name>.pbstream, then localization on it), Continue mapping (load the map unfrozen, keeps the frame),

@@ -41,6 +41,7 @@ from std_msgs.msg import Bool, Empty, String
 from tf2_ros import Buffer, TransformListener, TransformException
 
 from lidar_robot.commands import CommandParser
+from lidar_robot.llm import LLMLog, clean_key
 from lidar_robot.recovery import Recovery, RecoveryLLM
 from lidar_robot.docking import DockParams
 from lidar_robot.battery import BatteryMonitor
@@ -124,9 +125,11 @@ class NavigatorNode(Node):
         d('map_tf_timeout', 10.0)       # SLAM's map->odom correction may lag this much (it changes slowly)
         d('odom_frame', 'odom')
         d('require_localization_confirm', False)   # bringup sets true in slam_mode:=localization
-        d('llm_model', 'llama-3.1-8b-instant')
+        d('llm_model', 'openai/gpt-oss-20b')   # Groq; retired names are mapped to a current model (llm.py)
+        d('llm_policy', 'smart')        # smart: rules first, LLM only when unsure | always | off
+        d('llm_timeout', 6.0)
         d('recovery_mode', 'llm')       # llm (LLM first, rules if no key/network) | rules | off (old behaviour)
-        d('recovery_llm_model', 'llama-3.3-70b-versatile')
+        d('recovery_llm_model', 'openai/gpt-oss-120b')
         d('recovery_max_per_mission', 4)
         d('recovery_ask_timeout_s', 120.0)
         d('use_vision', True)           # camera people detection may slow / stop autonomous driving
@@ -142,8 +145,11 @@ class NavigatorNode(Node):
         self.odom_frame = g('odom_frame')
 
         self.places = PlaceStore(g('places_file'))
-        key = os.environ.get('GROQ_API_KEY')
-        parser = CommandParser(self.places, groq_api_key=key, model=g('llm_model'))
+        key = clean_key(os.environ.get('GROQ_API_KEY'))
+        self.llm_log = LLMLog()                  # every LLM call + its exact error, shown in the app
+        parser = CommandParser(self.places, groq_api_key=key, model=str(g('llm_model')),
+                               timeout=float(g('llm_timeout')), policy=str(g('llm_policy')), log=self.llm_log)
+        self.parser = parser
         self.planner_params = PlannerParams(robot_radius=float(g('robot_radius')),
                                             soft_radius=float(g('soft_radius')),
                                             allow_unknown=bool(g('allow_unknown')))
@@ -180,7 +186,8 @@ class NavigatorNode(Node):
                                    creep_speed=min(0.05, float(g('dock_creep_speed'))), tries=int(g('dock_tries')),
                                    backoff_m=float(g('dock_backoff_m')), volt_rise=float(g('dock_volt_rise')),
                                    cam_x=float(g('camera_x')), cam_y=float(g('camera_y')), cam_z=float(g('camera_z'))),
-            recovery=Recovery(llm=RecoveryLLM(key, model=str(g('recovery_llm_model'))), mode=str(g('recovery_mode')),
+            recovery=Recovery(llm=RecoveryLLM(key, model=str(g('recovery_llm_model')), log=self.llm_log),
+                              mode=str(g('recovery_mode')),
                               max_per_mission=int(g('recovery_max_per_mission')),
                               ask_timeout_s=float(g('recovery_ask_timeout_s'))),
             button_enabled=bool(g('button_enabled')), button_home_radius=float(g('button_home_radius')),
@@ -242,10 +249,15 @@ class NavigatorNode(Node):
         threading.Thread(target=self._watch_network, daemon=True).start()
         self.get_logger().info(
             f'navigator ready: {len(self.places.places)} places from {g("places_file")}, '
-            f'LLM {"ON (" + g("llm_model") + ")" if key else "OFF (offline rule parser)"}, '
+            f'LLM {"ON (" + parser.model + ", policy " + parser.policy + ")" if key else "OFF (offline rule parser)"}, '
             f'error recovery {g("recovery_mode")}'
-            + (f' ({g("recovery_llm_model")})' if key and g('recovery_mode') == 'llm' else
+            + (f' ({self.core.rec.llm.model})' if key and g('recovery_mode') == 'llm' else
                ' (rules: no GROQ_API_KEY)' if g('recovery_mode') == 'llm' else ''))
+        cfg = parser.client.config()
+        if cfg['retired_model_replaced']:
+            self.get_logger().warn(f'llm_model {cfg["requested_model"]} is retired on Groq: using {cfg["model"]}')
+        if key and cfg['key_problem']:
+            self.get_logger().warn(f'GROQ_API_KEY problem: {cfg["key_problem"]}')
 
     def _watch_network(self):
         while rclpy.ok():
@@ -369,6 +381,55 @@ class NavigatorNode(Node):
             return
         if not isinstance(req, dict):
             return
+        if req.get('type') in ('command', 'llm_test') and '_parsed' not in req:
+            # The LLM call can take seconds: never inside the 20 Hz control loop or the core lock.
+            threading.Thread(target=self._slow_request, args=(req,), daemon=True).start()
+            return
+        self._answer(req)
+
+    def _slow_request(self, req):
+        try:
+            if req['type'] == 'llm_test':
+                res = self._llm_test(req)
+                res['req_id'] = req.get('req_id')
+                self.resp_pub.publish(String(data=json.dumps(res)))
+                return
+            parsed = self.parser.parse(req.get('text', ''))
+            err = (parsed.get('llm') or {}).get('error')
+            if err:
+                self.get_logger().warn(f'LLM failed ({err["kind"]} {err.get("status") or ""}): '
+                                       f'{err.get("detail", "")[:160]} -> offline parser. {err["hint"]}')
+            req = dict(req, _parsed=parsed)
+        except Exception as e:                          # parse() never raises, but be safe
+            self.get_logger().error(f'LLM step failed: {e}')
+            req = dict(req, _parsed=None)
+        self._answer(req)
+
+    def _llm_test(self, req):
+        """App 'Test AI' button: key/network/model check, then one real command through the LLM."""
+        d = self.parser.client.diagnose()
+        sample = str(req.get('text') or 'take me to the first place on the map and then come back')
+        if d['ok']:
+            old = self.parser.policy
+            self.parser.policy = 'always'
+            self.parser._cache.clear()
+            try:
+                c = self.parser.parse(sample)
+            finally:
+                self.parser.policy = old
+            info = c.get('llm') or {}
+            d['sample'] = {'text': sample, 'intent': c['intent'], 'targets': c['targets'], 'source': c['source'],
+                           'reply': c.get('reply'), 'ms': info.get('ms'), 'error': info.get('error')}
+            if info.get('error'):
+                d['ok'] = False
+                d['summary'] = info['error']['hint']
+            else:
+                d['summary'] += f' Sample command understood in {info.get("ms")} ms.'
+        self.llm_log.last_test = {'t': round(time.time(), 1), 'ok': d['ok'], 'summary': d['summary']}
+        self.get_logger().info(f'LLM test: {d["summary"]}')
+        return {'ok': True, 'test': d}
+
+    def _answer(self, req):
         pose = self._pose()
         with self.core_lock:
             try:

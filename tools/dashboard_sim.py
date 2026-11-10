@@ -141,7 +141,7 @@ class SimBackend:
         # error recovery like on the robot: LLM when GROQ_API_KEY is set, otherwise the rules
         if recovery is None:
             recovery = Recovery(llm=RecoveryLLM(os.environ.get('GROQ_API_KEY'),
-                                                model=os.environ.get('RECOVERY_MODEL', 'llama-3.3-70b-versatile')),
+                                                model=os.environ.get('RECOVERY_MODEL', 'openai/gpt-oss-120b')),
                                 mode=os.environ.get('RECOVERY_MODE', 'llm'))
         self.dock_params = DockParams()
         self.nav = NavigatorCore(self.places, parser=parser, dwell_s=2.0, footprint=FP, data_dir=sim_dir, clock=clock,

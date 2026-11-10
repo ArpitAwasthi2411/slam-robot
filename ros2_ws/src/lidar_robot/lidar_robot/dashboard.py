@@ -494,7 +494,8 @@ class DashboardNode(Node):
         ev = threading.Event()
         self.pending[rid] = [ev, None]
         self.nav_req_pub.publish(String(data=json.dumps(req)))
-        ok = ev.wait(3.0)
+        # commands may go through the LLM (up to ~2 x llm_timeout with a model fallback); the AI test more
+        ok = ev.wait({'command': 16.0, 'llm_test': 30.0}.get(req.get('type'), 3.0))
         res = self.pending.pop(rid)[1]
         if not ok or res is None:
             return {'ok': False, 'error': 'navigator did not answer (is it running?)'}

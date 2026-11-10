@@ -74,7 +74,7 @@ in `~/robot.env`; otherwise (or if the LLM is slow / wrong) the rules decide. Ho
 What I'm doing / Why" and, when asked, the answer buttons. Settings: `recovery_*` in `robot_params.yaml`.
 
 Checks (robot running, a map with places, the app open on Home):
-1. `journalctl -u robot | grep "error recovery"` → `error recovery llm (llama-3.3-70b-versatile)` with the key,
+1. `journalctl -u robot | grep "error recovery"` → `error recovery llm (openai/gpt-oss-120b)` with the key,
    `(rules: no GROQ_API_KEY)` without it.
 2. **Person in the corridor**: send Pathik to a place; stand in front of it in a narrow spot for ~30 s. Home shows
    "Recovering", "Waiting N s, then trying again"; step aside: it carries on and the card says Recovered.

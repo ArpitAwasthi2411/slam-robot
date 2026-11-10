@@ -13,6 +13,7 @@ import json
 import math
 import os
 import time
+import urllib.error
 import urllib.request
 import uuid
 import wave
@@ -114,9 +115,20 @@ def multipart(fields, files):
 
 
 def _http_post(url, body, headers, timeout):
-    req = urllib.request.Request(url, data=body, method='POST', headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    # Groq's Cloudflare rejects Python's default "Python-urllib" User-Agent (403, error code 1010):
+    # always send our own. HTTP errors carry Groq's message, so the log says *why* (see llm.py).
+    from lidar_robot.llm import USER_AGENT, LLMError, classify_http
+    req = urllib.request.Request(url, data=body, method='POST', headers={'User-Agent': USER_AGENT, **headers})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        try:
+            payload = e.read()
+        except Exception:      # noqa: BLE001
+            payload = b''
+        kind, detail = classify_http(e.code, payload)
+        raise LLMError(kind, detail, e.code) from None
 
 
 # ------------------------------------------------------------------ engines
@@ -125,7 +137,8 @@ class GroqWhisper:
     name = 'groq'
 
     def __init__(self, key, model='whisper-large-v3-turbo', language=None, timeout=8.0, http_post=None):
-        self.key, self.model, self.language, self.timeout = key, model, language, timeout
+        from lidar_robot.llm import clean_key
+        self.key, self.model, self.language, self.timeout = clean_key(key), model, language, timeout
         self._post = http_post or _http_post
 
     def available(self):

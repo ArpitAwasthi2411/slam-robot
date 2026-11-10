@@ -1,6 +1,6 @@
 """Error recovery: when a mission step fails, pick ONE safe action from a fixed menu (pure Python, tested).
 
-    rec = Recovery(llm=RecoveryLLM(os.environ.get('GROQ_API_KEY'), model='llama-3.3-70b-versatile'))
+    rec = Recovery(llm=RecoveryLLM(os.environ.get('GROQ_API_KEY'), model='openai/gpt-oss-120b'))
     rec.start(context)            # robot is stopped; the LLM runs in a thread (rules answer at once)
     d = rec.poll()                # None while deciding, then {'action': 'wait_retry', 'params': {...}, ...}
 
@@ -15,7 +15,7 @@ import json
 import threading
 import time
 
-from lidar_robot.commands import GROQ_URL, _http_post_json
+from lidar_robot.llm import RECOVERY_MODEL, GroqClient
 
 MENU = {
     'wait_retry': {'help': 'stop, wait wait_s seconds (a person or a trolley may move), then plan again',
@@ -195,22 +195,29 @@ def describe(action, params, ctx, alt_label=None):
 
 
 class RecoveryLLM:
-    """Asks a Groq-hosted model for a decision. decide() raises on any problem (caller falls back)."""
+    """Asks a Groq-hosted model for a decision. decide() raises on any problem (caller falls back).
+    Every call (and its error, with the reason) lands in the shared LLM log shown in the app."""
 
-    def __init__(self, key, model='llama-3.3-70b-versatile', timeout=6.0, http_post=None):
-        self.key, self.model, self.timeout = key, model, timeout
-        self._post = http_post or _http_post_json
+    def __init__(self, key, model=RECOVERY_MODEL, timeout=6.0, http_post=None, log=None):
+        self.client = GroqClient(key, model=model, timeout=timeout, log=log, post=http_post)
+        self.timeout = timeout
+
+    @property
+    def key(self):
+        return self.client.key
+
+    @property
+    def model(self):
+        return self.client.model
 
     def decide(self, ctx):
         if not self.key:
             raise RuntimeError('no GROQ_API_KEY')
         public = {k: v for k, v in ctx.items() if k not in ('home_set', 'dock_set', 'going_home')}
-        body = {'model': self.model, 'temperature': 0, 'max_tokens': 220,
-                'response_format': {'type': 'json_object'},
-                'messages': [{'role': 'system', 'content': SYSTEM.format(menu=_menu_text())},
-                             {'role': 'user', 'content': json.dumps(public)}]}
-        resp = self._post(GROQ_URL, body, {'Authorization': f'Bearer {self.key}'}, self.timeout)
-        return json.loads(resp['choices'][0]['message']['content'])
+        return self.client.chat_json('recovery', [{'role': 'system', 'content': SYSTEM.format(menu=_menu_text())},
+                                                  {'role': 'user', 'content': json.dumps(public)}],
+                                     max_tokens=600, input_text=f'{ctx.get("failure", {}).get("code")} at '
+                                                                f'{ctx.get("failure", {}).get("place")}')
 
 
 class Recovery:

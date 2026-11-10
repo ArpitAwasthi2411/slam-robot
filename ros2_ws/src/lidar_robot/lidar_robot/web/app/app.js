@@ -105,7 +105,9 @@ async function req(path, { method = 'GET', body, timeout = 4000 } = {}) {
 const get = (p, o) => req(p, o);
 const post = (p, b = {}, o = {}) => req(p, { ...o, method: 'POST', body: b });
 async function nav(body) {
-  const r = await post('/api/nav', body);
+  // a command may go to the language model (a few seconds on a slow link); the AI test checks Groq end to end
+  const timeout = body && body.type === 'llm_test' ? 35000 : body && body.type === 'command' ? 20000 : 4000;
+  const r = await post('/api/nav', body, { timeout });
   if (r.ok === false) throw new Error(r.error || 'navigator refused');
   return r;
 }
@@ -1577,8 +1579,11 @@ async function planCommand(text, fromVoice) {
   try {
     const r = await nav({ type: 'command', text, dry_run: true });
     const it = r.interpretation || {}, p = r.plan || { steps: [] };
-    const src = it.source === 'llm' ? 'Understood by the language model' : 'Understood offline';
+    const L = it.llm || {};
+    const src = it.source === 'llm' ? `Understood by the language model${L.cached ? ' (remembered)' : fin(L.ms) ? ` in ${fmt(L.ms / 1000, 1)} s` : ''}`
+      : L.error ? 'Understood offline (AI failed)' : 'Understood offline';
     out.innerHTML = `<span class="src">${src}.</span> ${esc(it.reply || '')} ${it.notes && it.notes.length ? `<span class="muted">${esc(it.notes.join(' '))}</span>` : ''}`;
+    if (L.error) toast(`AI ${L.error.kind}${L.error.status ? ' ' + L.error.status : ''}: ${L.error.hint}`, true);
     if (['stop', 'status', 'explain', 'find', 'confirm'].includes(it.intent)) {   // act at once: never delay a stop
       const done = await nav({ type: 'command', text });
       const ans = done.status || done.answer || (done.interpretation && done.interpretation.reply) || '';
@@ -1720,7 +1725,7 @@ const lab = { wheelRanges: null, wheel: {}, wheelEdit: 0, wheelDirty: false, fol
   live: false, seq: 0, samples: [], frozen: null, test: 'straight', testResult: null, telemT: null };
 
 // Operate area: a list (hub) of the robot-team tools; each opens as a sub-page with a back button
-const SUBS = ['health', 'wheels', 'path', 'tests', 'log', 'people'];
+const SUBS = ['health', 'wheels', 'path', 'tests', 'ai', 'log', 'people'];
 $$('[data-sub]').forEach(b => b.onclick = () => { haptic(8); S.lab = b.dataset.sub; labEnter(); });
 // Phone detector (lab): detect.html runs YOLO on this phone. In the APK it opens on a secure asset origin
 // (camera + WebAssembly); the robot's address and login go along so it can also use the robot's camera.
@@ -1752,6 +1757,7 @@ function lab_set(which) {
   SUBS.forEach(n => { $('#lab-' + n).hidden = n !== which; });
   if (was !== which) $('#p-more').scrollTop = 0;
   if (which === 'log') loadLog();
+  if (which === 'ai') loadAI();
   if (which === 'health' && S.st) renderStatus(S.st);
   if (which === 'path') loadFollower();
   if (which === 'people') loadPeople();
@@ -2038,6 +2044,47 @@ function drawCharts() { drawWheelChart(); drawTestChart(); }
 
 // ------------------------------------------------------------------ mission log (evaluation)
 let logRows = [];
+// ---- AI commands: language model status, test button, every call with its error (navigator llm_log / llm_test)
+const AI_KIND = { ok: 'worked', error: 'failed', skipped: 'rules were sure', cached: 'remembered' };
+function aiAgo(t) { const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? `${Math.round(s)} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : clock(t); }
+async function loadAI() {
+  try {
+    const r = await nav({ type: 'llm_log', limit: 40 });
+    const L = r.llm || {}, c = L.config || {}, t = L.totals || {}, e = L.last_error;
+    const keyTxt = c.key_problem === 'no_key' ? 'No key on the robot' : c.key_problem === 'bad_key_format' ? `Key ${c.key || ''} does not look like gsk_…` : `Key ${c.key || 'set'}`;
+    const ok = !c.key_problem && (!e || (L.calls || []).some(x => x.outcome === 'ok' && x.t > e.t));
+    $('#hub-ai').textContent = c.key_problem ? 'No AI: offline rules only' : e && !ok ? `Last call failed: ${e.kind}` : `${c.model} · ${L.policy}`;
+    $('#ai-status').innerHTML = `
+      <div class="row gap"><span class="dot ${ok ? 'ok' : c.key_problem ? '' : 'bad'}"></span><b class="grow">${esc(ok ? 'AI ready' : c.key_problem ? 'AI off: offline rules only' : 'AI has a problem')}</b><span class="pill-tag">${esc(L.policy || '')}</span></div>
+      <p class="small">${esc(keyTxt)} · commands: <b>${esc(c.model || '–')}</b>${c.retired_model_replaced ? ` <span class="muted">(${esc(c.requested_model)} is retired)</span>` : ''} · recovery: <b>${esc((L.recovery || {}).model || '–')}</b> (${esc((L.recovery || {}).mode || '')})</p>
+      ${e ? `<p class="small"><b>Last error</b> ${esc(aiAgo(e.t))}: ${esc(e.kind)}${e.status ? ' ' + e.status : ''} — ${esc(e.detail || '')}<br><span class="muted">${esc(e.hint || '')}</span></p>` : ''}
+      ${L.last_test ? `<p class="small muted">Last test ${esc(aiAgo(L.last_test.t))}: ${esc(L.last_test.summary)}</p>` : ''}`;
+    $('#ai-stats').innerHTML = [['LLM calls', `${t.calls || 0}`], ['Worked', `${t.ok || 0}`], ['Failed', `${t.failed || 0}`],
+      ['Avg time', fin(t.avg_ms) ? `${fmt(t.avg_ms / 1000, 2)} s` : '–'], ['Rules were sure', `${t.skipped || 0}`], ['Remembered', `${t.cached || 0}`]]
+      .map(([k, v]) => `<div class="tile"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
+    const calls = L.calls || [];
+    $('#ai-list').innerHTML = calls.length ? calls.map(x => `
+      <li class="${x.outcome === 'error' ? 'FAILED' : x.outcome === 'ok' ? 'DONE' : ''}"><span class="l-top"><span>${esc(x.purpose)}: ${esc(x.input || '')}</span><span>${esc(AI_KIND[x.outcome] || x.outcome)}</span></span>
+      <span class="l-sub">${esc(aiAgo(x.t))} · ${esc(x.model || '')}${fin(x.ms) && x.ms ? ` · ${x.ms} ms` : ''}${x.tokens ? ` · ${x.tokens} tokens` : ''}${x.fallback ? ' · fallback model' : ''}</span>
+      ${x.outcome === 'error' ? `<span class="l-sub"><b>${esc(x.kind)}${x.status ? ' ' + x.status : ''}</b>: ${esc(x.detail || '')}<br>${esc(x.hint || '')}</span>` : x.output ? `<span class="l-sub mono">${esc(String(x.output).slice(0, 300))}</span>` : ''}</li>`).join('')
+      : '<li class="empty muted">No commands yet.</li>';
+  } catch (err) { toast(err.message, true); }
+}
+$('#ai-refresh').onclick = loadAI;
+$('#ai-test').onclick = async () => {
+  const b = $('#ai-test'), out = $('#ai-test-out');
+  b.disabled = true; out.hidden = false; out.innerHTML = '<p class="muted">Testing Groq: key, network, model, one sample command…</p>';
+  try {
+    const r = await nav({ type: 'llm_test', text: $('#ai-text').value.trim() || undefined });
+    const d = r.test || {};
+    out.innerHTML = `<p><b>${esc(d.ok ? 'Works' : 'Problem')}</b>: ${esc(d.summary || '')}</p><ol class="small">${(d.steps || []).map(st =>
+      `<li>${st.ok ? '✓' : '✗'} <b>${esc(st.name)}</b>: ${esc(st.text)}</li>`).join('')}</ol>${d.sample ? `<p class="small">“${esc(d.sample.text)}” → ${esc(d.sample.intent)} ${esc((d.sample.targets || []).join(' → '))} <span class="muted">(${esc(d.sample.source)}${fin(d.sample.ms) ? `, ${d.sample.ms} ms` : ''})</span></p>` : ''}`;
+    haptic(d.ok ? 20 : 60);
+  } catch (err) { out.innerHTML = `<p><b>Problem</b>: ${esc(err.message)}</p>`; }
+  b.disabled = false;
+  loadAI();
+};
+
 async function loadLog() {
   try {
     const r = await nav({ type: 'mission_log', n: 100 });

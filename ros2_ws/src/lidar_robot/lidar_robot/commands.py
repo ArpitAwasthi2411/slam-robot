@@ -3,23 +3,36 @@
     parser = CommandParser(place_store, groq_api_key=os.environ.get('GROQ_API_KEY'))
     cmd = parser.parse("urgent: take this to the HOD office and then lab 3")
     -> {'intent': 'navigate', 'targets': ['HOD office', 'Lab 3'], 'priority': 3,
-        'reply': '...', 'source': 'llm' | 'rules', 'notes': [...]}
+        'reply': '...', 'source': 'llm' | 'rules', 'notes': [...], 'llm': {...}}
 
-Fault tolerance (the gap in cloud-only systems like ELLMER):
-  * no API key / no internet / timeout / bad JSON  -> rule-based parser, still works offline
-  * LLM names a place that is not on the map        -> dropped (hallucination guard), noted
+How a command is understood (policy, default "smart"):
+  * "stop" and friends never wait for the network: the rules answer at once (safety).
+  * smart: the offline rules go first; when they are sure (a known place, home, dock, status, OK ...)
+    that answer is used with zero latency. Only commands the rules are unsure about (unknown words,
+    Hinglish, things instead of places) go to the LLM.  always: LLM first for everything.  off: rules only.
+  * identical commands within 10 min (e.g. the app's preview, then the real send) reuse the LLM answer.
+
+Hallucination / unwanted output guards:
+  * strict JSON schema: intent is an enum and every target must be one of the map's place / room
+    names (the model cannot even produce another name), priority 0-3, booleans are booleans;
+  * the answer is validated again here (unknown places dropped and noted, values clamped);
+  * an "unknown" from the LLM never overrides a rules answer that found something;
+  * any LLM problem (no key, retired model, network, timeout, bad JSON) -> rules answer, with the exact
+    error in result['llm'] and in the LLM log (app: Operate -> AI commands).
 """
 import json
 import re
-import urllib.error
-import urllib.request
+import time
 
+from lidar_robot.llm import CHAT_URL, DEFAULT_MODEL, GroqClient, LLMError, LLMLog, http_json
 from lidar_robot.places import normalize
 
 INTENTS = ('navigate', 'return_home', 'dock', 'stop', 'status', 'explain', 'find', 'confirm', 'unknown')
-GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
+GROQ_URL = CHAT_URL
+POLICIES = ('smart', 'always', 'off')
+CACHE_S = 600.0
 
-URGENT = re.compile(r'\b(urgent|urgently|asap|immediately|emergency|right now|quickly|hurry|priority)\b')
+URGENT = re.compile(r'\b(urgent|urgently|asap|immediately|emergency|right now|quickly|hurry|priority|jaldi|turant|fatafat)\b')
 LOW = re.compile(r'\b(low priority|when (you are |you\'re )?free|no rush|later|whenever)\b')
 STOP = re.compile(r'\b(stop|halt|cancel|abort|freeze|emergency stop|wait there)\b')
 HOME = re.compile(r'\b((go|come|return|head|get)\s+(back\s+)?(home|to base|to (the )?dock)|come back|go back|return|dock|go home)\b')
@@ -46,30 +59,106 @@ SPLIT = re.compile(r'\s*(?:,|;|\bthen\b|\band then\b|\bafter that\b|\bfollowed b
 
 
 class CommandParser:
-    def __init__(self, places, groq_api_key=None, model='llama-3.1-8b-instant', timeout=4.0,
-                 http_post=None):
+    def __init__(self, places, groq_api_key=None, model=DEFAULT_MODEL, timeout=6.0, http_post=None,
+                 policy='smart', log=None, client=None, clock=time.monotonic):
         self.places = places
-        self.key = groq_api_key
-        self.model = model
-        self.timeout = timeout
-        self._post = http_post or _http_post_json
+        self.log = log if log is not None else (client.log if client else LLMLog())
+        self.client = client or GroqClient(groq_api_key, model=model, timeout=timeout, log=self.log,
+                                           post=http_post)
+        self.policy = policy if policy in POLICIES else 'smart'
+        self.clock = clock
+        self._cache = {}
+
+    @property
+    def key(self):
+        return self.client.key
+
+    @property
+    def model(self):
+        return self.client.model
 
     # ---------------------------------------------------------------- public
     def parse(self, text):
         text = (text or '').strip()
         if not text:
             return self._result('unknown', [], 1, 'Say where I should go.', 'rules', [])
-        if self.key:
-            try:
-                res = self._parse_llm(text)
-                if res is not None:
-                    return res
-            except Exception as e:                      # network, quota, JSON ... -> fall back
-                fallback_note = f'LLM unavailable ({type(e).__name__}); used offline parser'
-                res = self._parse_rules(text)
-                res['notes'].insert(0, fallback_note)
-                return res
-        return self._parse_rules(text)
+        rules = self._parse_rules(text)
+        if rules['intent'] == 'stop':                       # safety: never wait for the network
+            return self._llm_info(rules, used=False, why='stop is always handled offline')
+        if self.policy == 'off':
+            return self._llm_info(rules, used=False, why='LLM turned off (llm_policy: off)')
+        if not self.client.key:
+            return self._llm_info(rules, used=False, why='no GROQ_API_KEY')
+        if self.policy == 'smart' and self._rules_sure(rules, text):
+            self.log.add(purpose='command', model=self.client.model, outcome='skipped', input=text[:160],
+                         output=f'rules: {rules["intent"]} {rules["targets"]}', ms=0)
+            return self._llm_info(rules, used=False, why='the offline rules were sure (no LLM call needed)')
+        key = (normalize(text), self._places_sig())
+        hit = self._cache.get(key)
+        if hit and self.clock() - hit[0] < CACHE_S:
+            self.log.add(purpose='command', model=self.client.model, outcome='cached', input=text[:160],
+                         output=f'{hit[1]["intent"]} {hit[1]["targets"]}', ms=0)
+            res = json.loads(json.dumps(hit[1]))
+            res['llm'] = dict(res.get('llm') or {}, cached=True)
+            return res
+        t0 = self.clock()
+        try:
+            res = self._parse_llm(text)
+        except LLMError as e:
+            return self._fallback(rules, e)
+        except Exception as e:                              # anything unexpected -> rules, never crash
+            return self._fallback(rules, LLMError('error', f'{type(e).__name__}: {e}'))
+        ms = round((self.clock() - t0) * 1000)
+        if res['intent'] == 'unknown' and rules['intent'] != 'unknown':
+            rules['notes'].append('LLM said "unknown"; kept the offline answer')
+            return self._llm_info(rules, used=True, ms=ms, why='LLM was unsure, rules were not')
+        res = self._llm_info(res, used=True, ms=ms)
+        self._cache[key] = (self.clock(), json.loads(json.dumps(res)))
+        if len(self._cache) > 200:
+            self._cache.pop(next(iter(self._cache)))
+        return res
+
+    def _rules_sure(self, r, text=''):
+        """The offline answer is complete and unambiguous: no reason to pay for an LLM round trip."""
+        if r['intent'] in ('confirm', 'explain', 'status', 'dock', 'return_home'):
+            return True
+        if r['intent'] == 'find':
+            return bool(r.get('query'))
+        if r['intent'] == 'navigate':
+            # every destination-looking part of the sentence must have become a target
+            return bool(r['targets']) and not r['notes'] and self._destination_parts(text) <= len(r['targets'])
+        return False
+
+    @staticmethod
+    def _destination_parts(text):
+        """How many separate destinations the sentence seems to name (commas kept, unlike normalize())."""
+        low = re.sub(r"[^a-z0-9,;' ]+", ' ', (text or '').lower())
+        m = NAV_VERB.search(low)
+        if not m:
+            return 0
+        n = 0
+        for chunk in SPLIT.split(low[m.end():]):
+            chunk = ' '.join((chunk or '').replace("'", ' ').split())
+            for pat in (WAIT, WAIT_OK, HOME, URGENT, LOW):
+                chunk = pat.sub(' ', chunk)
+            chunk = re.sub(r'\b(?:me|us|this|these|them|it|to|into|in|at|towards?|the|a|an|my|our|please|'
+                           r'there|here|and|then|for|of|go|come|back)\b', ' ', chunk)
+            if chunk.strip():
+                n += 1
+        return n
+
+    def _fallback(self, rules, err):
+        rules['notes'].insert(0, f'LLM unavailable ({err.kind}); used offline parser')
+        return self._llm_info(rules, used=True, error={'kind': err.kind, 'status': err.status,
+                                                       'detail': err.detail[:200], 'hint': err.hint})
+
+    def _llm_info(self, res, used, ms=None, why='', error=None):
+        res['llm'] = {'used': used, 'model': self.client.model if used else None, 'ms': ms, 'why': why,
+                      'error': error, 'policy': self.policy}
+        return res
+
+    def _places_sig(self):
+        return getattr(self.places, 'version', None) or len(self.places.places) + len(self.places.rooms)
 
     # ---------------------------------------------------------------- rules
     def _parse_rules(self, text):
@@ -140,22 +229,39 @@ class CommandParser:
         return self._result('unknown', [], prio, hint, 'rules', notes)
 
     # ---------------------------------------------------------------- llm
+    def _schema(self, names):
+        target = {'type': 'string', 'enum': names} if names else {'type': 'string'}
+        return {'type': 'object', 'additionalProperties': False,
+                'required': ['intent', 'query', 'targets', 'priority', 'reply', 'waits', 'then_home', 'confirms'],
+                'properties': {
+                    'intent': {'type': 'string', 'enum': list(INTENTS)},
+                    'query': {'type': ['string', 'null']},
+                    'targets': {'type': 'array', 'items': target},
+                    'priority': {'type': 'integer', 'enum': [0, 1, 2, 3]},
+                    'reply': {'type': 'string'},
+                    'waits': {'type': 'array', 'items': {'type': 'number'}},
+                    'then_home': {'type': 'boolean'},
+                    'confirms': {'type': 'array', 'items': {'type': 'boolean'}}}}
+
     def _parse_llm(self, text):
         catalog = []
         for p in self.places.places:
-            entry = {'name': p['name'], 'aliases': p.get('aliases', [])}
+            entry = {'name': p['name']}
+            if p.get('aliases'):
+                entry['aliases'] = p['aliases']
             room = self.places.get_room(p['name'])       # a room with the same name: pass on its contents
             if room and room.get('contents'):
                 entry['room_contains'] = room['contents']
             catalog.append(entry)
         catalog += [{'name': r['name'], 'aliases': r.get('aliases', []), 'room_contains': r.get('contents', [])}
                     for r in self.places.rooms if not self.places.get(r['name'])]
+        names = [c['name'] for c in catalog]
         system = (
-            'You control an indoor campus robot. Convert the user command into JSON with keys: '
+            'You control an indoor campus robot. Convert the user command (English or Hinglish) into JSON with keys: '
             'intent (one of navigate, return_home, dock (go and charge), stop, status, '
             'explain (user asks why the robot stopped / what went wrong), '
             'find (user asks where something is), confirm (user says ok/done), unknown), '
-            'query (for find: the thing asked about), '
+            'query (for find: the thing asked about, else null), '
             'targets (ordered list of place names, ONLY copied exactly from the provided list), '
             'priority (0 low, 1 normal, 2 high, 3 urgent), '
             'reply (one short friendly sentence to say back), '
@@ -164,14 +270,11 @@ class CommandParser:
             'confirms (list of true/false per target: true if the robot must wait there until someone presses OK). '
             'A target can be a room; if the user names a thing, pick the room whose room_contains has it. '
             'Never invent places. If a requested place is not in the list, leave it out and say so in reply. '
-            'Known places: ' + json.dumps(catalog))
-        body = {'model': self.model, 'temperature': 0, 'max_tokens': 200,
-                'response_format': {'type': 'json_object'},
-                'messages': [{'role': 'system', 'content': system},
-                             {'role': 'user', 'content': text}]}
-        resp = self._post(GROQ_URL, body, {'Authorization': f'Bearer {self.key}'}, self.timeout)
-        content = resp['choices'][0]['message']['content']
-        d = json.loads(content)
+            'If the command is not about the robot, use intent unknown. '
+            'Known places: ' + json.dumps(catalog, separators=(',', ':')))
+        d = self.client.chat_json('command', [{'role': 'system', 'content': system},
+                                              {'role': 'user', 'content': text}],
+                                  schema=self._schema(names), max_tokens=500, input_text=text)
         intent = d.get('intent', 'unknown')
         if intent not in INTENTS:
             intent = 'unknown'
@@ -197,6 +300,9 @@ class CommandParser:
             prio = max(0, min(3, int(d.get('priority', 1))))
         except (TypeError, ValueError):
             prio = 1
+        if prio == 3 and not URGENT.search(normalize(text)):   # urgent pre-empts other people's trips:
+            prio = 2                                            # only when the words say so
+            notes.append('LLM asked for urgent priority without an urgent word; used high instead')
         reply = str(d.get('reply', ''))[:200]
         res = self._result(intent, names, prio, reply, 'llm', notes)
         if intent == 'navigate':
@@ -262,7 +368,5 @@ class CommandParser:
 
 
 def _http_post_json(url, body, headers, timeout):
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method='POST',
-                                 headers={'Content-Type': 'application/json', **headers})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    """Kept for old callers: JSON POST with the robot's User-Agent (see llm.py for why it matters)."""
+    return http_json(url, body, headers, timeout)

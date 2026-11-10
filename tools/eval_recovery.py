@@ -2,7 +2,7 @@
 """Error-recovery evaluation: scripted failures on the simulated floor, LLM vs rules vs no recovery.
 
     python3 tools/eval_recovery.py                      # none + rules (+ llm when GROQ_API_KEY is set)
-    GROQ_API_KEY=... python3 tools/eval_recovery.py --policies llm --model llama-3.3-70b-versatile
+    GROQ_API_KEY=... python3 tools/eval_recovery.py --policies llm --model openai/gpt-oss-120b
     python3 tools/eval_recovery.py --rounds 3 --out results/
 
 Every scenario starts the same mission on tools/dashboard_sim.py's CSE floor and adds one kind of trouble
@@ -210,7 +210,7 @@ def main(argv=None):
     global OUT_TMP
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--policies', default='none,rules,llm', help='comma list of none, rules, llm')
-    ap.add_argument('--model', default=os.environ.get('RECOVERY_MODEL', 'llama-3.3-70b-versatile'))
+    ap.add_argument('--model', default=os.environ.get('RECOVERY_MODEL', 'openai/gpt-oss-120b'))
     ap.add_argument('--rounds', type=int, default=1)
     ap.add_argument('--only', help='run one scenario by name')
     ap.add_argument('--out', default=os.path.join(HERE, '..', 'results'))
