@@ -84,7 +84,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-11-10**
+**Last updated: 2026-11-11**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -121,12 +121,21 @@ Open problems / TODO (priority order):
 6. LLM (commands + recovery) fixed in code 2026-11-10 (`docs/llm.md`): deploy, then app Operate → AI commands →
    Test AI with the real key; run `tools/eval_commands.py` / `eval_recovery.py` with the key for the report.
 7. Install Docker on the Pi (make the GHCR package public first).
+9. Nav2 backend (2026-11-11): `bash scripts/setup_nav2.sh`, `nav_mode:=nav2`, first test on blocks (docs/nav2.md),
+   then 10 trips per backend and compare.
 8. Conversation agent + map fixes (2026-11-10): flash firmware v2.8, deploy, write the notebook in the app, run
    `tools/eval_chat.py` with the key; map one corridor and check `odom_guard` in /robot/status and the jump log.
 
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-11-11: Nav2 as a switchable backend (docs/nav2.md): launch `nav_mode:=nav2` starts controller/planner/
+  behavior servers + bt_navigator (config/nav2_params.yaml: NavFn, Regulated Pure Pursuit, cmd_vel remapped to
+  cmd_vel_nav2); navigator `_setup_nav2` swaps the core's follower for nav2_follower.Nav2Follower (NavigateToPose
+  or FollowPath, Pathik's front/body/speed gate on Nav2's command, BLOCKED on abort -> usual replans/recovery);
+  falls back to the built-in planner when Nav2 is not installed; scripts/setup_nav2.sh; test_nav2_follower.py.
+  NOT run with ROS yet. Decision: feature freeze, one use case (document delivery), 100-trip reliability trial.
 
 - 2026-11-10 (later): conversation agent (chat.py, docs/chat.md): notebook of college facts (knowledge.py,
   ~/maps/knowledge.json, app Operate → Knowledge, admin edits), questions routed away from the command path

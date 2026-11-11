@@ -16,7 +16,8 @@ Arguments
   map           ''          saved Cartographer state for localization
   map_mode_file ~/maps/map_mode.json   the app's choice (Map tab: freeze / continue / new map): wins over
                             slam_mode/map when the file exists ('' or off = ignore it). See map_mode.py
-  nav_mode      planner     planner (navigator: A* routes, places, missions) | direct (goal_controller) | none
+  nav_mode      planner     planner (navigator: A* routes, places, missions) | nav2 (the same navigator, but Nav2
+                            plans and drives: config/nav2_params.yaml, docs/nav2.md) | direct (goal_controller) | none
   dashboard     true        web dashboard on http://<pi>:8080
   places        ~/maps/places.json
   lidar_port    auto           the USB-serial port that is NOT the ESP32 (or give a path, e.g. /dev/ttyUSB0)
@@ -177,12 +178,39 @@ def _setup(context):
             arguments=['-resolution', '0.05'] + grid_args))
 
     goal_frame = 'map' if slam else 'odom'
-    if nav_mode == 'planner':
+    nav2 = False
+    if nav_mode == 'nav2':
+        try:                                  # Nav2 is optional: without it the built-in planner runs
+            for pkg in ('nav2_bt_navigator', 'nav2_controller', 'nav2_planner', 'nav2_behaviors',
+                        'nav2_lifecycle_manager', 'nav2_regulated_pure_pursuit_controller', 'nav2_navfn_planner'):
+                get_package_share_directory(pkg)
+            nav2 = True
+        except Exception as e:
+            actions.append(LogInfo(msg=f'[bringup] nav_mode nav2: Nav2 is not installed ({e}). Using the built-in '
+                                       f'planner. Install it with: sudo apt install ros-humble-navigation2'))
+    if nav_mode in ('planner', 'nav2'):
         actions.append(Node(
             package='lidar_robot', executable='navigator', name='navigator', output='screen',
             parameters=[params, {'global_frame': goal_frame, 'places_file': places,
                                  'require_localization_confirm': slam and slam_mode == 'localization',
-                                 'use_vision': vision}]))
+                                 'use_vision': vision, 'nav_backend': 'nav2' if nav2 else 'pathik'}]))
+    if nav2:
+        # Nav2's speed commands go to cmd_vel_nav2; the navigator checks them and publishes /cmd_vel itself
+        n2 = os.path.join(share, 'config', 'nav2_params.yaml')
+        to_pathik = [('cmd_vel', 'cmd_vel_nav2')]
+        names = ['controller_server', 'planner_server', 'behavior_server', 'bt_navigator']
+        actions += [
+            Node(package='nav2_controller', executable='controller_server', name='controller_server',
+                 output='screen', parameters=[n2], remappings=to_pathik),
+            Node(package='nav2_planner', executable='planner_server', name='planner_server',
+                 output='screen', parameters=[n2]),
+            Node(package='nav2_behaviors', executable='behavior_server', name='behavior_server',
+                 output='screen', parameters=[n2], remappings=to_pathik),
+            Node(package='nav2_bt_navigator', executable='bt_navigator', name='bt_navigator',
+                 output='screen', parameters=[n2]),
+            Node(package='nav2_lifecycle_manager', executable='lifecycle_manager', name='lifecycle_manager_navigation',
+                 output='screen', parameters=[{'autostart': True, 'node_names': names, 'bond_timeout': 10.0}]),
+        ]
     elif nav_mode == 'direct':
         actions.append(Node(
             package='lidar_robot', executable='goal_controller', name='goal_controller',

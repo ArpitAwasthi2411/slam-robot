@@ -132,6 +132,9 @@ class NavigatorNode(Node):
         d('llm_timeout', 6.0)
         d('recovery_mode', 'llm')       # llm (LLM first, rules if no key/network) | rules | off (old behaviour)
         d('recovery_llm_model', 'openai/gpt-oss-120b')
+        d('nav_backend', 'pathik')      # pathik = own A* + follower | nav2 = Nav2 plans and drives (nav2_follower.py)
+        d('nav2_mode', 'navigate')      # navigate = Nav2 planner + controller | follow = Pathik's route, Nav2 controller
+        d('nav2_cmd_topic', 'cmd_vel_nav2')
         d('chat_enabled', True)         # talk to the robot: college notebook + general questions (chat.py)
         d('chat_model', 'openai/gpt-oss-120b')   # the bigger model converses and follows the rules better
         d('knowledge_file', '')         # '' = knowledge.json next to places.json
@@ -235,7 +238,9 @@ class NavigatorNode(Node):
         volatile = QoSProfile(depth=1, durability=DurabilityPolicy.VOLATILE,
                               reliability=ReliabilityPolicy.RELIABLE)
         self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
-        self.plan_pub = self.create_publisher(Path, 'plan', 1)
+        self.nav_backend = str(g('nav_backend'))
+        # with Nav2 the topic 'plan' is Nav2's own route; ours (used for the checks) moves aside
+        self.plan_pub = self.create_publisher(Path, 'navigator/plan' if self.nav_backend == 'nav2' else 'plan', 1)
         self.status_pub = self.create_publisher(String, 'navigator/status', 5)
         self.places_pub = self.create_publisher(String, 'navigator/places', latched)
         self.resp_pub = self.create_publisher(String, 'navigator/response', 10)
@@ -255,6 +260,8 @@ class NavigatorNode(Node):
         self.create_subscription(String, 'navigator/request', self._on_request, 10)
 
         self.dt = 1.0 / float(g('rate'))
+        if self.nav_backend == 'nav2':
+            self._setup_nav2()
         self.create_timer(self.dt, self._tick)
         self.create_timer(0.25, self._publish_status)
         # network watch in a thread (one ping every network_check_s; never blocks the control loop)
@@ -508,6 +515,96 @@ class NavigatorNode(Node):
             return compose_2d(correction, odom_pose)
         except TransformException:
             return None
+
+    # ---------------------------------------------------------------- Nav2 backend (nav2_follower.py)
+    def _setup_nav2(self):
+        """Nav2 plans and drives; the core keeps missions and safety. Falls back to the built-in follower
+        when Nav2 is not installed, so a missing package never leaves the robot unable to move."""
+        try:
+            from rclpy.action import ActionClient
+            from nav2_msgs.action import FollowPath, NavigateToPose
+        except ImportError as e:
+            self.get_logger().error(f'nav_backend nav2 asked for, but Nav2 is not installed ({e}). Using the '
+                                    f'built-in planner. Install: sudo apt install ros-humble-navigation2')
+            self.nav_backend = 'pathik'
+            return
+        from lidar_robot.nav2_follower import Nav2Follower
+        self._nav2 = {'navigate': (ActionClient(self, NavigateToPose, 'navigate_to_pose'), NavigateToPose),
+                      'follow': (ActionClient(self, FollowPath, 'follow_path'), FollowPath)}
+        self._nav2_handles = {}
+        fol = Nav2Follower(self.core.follower.p, self._nav2_send, self._nav2_cancel,
+                           clock=lambda: self.get_clock().now().nanoseconds * 1e-9, mode=str(self.get_parameter('nav2_mode').value))
+        with self.core_lock:
+            self.core.follower = fol
+            self.core.nav_backend = 'nav2'
+        self._nav2_fol = fol
+        self.create_subscription(Twist, str(self.get_parameter('nav2_cmd_topic').value),
+                                 lambda m: fol.on_cmd(m.linear.x, m.angular.z), 10)
+        self.create_subscription(Path, 'plan', lambda m: fol.on_plan(
+            [(ps.pose.position.x, ps.pose.position.y) for ps in m.poses][::max(1, len(m.poses) // 200)]
+            + ([(m.poses[-1].pose.position.x, m.poses[-1].pose.position.y)] if m.poses else [])), 1)
+        self.get_logger().info(f'navigation backend: Nav2 ({fol.mode}); Pathik keeps missions and the safety checks')
+
+    def _nav2_pose(self, x, y, yaw):
+        ps = PoseStamped()
+        ps.header.frame_id = self.global_frame
+        ps.header.stamp = self.get_clock().now().to_msg()
+        ps.pose.position.x, ps.pose.position.y = float(x), float(y)
+        ps.pose.orientation.z, ps.pose.orientation.w = math.sin(yaw / 2.0), math.cos(yaw / 2.0)
+        return ps
+
+    def _nav2_send(self, seq, mode, pts, goal):
+        client, kind = self._nav2[mode]
+        fol = self._nav2_fol
+        if not client.server_is_ready():
+            # not up yet (Nav2 takes ~20 s to start on the Pi): the follower waits start_timeout, then reports it
+            self.get_logger().warn(f'Nav2 action server for "{mode}" is not ready yet', throttle_duration_sec=5.0)
+            if not client.wait_for_server(timeout_sec=0.0):
+                fol.on_accepted(seq, False, 'Nav2 is not running yet')
+                return
+        g = kind.Goal()
+        if mode == 'navigate':
+            g.pose = self._nav2_pose(*goal)
+        else:
+            g.path = Path()
+            g.path.header.frame_id = self.global_frame
+            g.path.header.stamp = self.get_clock().now().to_msg()
+            for (x, y), (nx, ny) in zip(pts, pts[1:] + [pts[-1]]):
+                yaw = goal[2] if (x, y) == (nx, ny) else math.atan2(ny - y, nx - x)
+                g.path.poses.append(self._nav2_pose(x, y, yaw))
+
+        def accepted(fut):
+            try:
+                handle = fut.result()
+            except Exception as e:
+                fol.on_accepted(seq, False, f'Nav2 goal failed: {e}')
+                return
+            if not handle.accepted:
+                fol.on_accepted(seq, False, 'Nav2 refused the goal')
+                return
+            fol.on_accepted(seq, True)
+            self._nav2_handles[seq] = handle
+            if seq != fol.seq:                       # replaced while we waited: cancel it at once
+                handle.cancel_goal_async()
+                return
+
+            def done(rf):
+                self._nav2_handles.pop(seq, None)
+                try:
+                    status = rf.result().status
+                except Exception as e:
+                    fol.on_result(seq, False, f'Nav2 result failed: {e}')
+                    return
+                # action_msgs/GoalStatus: 4 succeeded, 5 canceled, 6 aborted
+                fol.on_result(seq, status == 4, {5: 'Nav2 goal was cancelled', 6: 'Nav2 gave up: no route or stuck'}
+                              .get(status, f'Nav2 ended with status {status}'))
+            handle.get_result_async().add_done_callback(done)
+        client.send_goal_async(g).add_done_callback(accepted)
+
+    def _nav2_cancel(self, seq):
+        handle = self._nav2_handles.pop(seq, None)
+        if handle is not None:
+            handle.cancel_goal_async()
 
     def _tick(self):
         pose = self._pose()

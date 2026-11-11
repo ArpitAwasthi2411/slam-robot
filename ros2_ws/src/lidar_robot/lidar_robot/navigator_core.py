@@ -1067,6 +1067,8 @@ class NavigatorCore:
                 self._fail('BLOCKED', f'path to {m.current.label} stays blocked after {self.max_replans} new routes')
                 return 0.0, 0.0
             why = 'obstacle in the way' if event == 'BLOCKED' else 'drifted off the path'
+            if event == 'BLOCKED' and getattr(self.follower, 'why_blocked', '') == 'nav2':
+                why = getattr(self.follower, 'nav2_note', '') or 'Nav2 could not continue'
             self._log(f'{why}: finding another route ({self._replans}/{self.max_replans})', 'warn')
             self.follower.clear()
             self._set(PLANNING, f'{why}, replanning')
@@ -1675,6 +1677,7 @@ class NavigatorCore:
         return {
             'state': self.state, 'message': self.message, 'estop': self.estopped, 'hold': self.hold,
             'localized': self.localized, 'last_failure': self.last_failure,
+            'nav_backend': getattr(self, 'nav_backend', 'pathik'),
             'map_jumps': getattr(self, 'map_jumps', 0), 'last_map_jump': getattr(self, 'last_map_jump', None),
             'goal': (None if not (m and m.current) else
                      {'label': m.current.label, 'x': m.current.x, 'y': m.current.y, 'yaw': m.current.yaw}),

@@ -103,6 +103,8 @@ navigator:
     pose_timeout: 1.5            # s: odometry older than this = position lost (1.0 tripped on short CPU stalls)
     llm_model: openai/gpt-oss-20b     # used only if GROQ_API_KEY is set and there is internet (Groq retired llama-3.x on 16 Aug 2026)
     llm_policy: smart                 # smart: offline rules first, LLM only when they are unsure | always | off
+    nav_backend: pathik               # set by the launch: nav_mode:=nav2 makes Nav2 plan and drive (docs/nav2.md)
+    nav2_mode: navigate               # navigate = Nav2 planner + controller | follow = Pathik's route, Nav2's controller
     chat_enabled: true                # talk to the robot: college notebook (app: Operate -> Knowledge) + general questions
     chat_model: openai/gpt-oss-120b   # conversation model (falls back to the small one if Groq retires it)
     llm_timeout: 6.0
