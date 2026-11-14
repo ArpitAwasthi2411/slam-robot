@@ -46,11 +46,14 @@ def test_moods_for_robot_states():
         (st(), {'idleS': 300}),
         (st(), {'idleS': 5}),
         (st('DRIVING', goal={'label': 'Lab 3'}, vision={'action': 'SLOW_DOWN'}), {}),
+        (st('DRIVING', goal={'label': 'Lab 3'}, blocked=True, blocker={'now': 'object'}), {}),
+        (st('DRIVING', goal={'label': 'Lab 3'}, blocked=True, blocker={'now': 'person'}), {}),
     ]
     got = faces(cases)
     moods = [g['mood'] for g in got]
     assert moods == ['offline', 'stopped', 'help', 'lost', 'happy', 'blocked', 'blocked', 'thinking', 'driving',
-                     'charging', 'lowbat', 'sleepy', 'idle', 'blocked']
+                     'charging', 'lowbat', 'sleepy', 'idle', 'blocked', 'thinking', 'blocked']
+    assert got[14]['line'] == 'Something is in my way' and got[15]['line'] == 'Excuse me, may I pass?'
     assert got[2]['ask']['options'][0]['id'] == 'retry' and got[2]['recId'] == 4
     assert got[4]['ok'] is True and 'Lab 2' in got[4]['line']
     assert got[5]['line'] == 'Excuse me, may I pass?'
@@ -75,3 +78,33 @@ def test_head_page_and_entry_points():
     if os.path.exists(java):
         j = open(java).read()
         assert 'public void openHead' in j and '/app/head.html' in j and 'RESOURCE_VIDEO_CAPTURE' in j
+
+
+def test_pin_is_asked_last_and_never_for_questions():
+    html = open(os.path.join(APP, 'head.html')).read()
+    js = open(os.path.join(APP, 'head.js')).read()
+    for need in ('id="ic-go"', 'id="ic-ask"', 'id="ic-send"', 'id="ask"', 'id="deliver"'):
+        assert need in html, need
+
+    def body(name):
+        a = js.index(name)
+        return js[a:js.index('\n  }\n', a)]
+    # opening a sheet never asks for the PIN: people look and choose first
+    for fn in ('function openKiosk()', 'function openAsk()', 'function openDeliver()'):
+        assert 'needPin' not in body(fn) and 'pinPad' not in body(fn), fn
+    # sending a trip asks for it before the request goes to the robot
+    send = body('async function send(req, label)')
+    assert 0 < send.index('needPin(') < send.index('await nav(')
+    # Ask: answers (chat / status / explain / find) go straight through; a trip needs the PIN first
+    ask = body('async function ask(text)')
+    answers = ask[ask.index('ANSWERS.includes'):ask.index('it wants the robot to move')]
+    assert 'needPin' not in answers and 'say(reply)' in answers
+    trip = ask[ask.index('it wants the robot to move'):]
+    assert trip.index('needPin(') < trip.index("await nav({ type: 'command', text, source: 'head', priority: 1 })")
+    errand = body('async function startErrand()')
+    assert errand.index('needPin(') < errand.index('M.plan(e)')
+    # tapping the face introduces the robot, it does not open the place list
+    tap = body("$('face-wrap').onclick")
+    assert 'ABOUT[' in tap and 'openKiosk' not in tap
+    # the PIN pad sits above the sheet the choice was made in, and STOP above everything
+    assert '#pin { z-index: 20; }' in html and 'z-index: 30' in html[html.index('.h-stop {'):html.index('body.estop')]

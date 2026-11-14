@@ -59,6 +59,7 @@ from lidar_robot.explorer import ExploreParams, find_frontiers, choose_goal, map
 from lidar_robot.follower import FollowerParams, PathFollower
 from lidar_robot.missions import Mission, MissionQueue, Stop
 from lidar_robot.planner import Planner, PlannerParams, path_length
+from lidar_robot.blockers import BlockerWatch
 from lidar_robot.recovery import RECOVERABLE, Recovery, describe, rule_decide, validate
 from lidar_robot.tuning import (TuningStore, apply_follower, follower_values, ranges_for_app,
                                 FOLLOWER_RANGES)
@@ -94,7 +95,7 @@ class NavigatorCore:
                  localtime=time.localtime, confirm_timeout_s=300.0, dock_offset=0.55, recovery=None,
                  dock_front=True, dock_params=None, dock_without_marker=False,
                  button_enabled=True, button_home_radius=0.6, button_gap_s=30.0, offline_home_s=120.0,
-                 knowledge=None, chat=None):
+                 knowledge=None, chat=None, blockers=None):
         self.places = places
         self.planner = Planner(planner_params or PlannerParams())
         self.follower = PathFollower(follower_params or FollowerParams())
@@ -164,6 +165,7 @@ class NavigatorCore:
         self.dock_without_marker = dock_without_marker   # no camera: use the map pose of the dock instead
         self._marker = (None, -1e9)
         self.localtime = localtime
+        self.blockers = blockers or BlockerWatch()       # person or object in the way? (ask to pass / reroute)
         self.knowledge = knowledge                       # the notebook the conversation agent answers from
         self.chat = chat                                 # chat.ChatAgent (the node runs it off this thread)
         self.rec = recovery or Recovery(mode='off')      # error recovery (off unless the node/sim turns it on)
@@ -1014,6 +1016,15 @@ class NavigatorCore:
             return self._plan_current(m, pose, now)
 
         v, w, event = self.follower.step(pose, front_clearance, dt, guard=guard)
+        # what is in the way? a person gets asked and some time; an object is routed around at once
+        front_block = self.follower.blocked and self.follower.why_blocked == 'front'
+        b = ({'limit': None, 'say': [], 'ended': None} if event == 'BLOCKED'      # counted below, as a replan
+             else self.blockers.update(front_block, now))
+        self.follower.blocked_limit = b['limit'] if front_block else None
+        self.say_queue.extend(b['say'])
+        if b['ended'] and b['ended']['kind'] == 'person':
+            self.mlog.bump(m, 'blocked_person')
+            self._log(f"a person was in my way for {b['ended']['s']:.0f} s and let me pass")
         if event == 'ARRIVED':
             m.skips = 0
             if m.current.via:                         # recovery detour point: straight on to the real stop
@@ -1058,9 +1069,14 @@ class NavigatorCore:
                 self._set(SCANNING, 'scanning the area')
             return 0.0, 0.0
         if event in ('BLOCKED', 'OFF_PATH'):
+            blocker = None
             if event == 'BLOCKED':
                 self.remember_us(now)
                 self._us_watch_until = now + self.us_watch_s
+                ended = self.blockers.replanned(now) if self.follower.why_blocked == 'front' else None
+                if ended and ended['kind'] in ('person', 'object'):
+                    blocker = ended['kind']
+                    self.mlog.bump(m, 'blocked_' + blocker)
             self.mlog.bump(m, 'replans')
             self._replans += 1
             if self._replans > self.max_replans:
@@ -1069,6 +1085,10 @@ class NavigatorCore:
             why = 'obstacle in the way' if event == 'BLOCKED' else 'drifted off the path'
             if event == 'BLOCKED' and getattr(self.follower, 'why_blocked', '') == 'nav2':
                 why = getattr(self.follower, 'nav2_note', '') or 'Nav2 could not continue'
+            elif blocker == 'person':
+                why = 'the person in my way did not move'
+            elif blocker == 'object':
+                why = 'an object is in my way (no person)'
             self._log(f'{why}: finding another route ({self._replans}/{self.max_replans})', 'warn')
             self.follower.clear()
             self._set(PLANNING, f'{why}, replanning')
@@ -1081,11 +1101,14 @@ class NavigatorCore:
         if self.follower.blocked:
             if self._blocked_since is None:
                 self._blocked_since = now
-            elif now - self._blocked_since > 1.5:
+            elif now - self._blocked_since > 1.5 and not front_block:      # the body or a turn is blocked
                 self.say_queue.append(('make_way', 'Excuse me, please make way.'))
         else:
             self._blocked_since = None
-        self.message = (f'blocked, waiting… ({m.current.label})' if self.follower.blocked
+        kind = self.blockers.kind
+        self.message = (f'a person is in my way, asked to pass… ({m.current.label})' if kind == 'person'
+                        else f'an object is in my way, finding another way… ({m.current.label})' if kind == 'object'
+                        else f'blocked, waiting… ({m.current.label})' if self.follower.blocked
                         else f'driving to {m.current.label}')
         return v, w
 
@@ -1657,6 +1680,10 @@ class NavigatorCore:
     def _set(self, state, message):
         self.state, self.message = state, message
 
+    def see_people(self, decision):
+        """The camera's latest people decision (from the node), for telling a person from an object."""
+        self.blockers.see_people(decision, self.clock())
+
     def note_map_jump(self, d, dyaw):
         """SLAM moved the robot on the map in one step (from the node). Counted and shown: many of these
         = the map is being displaced (bad odometry, look-alike corridors, a wrong start position)."""
@@ -1677,7 +1704,7 @@ class NavigatorCore:
         return {
             'state': self.state, 'message': self.message, 'estop': self.estopped, 'hold': self.hold,
             'localized': self.localized, 'last_failure': self.last_failure,
-            'nav_backend': getattr(self, 'nav_backend', 'pathik'),
+            'nav_backend': getattr(self, 'nav_backend', 'pathik'), 'blocker': self.blockers.summary(),
             'map_jumps': getattr(self, 'map_jumps', 0), 'last_map_jump': getattr(self, 'last_map_jump', None),
             'goal': (None if not (m and m.current) else
                      {'label': m.current.label, 'x': m.current.x, 'y': m.current.y, 'yaw': m.current.yaw}),

@@ -196,3 +196,27 @@ retry, wider route, detour, skip the stop, do it later, ask a person, go home, g
 carries it out. `status()['recovery']` drives the app's "What happened / What I'm doing" card. Details,
 settings and the evaluation: [recovery.md](recovery.md).
 
+
+
+## Person or object in the way (`blockers.py`)
+
+When the front is blocked the robot first decides what blocks it, using the people detector (the Pi camera,
+or the mounted phone in head mode) together with the LiDAR / ultrasonic stop:
+
+| In the way | How it knows | What it does |
+|---|---|---|
+| a person | the detector reports someone in the path within 2.5 m while the front is blocked | stops, says "Excuse me, may I pass?" once, waits `person_wait_s` (8 s). Way clear: "Thank you", continues. Still there: looks for another route |
+| an object | fresh camera decisions, nobody in the path for `object_wait_s` (1.2 s) | says nothing, looks for another route at once (before: always waited `blocked_after`, 5 s) |
+| unknown | no fresh camera decision (camera off, detector resting, no picture) | as before: asks to make way, replans after `blocked_after` |
+
+- The decision is taken over about a second, not on one frame. A person seen once stays "a person" for that block.
+- Wrong guesses are safe: the robot never drives through anything; it only chooses between waiting and going around.
+- A camera STOP (person very close) still holds the robot by itself, as before.
+- The app message, "Why did you stop?" and the head-mode face say which it is.
+- Each trip in the mission log counts `blocked_person` and `blocked_object`; `/navigator/status` → `blocker`
+  has the totals and the seconds lost to each, for the reliability table.
+- Settings (navigator): `polite_pass` (false = old behaviour), `person_wait_s`, `object_wait_s`, `pass_text`
+  (e.g. "Kripya raasta dijiye").
+
+Not yet tried on the robot: check that the person check agrees with what you see (stand in the path: it must
+ask; put a chair there: it must reroute without speaking).

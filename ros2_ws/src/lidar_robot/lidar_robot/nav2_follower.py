@@ -150,7 +150,7 @@ class Nav2Follower(PathFollower):
         if self.blocked:
             self.stats['gated'] += 1
             self._blocked_for += dt
-            if self._blocked_for > p.blocked_after:
+            if self._blocked_for > (p.blocked_after if self.blocked_limit is None else self.blocked_limit):
                 self._blocked_for = 0.0
                 self._cancel(self.seq)       # Nav2 does not see what stopped us: let the core route around it
                 self._active = False

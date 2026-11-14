@@ -4,14 +4,16 @@ A phone mounted on the robot runs the Pathik app in **Head mode** (Operate → H
 
 | It does | How |
 |---|---|
-| **Face** | 11 moods from the robot's state (`face.js`): idle, resting, thinking, driving, "Excuse me, may I pass?", arrived, asking for help, charging, low battery, stopped, lost / offline |
+| **Face** | 12 moods from the robot's state (`face.js`): idle, resting, thinking, listening, driving, "Excuse me, may I pass?", arrived, asking for help, charging, low battery, stopped, lost / offline |
 | **STOP** | big red button, always, **no PIN** (anyone can stop the robot) |
-| **Kiosk** | tap the face → **PIN** → places, rooms, typed or spoken command, go home, cancel |
+| **Side icons** | **Go** (places, rooms, go home, cancel my trip) · **Ask** (type or speak a question or a command) · **Deliver** (errand). Big, at the sides of the face (below it on a tall screen) |
+| **PIN** | asked **last**: people look and choose freely; the PIN pad appears with the question ("Go to Lab 3?") just before the robot would start, or before a trip is cancelled. **Questions never need it.** |
+| **Ask** | a question (college, department, the robot itself) is answered at once on the screen and by the robot's voice. A trip asked for in words is shown first, then the PIN |
+| **Tap the face** | the robot introduces itself: three short lines, one per tap. While busy it says what it is doing. The eyes glance at where it was touched |
 | **Answers** | the OK button at "wait for OK" stops and the error-recovery questions appear on the face (no PIN, like the app) |
 | **People detection** | YOLO11n on the **phone**, on the **Pi camera's plain picture**; the boxes go back to the robot |
 | Voice | stays on the **robot's speaker** (Piper); the phone's mic can be used to say a command in the kiosk |
-| **Greeting** | first touch after a quiet minute: "Hi, I'm Pathik! Where would you like to go?" (name in settings) |
-| **Errands** | kiosk → go to a place, check its door, say a message, wait (or until OK), come back; spoken report |
+| **Errands** | **Deliver** → go to a place, check its door, say a message, wait (or until OK), come back; spoken report |
 | **Doors** | settings → teach each door closed / open with the camera; errands check it on arrival |
 
 ## How the detection is shared
@@ -55,7 +57,7 @@ each step on its own speaker:
 5. "Going back to where I started." → drives back (to the exact spot the errand started)
 6. report: "I went to Shashi sir cabin, the door was closed, I waited 2 minutes and I am back."
 
-If it cannot reach the place it says why and comes back. Cancel from the kiosk (PIN). Code: `mission.js`
+If it cannot reach the place it says why and comes back. Cancel from the Deliver sheet (PIN). Code: `mission.js`
 (steps, tested in `test_errand.py`), `head.js` (robot / demo operations).
 
 ## Door check with the camera
@@ -86,3 +88,12 @@ it on the robot. The web engine now runs YOLO in a worker (`detworker.js`), so t
 
 Open Head mode while **not connected**: the face runs on a demo robot (choose a place in the kiosk and watch the
 moods). Settings → **Test detection with this phone's camera** shows the phone's own detection speed and decision.
+
+
+## The face (Nov 2026)
+
+A dark visor with two glowing eyes (`face.js`). Each mood is a target shape (eye size, slant, gaze, mouth,
+colour) and the face eases from one to the next, so it never jumps. It blinks, glances around when idle,
+breathes slightly, moves its mouth while the robot speaks, and shows a pulsing ring when it needs attention
+(blocked, asking for help, listening). When an object blocks the way and no person is there, it shows
+"Something is in my way · finding another way" instead of asking to pass.

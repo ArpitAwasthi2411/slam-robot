@@ -51,6 +51,7 @@ class PathFollower:
         self.idx = 0
         self.aligning = False
         self.rotating = False
+        self.blocked_limit = None    # s: set by the core while it knows what blocks (blockers.py); None = p.blocked_after
         self.blocked = False
         self._blocked_for = 0.0
         self._v = 0.0
@@ -244,7 +245,7 @@ class PathFollower:
 
         if self.blocked:
             self._blocked_for += dt
-            if self._blocked_for > p.blocked_after:
+            if self._blocked_for > (p.blocked_after if self.blocked_limit is None else self.blocked_limit):
                 event = 'BLOCKED'
                 self._blocked_for = 0.0
         else:

@@ -59,6 +59,12 @@ def explain(core):
                          "I'll try another route in a moment.")
         elif why == 'body':
             parts.append(f'The next curve would bring my body too close to something. Waiting, then trying another way to {goal}.')
+        elif core.blockers.kind == 'person':
+            parts.append(f'A person is in front of me on the way to {goal}. I asked to pass and I am waiting '
+                         f'a few seconds; if they stay, I will look for another route.')
+        elif core.blockers.kind == 'object':
+            parts.append(f'An object is in front of me on the way to {goal}, and I see no person, '
+                         'so I am looking for another route now.')
         else:
             parts.append(f'Something is in front of me on the way to {goal}. If it does not move, '
                          'I will look for another route.')

@@ -42,7 +42,7 @@ class MissionLog:
                 'id': m.id, 'text': m.text, 'source': m.source, 'priority': m.priority, 'by': getattr(m, 'by', ''),
                 'stops': [s.label for s in m.stops], 'started': round(self.clock(), 1),
                 'distance_m': 0.0, 'planned_m': 0.0, 'straight_m': 0.0, 'replans': 0, 'blocked_s': 0.0,
-                'estops': 0, 'bumps': 0, 'skipped': 0, 'min_gap_m': None, 'recoveries': [], '_planned_stops': set(),
+                'estops': 0, 'bumps': 0, 'skipped': 0, 'blocked_person': 0, 'blocked_object': 0, 'min_gap_m': None, 'recoveries': [], '_planned_stops': set(),
                 '_from': None}
         return r
 

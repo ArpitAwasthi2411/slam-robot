@@ -84,7 +84,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-11-11**
+**Last updated: 2026-11-14**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -121,6 +121,8 @@ Open problems / TODO (priority order):
 6. LLM (commands + recovery) fixed in code 2026-11-10 (`docs/llm.md`): deploy, then app Operate → AI commands →
    Test AI with the real key; run `tools/eval_commands.py` / `eval_recovery.py` with the key for the report.
 7. Install Docker on the Pi (make the GHCR package public first).
+10. Kiosk + person/object blocker (2026-11-14): mount the phone, open Head mode, try Go / Ask / Deliver and the
+   PIN-last flow; stand in the path (must ask) and put a chair there (must reroute silently).
 9. Nav2 backend (2026-11-11): `bash scripts/setup_nav2.sh`, `nav_mode:=nav2`, first test on blocks (docs/nav2.md),
    then 10 trips per backend and compare.
 8. Conversation agent + map fixes (2026-11-10): flash firmware v2.8, deploy, write the notebook in the app, run
@@ -129,6 +131,15 @@ Open problems / TODO (priority order):
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-11-14: head-mode kiosk rework: side icons Go / Ask / Deliver, **PIN asked last** (after choosing, just
+  before the robot starts; questions never need it; `needPin(why, title)`), Ask sheet (dry-run command: answers
+  shown + spoken at once, trips shown then PIN), tap the face = the robot introduces itself (3 lines, one per
+  tap), new face (visor, glowing eyes, eased moods, lid slant by clip-path, glances, `talk()` mouth, `look()`),
+  PIN pad two-column on a sideways phone, STOP above every sheet. Person or object in the way (blockers.py,
+  docs/navigation.md): person -> "Excuse me, may I pass?" + wait `person_wait_s` 8 s + "Thank you"; object (no
+  person for 1.2 s) -> replan at once; no camera -> old behaviour; follower `blocked_limit`; mission log
+  blocked_person / blocked_object; status `blocker`. test_blockers.py. Not tried on the robot.
 
 - 2026-11-11: Nav2 as a switchable backend (docs/nav2.md): launch `nav_mode:=nav2` starts controller/planner/
   behavior servers + bt_navigator (config/nav2_params.yaml: NavFn, Regulated Pure Pursuit, cmd_vel remapped to

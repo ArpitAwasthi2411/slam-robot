@@ -19,17 +19,49 @@
   .h-grow { flex: 1; min-width: 0; }
   .h-corner { width: 40px; height: 40px; border-radius: var(--r-pill); border: 0; background: rgba(255,255,255,.06);
             color: var(--dim); font-size: 20px; cursor: pointer; }
-  .h-face-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0; cursor: pointer; }
-  svg.face { width: min(92vw, 120vh); max-height: 52vh; --face: var(--teal); }
-  .f-eye { fill: var(--face); transition: y .18s, height .18s; }
-  .f-pupil { fill: #08080a; transition: r .2s; } .f-shine { fill: #fff; opacity: .85; }
-  .f-arc { fill: none; stroke: var(--face); stroke-width: 18; stroke-linecap: round; opacity: 0; transition: opacity .2s; }
-  .f-cross { fill: none; stroke: var(--face); stroke-width: 18; stroke-linecap: round; opacity: 0; }
-  .f-brow { fill: var(--face); opacity: .8; transition: transform .25s; }
-  .f-mouth { fill: none; stroke: var(--face); stroke-width: 12; stroke-linecap: round; stroke-linejoin: round; }
-  svg.face[data-mood="happy"] .f-mouth { fill: var(--face); }
-  .f-zz { fill: var(--dim); font: 700 44px var(--display); opacity: 0; transition: opacity .4s; }
-  .h-line { font: 800 clamp(24px, 6vw, 44px)/1.1 var(--display); text-align: center; margin: 6px 0 4px; max-width: 900px; }
+  /* stage: the face in the middle, big command icons at the sides (below the face on a tall screen) */
+  .h-stage { flex: 1; min-height: 0; display: grid; gap: 10px 18px; align-items: center; justify-items: center;
+             grid-template-columns: 124px minmax(0, 1fr) 124px; grid-template-rows: 1fr 1fr;
+             grid-template-areas: "go face ask" "send face spare"; }
+  .h-face-wrap { grid-area: face; display: flex; flex-direction: column; align-items: center; justify-content: center;
+                 min-height: 0; width: 100%; height: 100%; cursor: pointer; }
+  #ic-go { grid-area: go; align-self: end; } #ic-send { grid-area: send; align-self: start; }
+  #ic-ask { grid-area: ask; align-self: end; }
+  .h-ic { width: 112px; height: 112px; border-radius: 32px; border: 1px solid var(--line-2); background: var(--surface-2);
+          color: var(--text); font: 800 17px var(--ui); cursor: pointer; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; gap: 6px; box-shadow: 0 10px 28px #0008;
+          transition: transform .12s; -webkit-tap-highlight-color: transparent; }
+  .h-ic:active { transform: scale(.94); }
+  .h-ic svg { width: 44px; height: 44px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .h-ic.go { background: var(--grad); color: var(--on-grad); border-color: transparent; }
+  .h-ic.ask { background: color-mix(in srgb, var(--teal) 22%, var(--surface-2)); border-color: color-mix(in srgb, var(--teal) 55%, transparent); }
+  .h-ic[disabled] { opacity: .35; }
+  @media (max-aspect-ratio: 1/1) {
+    .h-hd { padding-bottom: calc(var(--safe-b) + 122px); }
+    .h-stage { grid-template-columns: repeat(3, 1fr); grid-template-rows: minmax(0, 1fr) auto;
+               grid-template-areas: "face face face" "go ask send"; }
+    #ic-go, #ic-send, #ic-ask { align-self: center; }
+    .h-ic { width: min(104px, 27vw); height: min(104px, 27vw); border-radius: 28px; font-size: 15px; }
+    .h-ic svg { width: 38px; height: 38px; }
+  }
+  svg.face { width: 100%; max-width: min(760px, 120vh); max-height: 54vh; --face: var(--teal); color: var(--face);
+             animation: f-breathe 5s ease-in-out infinite; }
+  @keyframes f-breathe { 50% { transform: scale(1.012) translateY(-2px); } }
+  .f-visor { fill: url(#f-visor-g); }
+  .f-ring { fill: none; stroke: currentColor; stroke-width: 4; opacity: .45; transition: stroke .4s; }
+  svg.face.pulse .f-ring { animation: f-pulse 1.3s ease-in-out infinite; }
+  @keyframes f-pulse { 50% { opacity: 1; stroke-width: 9; } }
+  .f-gloss { fill: #fff; opacity: .05; }
+  .f-glow { filter: drop-shadow(0 0 14px currentColor); }
+  .f-eye { fill: currentColor; transition: fill .4s, opacity .2s; }
+  .f-eye-shine { fill: url(#f-eye-g); transition: opacity .2s; }
+  .f-arc { fill: none; stroke: currentColor; stroke-width: 20; stroke-linecap: round; opacity: 0; transition: opacity .2s, stroke .4s; }
+  .f-mouth { fill: none; stroke: currentColor; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; transition: stroke .4s; }
+  .f-mouth.fill { fill: currentColor; }
+  .f-cheek { fill: #ff7a90; opacity: 0; transition: opacity .5s; }
+  .f-bolt { fill: var(--good); opacity: 0; transition: opacity .4s; }
+  .f-zz { fill: var(--dim); font: 700 40px var(--display); opacity: 0; transition: opacity .4s; }
+  .h-line { font: 800 clamp(22px, 5vw, 40px)/1.12 var(--display); text-align: center; margin: 8px 0 4px; max-width: 900px; }
   .h-sub { color: var(--dim); font-size: clamp(14px, 3.4vw, 20px); text-align: center; min-height: 1.4em; max-width: 900px; }
   .h-acts { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 14px; }
   .h-b { min-height: 56px; padding: 0 22px; border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--surface-2);
@@ -37,10 +69,11 @@
   .h-b.go { background: var(--grad); color: var(--on-grad); border-color: transparent; }
   .h-stop { position: fixed; right: 16px; bottom: calc(var(--safe-b) + 16px); width: 96px; height: 96px; border-radius: 50%;
           border: 5px solid #fff3; background: var(--red); color: #fff; font: 900 20px var(--display); letter-spacing: .04em;
-          box-shadow: 0 8px 30px #e5301f66; cursor: pointer; z-index: 5; }
+          box-shadow: 0 8px 30px #e5301f66; cursor: pointer; z-index: 30; }   /* above every sheet: STOP always works */
   body.estop .h-hd { box-shadow: inset 0 0 0 6px var(--red); }
   .h-sheet { position: fixed; inset: 0; background: rgba(5,5,8,.86); z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; }
   .h-sheet[hidden] { display: none; }
+  #pin { z-index: 20; }                 /* asked last, on top of the sheet the choice was made in */
   .h-panel { width: min(720px, 100%); max-height: 100%; overflow: auto; background: var(--surface); border-radius: var(--r-xl);
            border: 1px solid var(--line); padding: 18px; }
   .h-panel h2 { font: 800 var(--fs-l)/1.1 var(--display); margin: 0 0 4px; }
@@ -60,6 +93,12 @@
   .h-pad button { min-height: 64px; border-radius: var(--r-m); border: 1px solid var(--line-2); background: var(--surface-2);
                 color: var(--text); font: 700 26px var(--display); cursor: pointer; }
   .h-err { color: var(--bad-text); text-align: center; min-height: 1.3em; }
+  #pin .h-panel { width: min(420px, 100%); }
+  .p-info { text-align: center; margin-bottom: 12px; } .p-info h2 { font-size: clamp(22px, 5vw, 30px); }
+  @media (max-height: 560px) {            /* a phone lying on its side: question on the left, keys on the right */
+    #pin .h-panel { width: min(680px, 100%); display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center; }
+    .p-info { margin: 0; } .h-pad { width: 264px; gap: 8px; } .h-pad button { min-height: 0; height: min(64px, 19vh); }
+  }
   .h-row { display: flex; gap: 10px; flex-wrap: wrap; } .h-row > * { flex: 1 1 140px; }
   label.h-tg { display: flex; gap: 10px; align-items: center; padding: 10px 0; font-size: 16px; }
   label.h-tg input { width: 22px; height: 22px; accent-color: var(--orange); }
@@ -72,6 +111,13 @@
   .h-form select, .h-form input { min-height: 52px; border-radius: var(--r-m); border: 1px solid var(--line-2);
                   background: var(--surface-2); color: var(--text); font: 600 17px var(--ui); padding: 0 12px;
                   text-transform: none; letter-spacing: 0; }
+  .h-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 4px; }
+  .h-chips button { min-height: 44px; padding: 0 16px; border-radius: var(--r-pill); border: 1px solid var(--line-2);
+                    background: transparent; color: var(--text-2); font: 600 15px var(--ui); cursor: pointer; }
+  .h-ans { margin: 12px 0 4px; display: flex; flex-direction: column; gap: 8px; max-height: 38vh; overflow-y: auto; }
+  .h-ans div { padding: 10px 14px; border-radius: 16px; font-size: 17px; line-height: 1.4; max-width: 90%; }
+  .h-ans .q { align-self: flex-end; background: var(--orange); color: #fff; border-bottom-right-radius: 5px; }
+  .h-ans .a { align-self: flex-start; background: var(--surface-2); border: 1px solid var(--line-2); border-bottom-left-radius: 5px; }
   .h-steps { display: flex; gap: 6px; margin: 10px 0 4px; }
   .h-steps i { flex: 1; height: 6px; border-radius: 3px; background: var(--line-2); }
   .h-steps i.done { background: var(--good); } .h-steps i.now { background: var(--orange); }
@@ -90,33 +136,59 @@
     <span class="h-grow"></span>
     <span class="h-chip" id="c-det">detection –</span>
   </div>
-  <div class="h-face-wrap" id="face-wrap" role="button" aria-label="Tap to choose where to go">
-    <svg class="face" id="face" aria-hidden="true"></svg>
-    <div class="h-line" id="line">…</div>
-    <div class="h-sub" id="sub"></div>
-    <div class="h-acts" id="acts"></div>
-    <div class="h-steps" id="steps" hidden style="width:min(520px,80vw)"></div>
+  <div class="h-stage">
+    <button class="h-ic go" id="ic-go" aria-label="Go: choose a place">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.500C19 14.800 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.6"/></svg>Go</button>
+    <button class="h-ic" id="ic-send" aria-label="Deliver: go, wait and come back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 8 12 3.5 20.500 8v8L12 20.500 3.500 16z"/><path d="M3.5 8 12 12.500 20.500 8M12 12.500v8"/></svg>Deliver</button>
+    <div class="h-face-wrap" id="face-wrap" role="button" aria-label="Tap my face and I tell you about myself">
+      <svg class="face" id="face" aria-hidden="true"></svg>
+      <div class="h-line" id="line">…</div>
+      <div class="h-sub" id="sub"></div>
+      <div class="h-acts" id="acts"></div>
+      <div class="h-steps" id="steps" hidden style="width:min(520px,80vw)"></div>
+    </div>
+    <button class="h-ic ask" id="ic-ask" aria-label="Ask me a question">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.500h16v10.500H10l-4.500 3.500V16H4z"/><path d="M8.500 9.500h7M8.500 12.500h4.500"/></svg>Ask</button>
   </div>
 </div>
 <button class="h-stop" id="stop" aria-label="Stop the robot">STOP</button>
 
 <!-- PIN pad -->
 <div class="h-sheet" id="pin" hidden><div class="h-panel">
-  <h2 id="pin-t">Enter the PIN</h2><p id="pin-p">To choose a place.</p>
-  <div class="h-pin-dots" id="pin-dots"></div>
-  <div class="h-err" id="pin-e"></div>
+  <div class="p-info">
+    <h2 id="pin-t">Enter the PIN</h2><p id="pin-p">To start.</p>
+    <div class="h-pin-dots" id="pin-dots"></div>
+    <div class="h-err" id="pin-e"></div>
+    <button class="h-b" id="pin-x">Cancel</button>
+  </div>
   <div class="h-pad" id="pad"></div>
-  <div class="h-row" style="margin-top:14px"><button class="h-b" id="pin-x">Cancel</button></div>
 </div></div>
 
-<!-- kiosk: where to go -->
+<!-- Go: where to go (the PIN is asked after choosing, just before the robot starts) -->
 <div class="h-sheet" id="kiosk" hidden><div class="h-panel">
-  <h2>Where should I go?</h2><p>Tap a place or a room, or say / type it.</p>
-  <div class="h-cmd"><input id="k-text" placeholder="e.g. take me to the HOD office" autocomplete="off">
-    <button class="h-b" id="k-mic" hidden aria-label="Speak">🎤</button><button class="h-b go" id="k-send">Go</button></div>
+  <h2>Where should I go?</h2><p>Tap a place or a room. I ask for the PIN before I start.</p>
   <div class="h-h3">Places</div><div class="h-grid" id="k-places"></div>
   <div class="h-h3">Rooms</div><div class="h-grid" id="k-rooms"></div>
-  <div class="h-h3">Errand: go, wait, come back</div>
+  <div class="h-row"><button class="h-b" id="k-home">Go home</button><button class="h-b" id="k-cancel">Cancel my trip</button>
+    <button class="h-b" id="k-close">Close</button></div>
+  <p class="h-muted" id="k-msg" style="margin-top:10px"></p>
+</div></div>
+
+<!-- Ask: talk to the robot. Questions need no PIN; a trip asked for here needs it before starting -->
+<div class="h-sheet" id="ask" hidden><div class="h-panel">
+  <h2>Ask me</h2><p>About the college, the department, or me. You can also tell me where to go.</p>
+  <div class="h-cmd"><input id="k-text" placeholder="e.g. library timings? · take me to the HOD office" autocomplete="off">
+    <button class="h-b" id="k-mic" hidden aria-label="Speak">🎤</button><button class="h-b go" id="k-send">Ask</button></div>
+  <div class="h-chips" id="a-chips"></div>
+  <div class="h-ans" id="a-list"></div>
+  <p class="h-muted" id="a-msg"></p>
+  <div class="h-row"><button class="h-b" id="a-close">Close</button></div>
+</div></div>
+
+<!-- Deliver: an errand (go, say, wait, come back) -->
+<div class="h-sheet" id="deliver" hidden><div class="h-panel">
+  <h2>Deliver something</h2><p>I go there, wait, and come back. I ask for the PIN before I start.</p>
   <div class="h-card" id="e-new">
     <div class="h-form">
       <label>Go to<select id="e-to"></select></label>
@@ -126,16 +198,15 @@
         <option value="stay">stay there</option></select></label>
       <label>Say there<input id="e-msg" placeholder="e.g. Ravi sir sent me with the file" maxlength="140" autocomplete="off"></label>
     </div>
-    <button class="h-b go" id="e-start">Start errand</button>
+    <button class="h-b go" id="e-start">Start</button>
   </div>
   <div class="h-card" id="e-run" hidden>
     <b id="e-now">Errand running</b><div class="h-steps" id="e-steps"></div>
     <p class="h-muted" id="e-plan"></p>
     <button class="h-b" id="e-cancel">Cancel errand</button>
   </div>
-  <div class="h-row"><button class="h-b" id="k-home">Go home</button><button class="h-b" id="k-cancel">Cancel my trip</button>
-    <button class="h-b" id="k-close">Close</button></div>
-  <p class="h-muted" id="k-msg" style="margin-top:10px"></p>
+  <p class="h-muted" id="e-info"></p>
+  <div class="h-row"><button class="h-b" id="d-close">Close</button></div>
 </div></div>
 
 <!-- settings -->
@@ -146,7 +217,7 @@
   <p class="h-muted">While this phone detects, the robot's Pi skips its own YOLO. If the phone stops for 1 s, the Pi detects
   again by itself. The LiDAR and ultrasonic stops never depend on the phone.</p>
   <div class="h-h3" style="margin-top:12px">Greeting</div>
-  <label class="h-tg"><input type="checkbox" id="s-greet" checked> Say hello on the first touch</label>
+  <label class="h-tg"><input type="checkbox" id="s-greet" checked> Speak when someone taps my face (I introduce myself)</label>
   <label class="h-tg" style="gap:8px">My name <input id="s-name" maxlength="20" style="flex:1;min-height:44px;border-radius:12px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--text);font:600 16px var(--ui);padding:0 12px"></label>
   <div class="h-h3" style="margin-top:12px">Doors (camera)</div>
   <p class="h-muted">Stand where the robot stops in front of the door (or hold the phone there), then show it the door

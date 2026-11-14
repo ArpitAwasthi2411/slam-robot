@@ -1,10 +1,12 @@
 /* Head mode: the phone mounted on the robot.
  *   face        mood from the robot's state (face.js), big line + subtitle, OK / answer buttons when it asks
  *   STOP        always, no PIN
- *   kiosk       tap the face -> PIN -> places, rooms, typed or spoken command, go home, cancel
+ *   side icons  Go (places, rooms, home, cancel) · Ask (questions answered at once; a trip asked for in words
+ *               is shown first) · Deliver (errand). The PIN is asked LAST: after choosing, just before the robot
+ *               starts. Questions never need the PIN.
+ *   face tap    the robot introduces itself (a few lines, one per tap); while busy it says what it is doing
  *   detection   people detection ON THE PHONE on the Pi camera's plain picture, boxes POSTed to the robot
  *               (/api/vision/phone): the Pi then skips its own YOLO; only while the robot is busy
- *   greeting    first touch after a quiet minute: "Hi, I'm Pathik! Where would you like to go?" (robot speaker)
  *   errands     kiosk: go to a place, check its door, say a message, wait, come back, speak a report (mission.js)
  *   doors       settings: teach a door closed / open with the camera, check it (doorcheck.js)
  *   no robot    demo state (moods cycle) + optional detection test with the phone's own camera
@@ -73,7 +75,17 @@
       if (['goto_place', 'goto_room'].includes(t)) { demo.goal = body.name; demo.t0 = performance.now(); }
       else if (t === 'goto_pose') { demo.goal = body.label || 'there'; demo.t0 = performance.now(); }
       else if (t === 'say') { /* the phone speaks it (say() below) */ }
-      else if (t === 'command') { demo.goal = body.text.replace(/^(take me to|go to)\s+(the\s+)?/i, '') || 'there'; demo.t0 = performance.now(); }
+      else if (t === 'command') {
+        const text = body.text.trim(), q = /\?$|^(what|when|who|why|which|how|kya|kaun|kab|hello|hi)\b/i.test(text) && !/\b(go|take|bring)\b/i.test(text);
+        const place = text.replace(/^(please\s+)?(take me to|go to|bring me to)\s+(the\s+)?/i, '').replace(/[?.!]+$/, '') || 'there';
+        if (q) return { ok: true, interpretation: { intent: 'chat', targets: [], reply: /timing|open|kab/i.test(text)
+          ? 'The department office is open from 9:30 am to 4:30 pm, Monday to Saturday.'
+          : "I'm Pathik. In demo mode I only know a few things: ask me about office timings, or tell me where to go.",
+          chat: { basis: 'knowledge' } }, plan: { steps: [] } };
+        if (body.dry_run) return { ok: true, interpretation: { intent: 'navigate', targets: [place], reply: `Going to ${place}.` }, plan: { steps: [{ label: place }] } };
+        demo.goal = place; demo.t0 = performance.now();
+        return { ok: true, interpretation: { intent: 'navigate', targets: [place], reply: `Going to ${place}.` } };
+      }
       else if (t === 'go_home') { demo.goal = 'Home'; demo.t0 = performance.now(); }
       else if (t === 'cancel' || t === 'confirm') { demo.goal = null; }
       return { ok: true };
@@ -108,6 +120,7 @@
     }
     if (S.saying && !(st && st.estop)) f = Object.assign({}, f, { sub: `🔊 ${S.saying}` });
     S.face.set(f.mood);
+    S.face.talk(!!S.saying);
     $('line').textContent = f.line;
     $('sub').textContent = f.sub || '';
     document.body.classList.toggle('estop', !!(st && st.estop));
@@ -198,15 +211,25 @@
     $('pad').appendChild(b);
   });
   $('pin-x').onclick = () => closePin(false);
-  async function needPin(why) { return pinPad('Enter the PIN', why); }
+  async function needPin(why, title) { return pinPad(title || 'Enter the PIN', why); }
 
-  // ------------------------------------------------------------------ kiosk
+  // ------------------------------------------------------------------ Go / Ask / Deliver sheets
+  // The PIN comes LAST: people look, choose and ask freely; only the moment the robot would start moving
+  // (or someone's trip would be cancelled) asks for it. Questions are answered without it.
+  const SHEETS = ['kiosk', 'ask', 'deliver'];
   let kioskTimer = 0;
-  function kioskIdle() { clearTimeout(kioskTimer); kioskTimer = setTimeout(() => { $('kiosk').hidden = true; }, 45000); }
-  async function openKiosk() {
-    if (!$('kiosk').hidden || !$('pin').hidden || !$('set').hidden) return;
-    if (!await needPin('To choose where I go.')) return;
+  const anySheet = () => SHEETS.concat(['pin', 'set']).some(id => !$(id).hidden);
+  function closeSheets() { SHEETS.forEach(id => { $(id).hidden = true; }); }
+  function kioskIdle() { clearTimeout(kioskTimer); kioskTimer = setTimeout(closeSheets, 45000); }
+  function targets() {
     const pl = (S.st && S.st.places) || { places: [], rooms: [] };
+    S.targets = [].concat((pl.places || []).map(p => ({ name: p.name, req: { type: 'goto_place', name: p.name } })),
+                          (pl.rooms || []).map(r => ({ name: r.name, req: { type: 'goto_room', name: r.name } })));
+    return pl;
+  }
+  function openKiosk() {
+    if (anySheet()) return;
+    const pl = targets();
     const tile = (name, sub, req) => {
       const b = document.createElement('button');
       b.innerHTML = `${esc(name)}${sub ? `<small>${esc(sub)}</small>` : ''}`;
@@ -217,52 +240,143 @@
     $('k-rooms').replaceChildren(...(pl.rooms || []).map(r => tile(r.name, (r.contents || []).slice(0, 3).join(', '), { type: 'goto_room', name: r.name })));
     if (!(pl.places || []).length) $('k-places').innerHTML = '<p class="h-muted">No places saved yet.</p>';
     if (!(pl.rooms || []).length) $('k-rooms').innerHTML = '<p class="h-muted">No rooms saved yet.</p>';
-    const opts = [].concat((pl.places || []).map(p => ({ name: p.name, req: { type: 'goto_place', name: p.name } })),
-                           (pl.rooms || []).map(r => ({ name: r.name, req: { type: 'goto_room', name: r.name } })));
-    S.targets = opts;
-    $('e-to').innerHTML = opts.map((o, i) => `<option value="${i}">${esc(o.name)}</option>`).join('') ||
-      '<option value="">no places saved</option>';
-    $('k-msg').textContent = ''; $('k-text').value = '';
+    $('k-msg').textContent = '';
     $('kiosk').hidden = false; kioskIdle();
   }
+  const ASK_PIN = { goto_place: l => `Go to ${l}?`, goto_room: l => `Go to ${l}?`, go_home: () => 'Go home?',
+                    cancel: () => 'Cancel the trip?' };
   async function send(req, label) {
     kioskIdle();
+    const q = ASK_PIN[req.type];
+    if (q && !await needPin(req.type === 'cancel' ? 'Enter the PIN to cancel it.' : 'Enter the PIN and I start.', q(label))) return;
     $('k-msg').textContent = 'Sending…';
     try {
       await nav(Object.assign({ priority: 1, source: 'head' }, req));
-      $('k-msg').textContent = `On my way${label ? ' to ' + label : ''}!`;
+      $('k-msg').textContent = req.type === 'cancel' ? 'Trip cancelled.' : `On my way${label ? ' to ' + label : ''}!`;
       if (req.type === 'goto_place' || req.type === 'goto_room') say(`Okay, going to ${label}. Please follow me.`);
       else if (req.type === 'go_home') say('Okay, going home.');
-      setTimeout(() => { $('kiosk').hidden = true; }, 900);
+      setTimeout(closeSheets, 900);
     } catch (e) { $('k-msg').textContent = e.message; }
   }
-  $('face-wrap').onclick = () => {
-    const now = performance.now(), st = S.st, idle = !st || !st.nav || ['IDLE', 'CHARGING'].includes(st.nav.state);
-    S.faceT = now;
-    if (idle && !S.errand && store.get('greet', true) && now - S.lastGreet > 60000) {
-      S.lastGreet = now;
-      const name = robotName();
-      S.ov = { mood: 'happy', line: `Hi, I'm ${name}!`, sub: 'Where would you like to go?', greet: true };
-      setTimeout(() => { if (S.ov && S.ov.greet) S.ov = null; }, 6000);
-      say(`Hi, I'm ${name}! Where would you like to go?`);
-    }
-    openKiosk();
-  };
-  $('k-send').onclick = () => { const t = $('k-text').value.trim(); if (t) send({ type: 'command', text: t }, ''); };
-  $('k-text').onkeydown = e => { kioskIdle(); if (e.key === 'Enter') $('k-send').click(); };
+  $('ic-go').onclick = e => { e.stopPropagation(); haptic(10); S.faceT = performance.now(); openKiosk(); };
   $('k-home').onclick = () => send({ type: 'go_home' }, 'home');
-  $('k-cancel').onclick = () => send({ type: 'cancel' }, '').then(() => { $('k-msg').textContent = 'Trip cancelled.'; });
-  $('k-close').onclick = () => { $('kiosk').hidden = true; };
+  $('k-cancel').onclick = () => send({ type: 'cancel' }, '');
+  $('k-close').onclick = closeSheets;
+
+  // ---- Ask: a question is answered at once (shown, and spoken by the robot); a trip is shown, then the PIN
+  const ANSWERS = ['chat', 'status', 'explain', 'find'];
+  function askChips() {
+    const pl = (S.st && S.st.places) || { places: [], rooms: [] };
+    const thing = ((pl.rooms || []).find(r => (r.contents || []).length) || {}).contents;
+    const place = ((pl.places || [])[0] || {}).name;
+    const qs = ['What can you do?', 'Tell me about the department', thing ? `Where is the ${thing[0]}?` : null,
+                place ? `Take me to ${place}` : null, 'What are you doing?'].filter(Boolean);
+    $('a-chips').replaceChildren(...qs.map(q => {
+      const b = document.createElement('button'); b.textContent = q; b.onclick = () => ask(q); return b; }));
+  }
+  function openAsk() {
+    if (anySheet()) return;
+    askChips();
+    $('k-text').value = ''; $('a-msg').textContent = '';
+    $('ask').hidden = false; kioskIdle();
+  }
+  function bubble(cls, text) {
+    const d = document.createElement('div'); d.className = cls; d.textContent = text;
+    const list = $('a-list'); list.appendChild(d);
+    while (list.children.length > 12) list.firstChild.remove();
+    list.scrollTop = list.scrollHeight;
+  }
+  let asking = false;
+  async function ask(text) {
+    text = (text || '').trim();
+    if (!text || asking) return;
+    asking = true; kioskIdle();
+    $('k-text').value = ''; bubble('q', text); $('a-msg').textContent = 'Thinking…';
+    S.ov = { mood: 'thinking', line: 'Let me think…', sub: text, always: true };
+    try {
+      const r = await nav({ type: 'command', text, dry_run: true, source: 'head' });
+      const it = r.interpretation || {};
+      S.ov = null;
+      if (it.intent === 'stop') { await nav({ type: 'command', text, source: 'head' }); bubble('a', 'Stopped.'); }
+      else if (ANSWERS.includes(it.intent) || it.intent === 'unknown' || !it.intent) {
+        const done = it.intent && it.intent !== 'unknown' ? await nav({ type: 'command', text, source: 'head' }) : r;
+        const reply = done.answer || done.status || (done.interpretation || it).reply || "I didn't understand that.";
+        bubble('a', reply); $('a-msg').textContent = '';
+        S.ov = { mood: 'happy', line: reply.length > 90 ? reply.slice(0, 88) + '…' : reply, sub: '', answer: true };
+        setTimeout(() => { if (S.ov && S.ov.answer) S.ov = null; }, 9000);
+        say(reply);
+      } else {                                           // it wants the robot to move: show it, then the PIN
+        const stops = ((r.plan || {}).steps || []).map(x => x.label || x.name).filter(Boolean);
+        const what = it.intent === 'return_home' ? 'Go home' : it.intent === 'dock' ? 'Go and charge'
+          : it.intent === 'confirm' ? 'Continue' : stops.length ? `Go to ${stops.join(', then ')}`
+            : (it.targets || []).length ? `Go to ${it.targets.join(', then ')}` : (it.reply || 'Do this');
+        bubble('a', `${what}. I need the PIN to start.`); $('a-msg').textContent = '';
+        if (await needPin('Enter the PIN and I start.', `${what}?`)) {
+          const done = await nav({ type: 'command', text, source: 'head', priority: 1 });
+          const reply = (done.interpretation || it).reply || 'On my way.';
+          bubble('a', reply); say(reply);
+          setTimeout(closeSheets, 1200);
+        } else bubble('a', 'Okay, I stay here.');
+      }
+    } catch (e) { S.ov = null; $('a-msg').textContent = e.message || String(e); }
+    asking = false;
+  }
+  $('ic-ask').onclick = e => { e.stopPropagation(); haptic(10); S.faceT = performance.now(); openAsk(); };
+  $('k-send').onclick = () => ask($('k-text').value);
+  $('k-text').onkeydown = e => { kioskIdle(); if (e.key === 'Enter') $('k-send').click(); };
+  $('a-close').onclick = closeSheets;
   // speak: the phone's speech recognizer (the robot's own speaker stays the robot's voice)
   if (window.PathikNative && PathikNative.listen) {
     $('k-mic').hidden = false;
-    $('k-mic').onclick = () => { kioskIdle(); $('k-msg').textContent = 'Listening…'; PathikNative.listen('en-IN'); };
+    $('k-mic').onclick = () => {
+      kioskIdle(); $('a-msg').textContent = 'Listening…';
+      S.ov = { mood: 'listening', line: "I'm listening…", sub: '', always: true, mic: true };
+      PathikNative.listen('en-IN');
+    };
     window.__pathikVoice = (kind, text) => {
       if (kind === 'partial' || kind === 'final') $('k-text').value = text;
+      if (kind === 'final' || kind === 'error') { if (S.ov && S.ov.mic) S.ov = null; }
       if (kind === 'final' && text) $('k-send').click();
-      if (kind === 'error') $('k-msg').textContent = text;
+      if (kind === 'error') $('a-msg').textContent = text;
     };
   }
+
+  // ---- Deliver (errand)
+  function openDeliver() {
+    if (anySheet()) return;
+    targets();
+    $('e-to').innerHTML = S.targets.map((o, i) => `<option value="${i}">${esc(o.name)}</option>`).join('') ||
+      '<option value="">no places saved</option>';
+    $('e-info').textContent = '';
+    $('deliver').hidden = false; kioskIdle();
+  }
+  $('ic-send').onclick = e => { e.stopPropagation(); haptic(10); S.faceT = performance.now(); openDeliver(); };
+  $('d-close').onclick = closeSheets;
+
+  // ---- tap the face: the robot tells about itself (one line per tap); while busy, what it is doing
+  const ABOUT = [
+    n => `Hi, I'm ${n}, the campus service robot. I can guide you to a room, carry things between rooms, and answer questions about the college.`,
+    () => 'I find my way with a laser scanner and a map of this floor. I stop for people, and the red stop button always works.',
+    () => 'Tap Go to choose a place, Ask to talk to me, or Deliver to send something. I ask for the PIN before I move.',
+  ];
+  let aboutI = 0;
+  $('face-wrap').onclick = ev => {
+    const now = performance.now(), st = S.st, idle = !st || !st.nav || ['IDLE', 'CHARGING'].includes(st.nav.state);
+    S.faceT = now;
+    const box = $('face').getBoundingClientRect();
+    S.face.look((ev.clientX - box.left) / box.width * 2 - 1, (ev.clientY - box.top) / box.height * 2 - 1, 1500);
+    if (anySheet() || S.saying || now - S.lastGreet < 1500) return;
+    S.lastGreet = now;
+    if (!idle || S.errand) {                               // busy: say what the face already shows
+      const f = F.faceFor(st, {});
+      if (store.get('greet', true) && !(st && st.estop)) say(f.line);
+      return;
+    }
+    const text = ABOUT[aboutI++ % ABOUT.length](robotName());
+    S.ov = { mood: 'happy', line: aboutI % ABOUT.length === 1 ? `Hi, I'm ${robotName()}!` : 'About me', sub: text, greet: true };
+    setTimeout(() => { if (S.ov && S.ov.greet) S.ov = null; }, 700 + 62 * text.length + 1500);
+    if (store.get('greet', true)) say(text);
+  };
 
   // ------------------------------------------------------------------ settings + leaving
   async function openSettings() {
@@ -403,12 +517,14 @@
   async function startErrand() {
     if (S.errand) return;
     const tgt = (S.targets || [])[+$('e-to').value];
-    if (!tgt) { $('k-msg').textContent = 'No place to go to yet.'; return; }
+    if (!tgt) { $('e-info').textContent = 'No place to go to yet.'; return; }
     const e = { to: tgt.name, waitS: +$('e-wait').value, message: $('e-msg').value, back: $('e-back').value };
+    if (!await needPin('Enter the PIN and I start.', `Deliver to ${tgt.name}?`)) return;
+    if (S.errand) return;
     const steps = M.plan(e), start = (S.st && S.st.pose) || null;
     const E = S.errand = { i: 0, n: steps.length, cancel: false, steps, plan: e };
     if (S.ov && S.ov.greet) S.ov = null;
-    $('kiosk').hidden = true;
+    closeSheets();
     const ops = {
       say, cancelled: () => E.cancel,
       go: () => trip(tgt.req, tgt.name),
@@ -441,7 +557,11 @@
     $('e-plan').textContent = `${E.plan.to} · wait ${M.fmtWait(E.plan.waitS)} · then ${E.plan.back === 'here' ? 'come back' : E.plan.back === 'home' ? 'go home' : 'stay'}`;
   }
   $('e-start').onclick = () => { kioskIdle(); startErrand(); };
-  $('e-cancel').onclick = () => { if (S.errand) { S.errand.cancel = true; if (S.waitEnd) S.waitEnd('cancelled'); } $('kiosk').hidden = true; };
+  $('e-cancel').onclick = async () => {
+    if (!await needPin('Enter the PIN to cancel it.', 'Cancel the errand?')) return;
+    if (S.errand) { S.errand.cancel = true; if (S.waitEnd) S.waitEnd('cancelled'); }
+    closeSheets();
+  };
 
   // ------------------------------------------------------------------ detection on the phone
   function wantDetect() {

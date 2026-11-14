@@ -42,6 +42,7 @@ from tf2_ros import Buffer, TransformListener, TransformException
 
 from lidar_robot.commands import CommandParser
 from lidar_robot.llm import GroqClient, LLMLog, clean_key
+from lidar_robot.blockers import BlockerWatch
 from lidar_robot.chat import ChatAgent
 from lidar_robot.knowledge import Knowledge
 from lidar_robot.recovery import Recovery, RecoveryLLM
@@ -132,6 +133,10 @@ class NavigatorNode(Node):
         d('llm_timeout', 6.0)
         d('recovery_mode', 'llm')       # llm (LLM first, rules if no key/network) | rules | off (old behaviour)
         d('recovery_llm_model', 'openai/gpt-oss-120b')
+        d('polite_pass', True)          # blocked by a person: ask and wait; by an object: reroute at once (blockers.py)
+        d('person_wait_s', 8.0)         # how long a person gets to step aside before a new route
+        d('object_wait_s', 1.2)         # nobody in view this long = an object
+        d('pass_text', 'Excuse me, may I pass?')
         d('nav_backend', 'pathik')      # pathik = own A* + follower | nav2 = Nav2 plans and drives (nav2_follower.py)
         d('nav2_mode', 'navigate')      # navigate = Nav2 planner + controller | follow = Pathik's route, Nav2 controller
         d('nav2_cmd_topic', 'cmd_vel_nav2')
@@ -206,6 +211,8 @@ class NavigatorNode(Node):
                               max_per_mission=int(g('recovery_max_per_mission')),
                               ask_timeout_s=float(g('recovery_ask_timeout_s'))),
             knowledge=self.knowledge, chat=self.chat,
+            blockers=BlockerWatch(enabled=bool(g('polite_pass')), person_wait_s=float(g('person_wait_s')),
+                                  object_wait_s=float(g('object_wait_s')), ask_text=str(g('pass_text'))),
             button_enabled=bool(g('button_enabled')), button_home_radius=float(g('button_home_radius')),
             button_gap_s=float(g('button_gap_s')), offline_home_s=float(g('offline_home_s')))
         self.core.localized = not bool(g('require_localization_confirm'))
@@ -625,12 +632,12 @@ class NavigatorNode(Node):
             if self.vision.note and self.vision.note != self._vision_said:
                 self.get_logger().info(self.vision.note)
                 if 'waiting' in self.vision.note:
-                    self.speaker.say('Excuse me, may I pass?', key='make_way', gap_s=12.0)
+                    self.speaker.say(str(self.get_parameter('pass_text').value), key='make_way', gap_s=12.0)
             self._vision_said = self.vision.note
             with self.core_lock:
                 says, self.core.say_queue = self.core.say_queue, []
             for key, text in says:
-                self.speaker.say(text, key=key, gap_s=12.0 if key == 'make_way' else 3.0)
+                self.speaker.say(text, key=key, gap_s=12.0 if key in ('make_way', 'thanks') else 3.0)
         except Exception as e:                           # stop, report, keep the node alive
             self.get_logger().error(f'navigator step failed: {e}\n{traceback.format_exc()}')
             self.cmd_pub.publish(Twist())
@@ -646,6 +653,8 @@ class NavigatorNode(Node):
     def _on_vision(self, msg: String):
         try:
             self.vision.update(json.loads(msg.data), time.monotonic())
+            with self.core_lock:                         # person or object in the way? (blockers.py)
+                self.core.see_people(self.vision.last if self.vision.enabled else None)
         except ValueError:
             pass
 
