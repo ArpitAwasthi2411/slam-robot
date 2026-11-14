@@ -9,7 +9,7 @@ A phone mounted on the robot runs the Pathik app in **Head mode** (Operate → H
 | **Side icons** | **Go** (places, rooms, go home, cancel my trip) · **Ask** (type or speak a question or a command) · **Deliver** (errand). Big, at the sides of the face (below it on a tall screen) |
 | **PIN** | asked **last**: people look and choose freely; the PIN pad appears with the question ("Go to Lab 3?") just before the robot would start, or before a trip is cancelled. **Questions never need it.** |
 | **Ask** | a question (college, department, the robot itself) is answered at once on the screen and by the robot's voice. A trip asked for in words is shown first, then the PIN |
-| **Tap the face** | the robot introduces itself: three short lines, one per tap. While busy it says what it is doing. The eyes glance at where it was touched |
+| **Tap the face** | the robot says its name and asks back ("Hi, I'm Pathik! What can I do for you today?"), and the three icons bounce to invite a tap. While busy it says what it is doing. The eyes glance at where it was touched |
 | **Answers** | the OK button at "wait for OK" stops and the error-recovery questions appear on the face (no PIN, like the app) |
 | **People detection** | YOLO11n on the **phone**, on the **Pi camera's plain picture**; the boxes go back to the robot |
 | Voice | stays on the **robot's speaker** (Piper); the phone's mic can be used to say a command in the kiosk |

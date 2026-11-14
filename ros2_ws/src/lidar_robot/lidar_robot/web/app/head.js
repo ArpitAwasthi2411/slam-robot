@@ -4,7 +4,7 @@
  *   side icons  Go (places, rooms, home, cancel) · Ask (questions answered at once; a trip asked for in words
  *               is shown first) · Deliver (errand). The PIN is asked LAST: after choosing, just before the robot
  *               starts. Questions never need the PIN.
- *   face tap    the robot introduces itself (a few lines, one per tap); while busy it says what it is doing
+ *   face tap    the robot says its name and asks what it can do (the icons bounce); while busy, what it is doing
  *   detection   people detection ON THE PHONE on the Pi camera's plain picture, boxes POSTed to the robot
  *               (/api/vision/phone): the Pi then skips its own YOLO; only while the robot is busy
  *   errands     kiosk: go to a place, check its door, say a message, wait, come back, speak a report (mission.js)
@@ -354,10 +354,10 @@
   $('d-close').onclick = closeSheets;
 
   // ---- tap the face: the robot tells about itself (one line per tap); while busy, what it is doing
-  const ABOUT = [
-    n => `Hi, I'm ${n}, the campus service robot. I can guide you to a room, carry things between rooms, and answer questions about the college.`,
-    () => 'I find my way with a laser scanner and a map of this floor. I stop for people, and the red stop button always works.',
-    () => 'Tap Go to choose a place, Ask to talk to me, or Deliver to send something. I ask for the PIN before I move.',
+  const ABOUT = [                                          // short and inviting: the name, then a question back
+    n => `Hi, I'm ${n}! What can I do for you today?`,
+    n => `I'm ${n}. Where would you like to go today?`,
+    n => `Hello, ${n} here! Ask me something, or tell me where to go.`,
   ];
   let aboutI = 0;
   $('face-wrap').onclick = ev => {
@@ -373,8 +373,10 @@
       return;
     }
     const text = ABOUT[aboutI++ % ABOUT.length](robotName());
-    S.ov = { mood: 'happy', line: aboutI % ABOUT.length === 1 ? `Hi, I'm ${robotName()}!` : 'About me', sub: text, greet: true };
-    setTimeout(() => { if (S.ov && S.ov.greet) S.ov = null; }, 700 + 62 * text.length + 1500);
+    S.ov = { mood: 'happy', line: text, sub: 'Tap Go, Ask or Deliver', greet: true };
+    setTimeout(() => { if (S.ov && S.ov.greet) S.ov = null; }, 700 + 62 * text.length + 2500);
+    document.body.classList.add('invite');                 // the three icons bounce once: "your turn"
+    setTimeout(() => document.body.classList.remove('invite'), 2600);
     if (store.get('greet', true)) say(text);
   };
 
