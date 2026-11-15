@@ -30,7 +30,7 @@ The Pi code from step 2 expects it.
 
 ## 2. New code on the Pi (15 min)
 
-Laptop:
+Laptop (unzip `slam-robot.zip` in Downloads first, so you have `~/Downloads/slam-robot/`):
 ```bash
 ip addr | grep 169.254 || bash ~/Downloads/slam-robot/scripts/setup_laptop_link.sh
 scp ~/Downloads/slam-robot.zip arpit@169.254.1.2:~
@@ -40,8 +40,7 @@ Pi (the first line keeps your calibration safe):
 ```bash
 cp ~/ros2_ws/src/lidar_robot/config/robot_params.yaml ~/robot_params.backup.yaml
 sudo systemctl stop robot
-rm -rf ~/slam-robot && mkdir ~/slam-robot && cd ~/slam-robot && unzip -q ~/slam-robot.zip
-[ -d ~/slam-robot/slam-robot-main ] && mv ~/slam-robot/slam-robot-main/* ~/slam-robot/ 2>/dev/null; true
+rm -rf ~/slam-robot && cd ~ && unzip -q ~/slam-robot.zip      # makes ~/slam-robot
 rm -rf ~/ros2_ws/src/lidar_robot ~/ros2_ws/build/lidar_robot ~/ros2_ws/install/lidar_robot
 cp -r ~/slam-robot/ros2_ws/src/lidar_robot ~/ros2_ws/src/
 diff ~/robot_params.backup.yaml ~/ros2_ws/src/lidar_robot/config/robot_params.yaml
