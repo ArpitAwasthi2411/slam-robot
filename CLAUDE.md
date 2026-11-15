@@ -81,10 +81,10 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Current status (update every session)
 
-Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
+Next lab day: **`docs/STEPS_lab_16nov.md`** (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-11-14**
+**Last updated: 2026-11-16**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -131,6 +131,11 @@ Open problems / TODO (priority order):
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-11-16: lab kit for the next robot day: docs/STEPS_lab_16nov.md (flash v2.8 + I2C scan, code to the Pi,
+  APK, link watch, 5 m push + spin, guard counters, footprint, map + 10 trips, person/chair, language + kiosk,
+  optional Nav2, results table). wheel_separation 0.294 now in the repo yaml + xacro default (2 Nov spin test).
+  Robot image CI fixed (test_nav2_follower skips its PyYAML check when yaml is missing).
 
 - 2026-11-14: head-mode kiosk rework: side icons Go / Ask / Deliver, **PIN asked last** (after choosing, just
   before the robot starts; questions never need it; `needPin(why, title)`), Ask sheet (dry-run command: answers

@@ -1,3 +1,4 @@
+import pytest
 """Nav2 behind the follower interface: goals, results, and Pathik's safety checks on Nav2's commands."""
 import math
 
@@ -152,7 +153,7 @@ def test_core_runs_a_mission_through_nav2(tmp_path):
 
 def test_nav2_params_match_the_robot():
     import ast
-    import yaml
+    yaml = pytest.importorskip('yaml')
     cfg = os.path.join(os.path.dirname(__file__), '..', 'config')
     n2 = yaml.safe_load(open(os.path.join(cfg, 'nav2_params.yaml')))
     rp = yaml.safe_load(open(os.path.join(cfg, 'robot_params.yaml')))['navigator']['ros__parameters']

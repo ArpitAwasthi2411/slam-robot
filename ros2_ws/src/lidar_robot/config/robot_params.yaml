@@ -4,7 +4,7 @@ esp32_bridge:
     serial_port: auto            # auto = /dev/esp32 (udev: GPIO UART ttyAMA0 or S3 USB), /dev/ttyACM* (S3), /dev/ttyUSB* (classic, skips the LiDAR)
     baud_rate: 115200
     wheel_radius: 0.0625         # 125 mm wheels
-    wheel_separation: 0.30       # tune with the 360-degree spin test (docs/calibration.md)
+    wheel_separation: 0.294      # 2 Nov 2026 lab: app spin test (was 0.30); re-check with docs/calibration.md
     ticks_per_rev_left: 5048.0   # 31 Oct 2026 lab: 5 m drive, wheels said 4.669 m vs 4.590 m taped (was 4963/4977)
     ticks_per_rev_right: 5063.0
     cmd_timeout: 0.5             # s, stale cmd_vel -> stop

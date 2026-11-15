@@ -24,7 +24,7 @@
   <xacro:arg name="footprint_rear" default="0.37"/>
   <xacro:arg name="footprint_half_width" default="0.21"/>
   <xacro:arg name="wheel_radius" default="0.0625"/>
-  <xacro:arg name="wheel_separation" default="0.30"/>
+  <xacro:arg name="wheel_separation" default="0.294"/>
 
   <xacro:property name="front" value="$(arg footprint_front)"/>
   <xacro:property name="rear" value="$(arg footprint_rear)"/>
