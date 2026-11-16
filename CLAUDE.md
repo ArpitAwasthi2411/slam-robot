@@ -132,6 +132,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-16 (lab): IMU replaced and working, firmware v2.8 confirmed, /odom 50 Hz, /scan 7.2 Hz, throttled 0x0,
+  robot drives well in one room; navigator + dashboard ~60 % CPU each at idle (to check). robot_check.sh fixed
+  (set -u before sourcing ROS made it exit silently). Department facts: plain paragraphs in ~/maps/info.txt
+  are read automatically (knowledge.parse_info, reloaded on change, read-only in the app);
+  tools/import_knowledge.py; test_import_knowledge.py. Next: department map (docs/mapping.md).
+
 - 2026-11-16: lab kit for the next robot day: docs/STEPS_lab_16nov.md (flash v2.8 + I2C scan, code to the Pi,
   APK, link watch, 5 m push + spin, guard counters, footprint, map + 10 trips, person/chair, language + kiosk,
   optional Nav2, results table). wheel_separation 0.294 now in the repo yaml + xacro default (2 Nov spin test).

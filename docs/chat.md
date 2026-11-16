@@ -60,6 +60,11 @@ checked". The notebook is the only source that is verified.
 - The robot is used by everyone who walks up to it: no phone numbers, no private details about people.
 - **Try** box: type a question and see which entries the robot would read. If none match, add tags.
 - Stored in `~/maps/knowledge.json` (not in Git). Three entries about the robot itself are built in.
+- **Many facts at once (easiest):** write plain paragraphs in one text file, one fact per paragraph with a
+  blank line between them (a short first line becomes the title), and copy it to the robot as
+  `~/maps/info.txt`. It is read at start and again whenever it changes; no restart needed. These entries show
+  as "info.txt" in the app and are edited in the file. (`tools/import_knowledge.py` copies such a file into
+  the editable notebook instead.)
 
 Suggested first entries: department name and courses, HOD and office location, office / library / lab timings,
 which lab is used for what, where to submit forms, who to ask about the robot, event of the week.

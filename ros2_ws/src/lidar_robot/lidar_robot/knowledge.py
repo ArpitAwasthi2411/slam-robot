@@ -5,7 +5,10 @@ few sentences and optional tags. The conversation agent (chat.py) looks up the e
 question and answers ONLY from them when the question is about the college, so it cannot make up a
 teacher's name or a timing. Without internet the best entry is read out as it is.
 
-Stored in ~/maps/knowledge.json (next to places.json). Search is plain word matching with weights:
+Stored in ~/maps/knowledge.json (next to places.json). The easy way to load many facts: write them as plain
+paragraphs in ~/maps/info.txt (one fact per paragraph, a blank line between them; a short first line is used
+as the title). The robot reads that file at start and again whenever it changes; those entries are read-only
+in the app (edit the file instead). Search is plain word matching with weights:
 no model, no internet, a few milliseconds on the Pi.
 """
 import difflib
@@ -37,6 +40,68 @@ BUILT_IN = [
      'tags': ['safe', 'safety', 'stop', 'emergency', 'hit', 'collision']},
 ]
 
+INFO_FILE = 'info.txt'                 # plain-text facts next to knowledge.json
+
+
+def parse_info(text):
+    """Plain text -> [(title, text, tags)].
+
+    Either free paragraphs (blank line between facts; a short first line becomes the title, otherwise the
+    first words), or '## title' blocks with an optional 'tags: a, b' line. Long paragraphs are split at
+    sentence ends so each entry stays under MAX_TEXT.
+    """
+    out = []
+    blocks, cur = [], []
+    headed = any(l.lstrip().startswith('#') for l in text.splitlines())
+    for raw in text.splitlines():
+        line = raw.strip()
+        if headed:
+            if line.startswith('#'):
+                if cur:
+                    blocks.append(cur)
+                cur = [line.lstrip('#').strip() or ' ']
+            elif cur:
+                cur.append(line)
+        elif line:
+            cur.append(line)
+        elif cur:
+            blocks.append(cur)
+            cur = []
+    if cur:
+        blocks.append(cur)
+    for b in blocks:
+        tags = []
+        body = []
+        for l in b:
+            m = re.match(r'^tags\s*:(.*)$', l, re.I)
+            if m:
+                tags = [t.strip() for t in m.group(1).split(',') if t.strip()]
+            elif l:
+                body.append(l)
+        if not body:
+            continue
+        if headed:
+            title, lines = body[0], body[1:]
+        elif len(body) > 1 and len(body[0]) <= 60:
+            title, lines = body[0].rstrip(':.'), body[1:]
+        else:
+            title, lines = ' '.join(' '.join(body).split()[:8]), body
+        txt = ' '.join(lines).strip()
+        if not txt or not title.strip():
+            continue
+        chunks, part = [], ''
+        for sent in re.split(r'(?<=[.!?])\s+', txt):
+            if part and len(part) + len(sent) + 1 > MAX_TEXT:
+                chunks.append(part)
+                part = sent
+            else:
+                part = (part + ' ' + sent).strip()
+        chunks.append(part)
+        for i, c in enumerate(chunks):
+            out.append((title if i == 0 else f'{title} ({i + 1})', c, tags))
+    return out
+
+
 STOP_WORDS = set('''a an the is are was were be been am i you he she it we they me my your our their this that these
 those of to in on at for from with by and or but if then so as do does did have has had can could will would shall
 should may might please tell about what which who whom whose when where why how there here any some no not yes
@@ -57,6 +122,8 @@ class Knowledge:
     def __init__(self, path=None):
         self.path = os.path.expanduser(path) if path else None
         self.entries = []
+        self.file_entries = []                           # from info.txt: read-only in the app
+        self._file_stamp = None
         self.version = 0
         self._index = None
         self.load()
@@ -76,7 +143,46 @@ class Knowledge:
                         self.entries.append(rec)
             except (OSError, ValueError, AttributeError):
                 self.entries = []
+        self._load_info()
         self._changed(save=False)
+
+    def info_path(self):
+        return os.path.join(os.path.dirname(self.path), INFO_FILE) if self.path else None
+
+    def _load_info(self):
+        p = self.info_path()
+        self.file_entries = []
+        try:
+            st = os.stat(p) if p else None
+        except OSError:
+            st = None
+        self._file_stamp = (st.st_mtime, st.st_size) if st else None
+        if not st:
+            return
+        try:
+            with open(p, encoding='utf-8', errors='replace') as f:
+                facts = parse_info(f.read())
+        except OSError:
+            return
+        for i, (title, text, tags) in enumerate(facts[:MAX_ENTRIES], 1):
+            rec = self._record(title, text, tags)
+            if rec:
+                rec['id'] = f'info-{i}'
+                self.file_entries.append(rec)
+
+    def refresh(self):
+        """Re-read info.txt if it changed on disk (cheap: one stat). True when it did."""
+        p = self.info_path()
+        try:
+            st = os.stat(p) if p else None
+        except OSError:
+            st = None
+        stamp = (st.st_mtime, st.st_size) if st else None
+        if stamp == self._file_stamp:
+            return False
+        self._load_info()
+        self._changed(save=False)
+        return True
 
     def save(self):
         if not self.path:
@@ -112,7 +218,7 @@ class Knowledge:
 
     # ---------------------------------------------------------------- editing (admin, from the app)
     def all(self):
-        return BUILT_IN + self.entries
+        return BUILT_IN + self.file_entries + self.entries
 
     def get(self, entry_id):
         return next((e for e in self.all() if e['id'] == entry_id), None)
@@ -132,8 +238,7 @@ class Knowledge:
     def update(self, entry_id, title=None, text=None, tags=None):
         e = next((x for x in self.entries if x['id'] == entry_id), None)
         if e is None:
-            raise ValueError('built-in entries cannot be changed' if str(entry_id).startswith('pathik-')
-                             else 'no such entry')
+            raise ValueError(self._readonly_why(entry_id, 'changed'))
         rec = self._record(e['title'] if title is None else title, e['text'] if text is None else text,
                            e['tags'] if tags is None else tags)
         if rec is None:
@@ -146,9 +251,16 @@ class Knowledge:
         n = len(self.entries)
         self.entries = [e for e in self.entries if e['id'] != entry_id]
         if len(self.entries) == n:
-            raise ValueError('built-in entries cannot be deleted' if str(entry_id).startswith('pathik-')
-                             else 'no such entry')
+            raise ValueError(self._readonly_why(entry_id, 'deleted'))
         self._changed()
+
+    @staticmethod
+    def _readonly_why(entry_id, verb):
+        if str(entry_id).startswith('pathik-'):
+            return f'built-in entries cannot be {verb}'
+        if str(entry_id).startswith('info-'):
+            return f'this fact comes from {INFO_FILE}: edit that file on the robot instead'
+        return 'no such entry'
 
     # ---------------------------------------------------------------- search
     def _build(self):
@@ -171,6 +283,7 @@ class Knowledge:
         q = _tokens(query)
         if not q:
             return []
+        self.refresh()
         if self._index is None:
             self._build()
         docs, idf = self._index
@@ -194,5 +307,8 @@ class Knowledge:
         return out[:limit]
 
     def summary(self):
-        return {'count': len(self.entries), 'built_in': len(BUILT_IN), 'version': self.version,
-                'entries': [dict(e, built_in=e['id'].startswith('pathik-')) for e in self.all()]}
+        self.refresh()
+        return {'count': len(self.entries), 'built_in': len(BUILT_IN), 'from_file': len(self.file_entries),
+                'version': self.version,
+                'entries': [dict(e, built_in=e['id'].startswith(('pathik-', 'info-')),
+                                 from_file=e['id'].startswith('info-')) for e in self.all()]}

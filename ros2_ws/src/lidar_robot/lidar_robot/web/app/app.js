@@ -2077,12 +2077,12 @@ let KN = { entries: [], edit: null };
 function knowRender(k) {
   KN.entries = k.entries || [];
   const c = k.chat || {};
-  $('#hub-know').textContent = `${k.count} entr${k.count === 1 ? 'y' : 'ies'} written · ${k.built_in} built in`;
+  $('#hub-know').textContent = `${k.count} entr${k.count === 1 ? 'y' : 'ies'} written · ${k.from_file || 0} from info.txt · ${k.built_in} built in`;
   $('#kn-stats').innerHTML = [['Entries', k.count], ['Questions', c.asked || 0], ['By the AI', c.llm || 0], ['Offline', c.offline || 0], ['Trips from talk', c.actions || 0], ['Answers blocked', c.guarded || 0]]
     .map(([a, b]) => `<div class="tile"><dt>${a}</dt><dd>${b}</dd></div>`).join('');
   const admin = can('admin');
   $('#kn-list').innerHTML = KN.entries.length ? KN.entries.map((e, i) => `<li>
-      <div class="l-top"><span>${esc(e.title)}</span>${e.built_in ? '<span class="pill-tag">built in</span>' : ''}</div>
+      <div class="l-top"><span>${esc(e.title)}</span>${e.from_file ? '<span class="pill-tag">info.txt</span>' : (e.built_in ? '<span class="pill-tag">built in</span>' : '')}</div>
       <div>${esc(e.text)}</div>
       ${e.tags && e.tags.length ? `<div class="l-sub">${esc(e.tags.join(' · '))}</div>` : ''}
       ${admin && !e.built_in ? `<div class="row gap"><button class="btn small ghost" data-kn="edit" data-i="${i}">Edit</button><button class="btn small ghost" data-kn="del" data-i="${i}">Delete</button></div>` : ''}
