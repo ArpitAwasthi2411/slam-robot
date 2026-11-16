@@ -139,3 +139,21 @@ def test_localization_needs_confirmation(tmp_path):
     nav.handle({'type': 'confirm_localization'})
     run(nav, clk, (1.0, 1.0, 0.0), 120)
     assert nav.queue.history[0].state == 'DONE'
+
+
+def test_plan_with_a_revisit_and_home_in_the_middle_drives_every_stop(tmp_path):
+    """LLM plan from the lab (16 Nov): Lab 3 -> home -> Lab 3 (wait) -> Store. Every stop is driven, in order."""
+    nav, clk = make_setup(tmp_path)
+    plan = {'intent': 'navigate', 'targets': ['Lab 3', 'home', 'Lab 3', 'Store'], 'priority': 1, 'reply': 'ok',
+            'source': 'llm', 'notes': [], 'then_home': False,
+            'steps': [{'place': 'Lab 3', 'wait_s': 0.0, 'confirm': False},
+                      {'place': 'home', 'wait_s': 0.0, 'confirm': False},
+                      {'place': 'Lab 3', 'wait_s': 5.0, 'confirm': False},
+                      {'place': 'Store', 'wait_s': 0.0, 'confirm': False}]}
+    nav.parser.parse = lambda text: plan
+    r = nav.handle({'type': 'command', 'text': 'lab 3 fir home fir lab 3 pe ruk ke store'}, (1.0, 1.0, 0.0))
+    assert r['ok'], r
+    x, y, yaw = run(nav, clk, (1.0, 1.0, 0.0), 600)
+    assert math.hypot(x - 1.0, y - 4.5) < 0.2, (x, y)
+    texts = ' | '.join(e['text'] for e in nav.events)
+    assert texts.count('arrived at Lab 3') == 2 and 'arrived at home' in texts and 'arrived at Store' in texts

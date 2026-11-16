@@ -55,6 +55,12 @@ CONFIRM = re.compile(r'^\s*(ok|okay|done|confirm(ed)?|received|got it|you can go
 WAIT_OK = re.compile(r'\b(wait (for|until) (an? )?(ok|okay|confirmation|someone|me|them|him|her|signature)'
                      r'|until (someone|they|i|he|she) (press|presses|tap|taps|say|says|confirm|confirms)'
                      r'|get (it )?(signed|confirmed)|wait for (a )?reply)\b')
+# Hindi / Hinglish step words: the English rules can't order these steps, so the LLM plans them.
+SEQ_HI = re.compile(r'\b(?:fir|phir|pahle|pehle|baad|wapas|waapas|vapas|wapis|ruk|ruko|rukna|rukke|jakar|jaakar|'
+                    r'aakar|akar|uske|iske|tab|phr|fr)\b')
+TIME_WORD = re.compile(r'\b(?:\d+|one|two|three|four|five|ten|ek|do|teen|char|paanch|das)\s*'
+                       r'(?:min|mins|minute|minutes|minut|minat|sec|secs|second|seconds|hour|hours|ghanta|ghante)\b')
+HOME_STOP = 'home'                     # a target meaning the home spot, for "go home first, then ..."
 SPLIT = re.compile(r'\s*(?:,|;|\bthen\b|\band then\b|\bafter that\b|\bfollowed by\b|\band\b)\s*')
 
 
@@ -126,7 +132,31 @@ class CommandParser:
             return bool(r.get('query'))
         if r['intent'] == 'navigate':
             # every destination-looking part of the sentence must have become a target
-            return bool(r['targets']) and not r['notes'] and self._destination_parts(text) <= len(r['targets'])
+            if not (r['targets'] and not r['notes'] and self._destination_parts(text) <= len(r['targets'])):
+                return False
+            return not self._multi_step_doubt(r, text)
+        return False
+
+    def _multi_step_doubt(self, r, text):
+        """Signs of a plan the English rules may have flattened (seen on the robot, Nov 2026): Hinglish
+        step words, a place visited twice, a wait the rules did not turn into one, home in the middle."""
+        t = normalize(text)
+        if SEQ_HI.search(t):
+            return True
+        pos = []
+        for name in r['targets']:
+            p = self.places.get(name) if hasattr(self.places, 'get') else None
+            labels = [name] + list((p or {}).get('aliases', []))
+            hits = sorted({m.start() for lab in labels if normalize(lab)
+                           for m in re.finditer(r'\b' + re.escape(normalize(lab)) + r'\b', t)})
+            if len(hits) > 1:
+                return True                              # the same place twice: a real multi-visit plan
+            pos += hits
+        if TIME_WORD.search(t) and not any(st.get('wait_s') for st in r.get('steps', [])):
+            return True                                  # "2 minut ruk ke": a wait the rules missed
+        last_place = max(pos, default=-1)
+        if any(m.start() < last_place for m in HOME.finditer(t)):
+            return True                                  # home in the middle of the trip
         return False
 
     @staticmethod
@@ -256,17 +286,21 @@ class CommandParser:
         catalog += [{'name': r['name'], 'aliases': r.get('aliases', []), 'room_contains': r.get('contents', [])}
                     for r in self.places.rooms if not self.places.get(r['name'])]
         names = [c['name'] for c in catalog]
+        if not any(n.lower() == HOME_STOP for n in names):
+            names = names + [HOME_STOP]
         system = (
             'You control an indoor campus robot. Convert the user command (English or Hinglish) into JSON with keys: '
             'intent (one of navigate, return_home, dock (go and charge), stop, status, '
             'explain (user asks why the robot stopped / what went wrong), '
             'find (user asks where something is), confirm (user says ok/done), unknown), '
             'query (for find: the thing asked about, else null), '
-            'targets (ordered list of place names, ONLY copied exactly from the provided list), '
+            'targets (ordered list of stops, ONLY names copied exactly from the provided list; the same place may '
+            'appear again if the user wants to visit it again; use "home" for a stop at the home spot in the '
+            'middle of a trip), '
             'priority (0 low, 1 normal, 2 high, 3 urgent), '
             'reply (one short friendly sentence to say back), '
             'waits (list of seconds to wait at each target, same order as targets, 0 if none), '
-            'then_home (true if the user wants the robot to come back / return afterwards), '
+            'then_home (true if the user wants the robot to come back / return home at the very end), '
             'confirms (list of true/false per target: true if the robot must wait there until someone presses OK). '
             'A target can be a room; if the user names a thing, pick the room whose room_contains has it. '
             'Never invent places. If a requested place is not in the list, leave it out and say so in reply. '
@@ -290,15 +324,28 @@ class CommandParser:
             res = self._result('find', [], 1, '', source, [])
             res['query'] = str(d.get('query') or '')[:80]
             return res
-        for raw in d.get('targets', []) or []:
-            p = self.places.target(str(raw))
-            if p is None:
-                hits = self.places.search(str(raw), limit=1, min_score=0.85)
-                p = hits[0][1] if hits else None
+        raw_waits = d.get('waits') if isinstance(d.get('waits'), list) else []
+        raw_confirms = d.get('confirms') if isinstance(d.get('confirms'), list) else []
+        kept = []                                         # (name, index in the model's list)
+        for i, raw in enumerate(d.get('targets', []) or []):
+            if str(raw).strip().lower() == HOME_STOP and not self.places.target(str(raw)):
+                p = {'name': HOME_STOP}
+            else:
+                p = self.places.target(str(raw))
+                if p is None:
+                    hits = self.places.search(str(raw), limit=1, min_score=0.85)
+                    p = hits[0][1] if hits else None
             if p is None:
                 notes.append(f'ignored place not on the map: "{raw}"')     # hallucination guard
-            elif p['name'] not in names:
+            elif not names or names[-1] != p['name']:      # a revisit is kept; the same stop twice in a row is not
                 names.append(p['name'])
+                kept.append(i)
+        if names and names[-1] == HOME_STOP:               # home at the end = the usual "then come back"
+            names.pop()
+            kept.pop()
+            d = dict(d, then_home=True)
+        if HOME_STOP in names and not getattr(self.places, 'home', None):
+            notes.append('a stop at home was asked for but no home spot is set')
         if intent == 'navigate' and not names:
             intent = 'unknown'
         try:
@@ -311,16 +358,20 @@ class CommandParser:
         reply = str(d.get('reply', ''))[:200]
         res = self._result(intent, names, prio, reply, source, notes)
         if intent == 'navigate':
-            from_text = self._steps_from_text(text, [self.places.target(n) for n in names])
-            waits = d.get('waits') if isinstance(d.get('waits'), list) else []
-            confirms = d.get('confirms') if isinstance(d.get('confirms'), list) else []
-            for i, st in enumerate(from_text['steps']):
+            simple = len(set(names)) == len(names) and HOME_STOP not in names
+            if simple:                                     # the text itself can add waits the model missed
+                from_text = self._steps_from_text(text, [self.places.target(n) for n in names])
+            else:                                          # revisits / home in the middle: trust the model's order
+                from_text = {'steps': [{'place': n, 'wait_s': 0.0, 'confirm': False} for n in names],
+                             'then_home': False}
+            for k, st in enumerate(from_text['steps']):
+                i = kept[k] if k < len(kept) else k
                 try:
-                    w = float(waits[i]) if i < len(waits) else 0.0
+                    w = float(raw_waits[i]) if i < len(raw_waits) else 0.0
                 except (TypeError, ValueError):
                     w = 0.0
                 st['wait_s'] = max(st['wait_s'], min(MAX_WAIT_S, max(0.0, w)))
-                st['confirm'] = bool(st.get('confirm')) or (i < len(confirms) and confirms[i] is True)
+                st['confirm'] = bool(st.get('confirm')) or (i < len(raw_confirms) and raw_confirms[i] is True)
             res['steps'] = from_text['steps']
             res['then_home'] = bool(d.get('then_home')) or from_text['then_home']
         return res

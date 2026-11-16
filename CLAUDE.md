@@ -132,6 +132,11 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-16 (lab, later): Test AI works on the robot (gpt-oss-20b, ~0.8 s), but the rules were "sure" about
+  long Hinglish multi-step plans and flattened them. commands.py `_multi_step_doubt` (SEQ_HI step words, a place
+  named twice, a missed time, home mid-trip) now sends those to the LLM; build() keeps revisits and a `home`
+  stop mid-trip (navigator drives it to the home spot). Tests in test_llm.py + test_navigator_core.py. docs/llm.md §6.
+
 - 2026-11-16 (lab): IMU replaced and working, firmware v2.8 confirmed, /odom 50 Hz, /scan 7.2 Hz, throttled 0x0,
   robot drives well in one room; navigator + dashboard ~60 % CPU each at idle (to check). robot_check.sh fixed
   (set -u before sourcing ROS made it exit silently). Department facts: plain paragraphs in ~/maps/info.txt

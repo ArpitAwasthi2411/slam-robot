@@ -126,3 +126,13 @@ recovery_llm_model: openai/gpt-oss-120b
 
 Model names change. Check [console.groq.com/docs/models](https://console.groq.com/docs/models) and the
 deprecations page when a model starts failing; the app's AI page will already say `model` and name it.
+
+## 6. When the rules are sure (lab finding, 16 Nov 2026)
+
+On the robot the offline rules said "sure" to long Hinglish plans and flattened them ("pahle test room, fir
+home, fir se test room pe 2 minut ruk ke best" became just Test room -> Best). Now, under `llm_policy: smart`,
+these go to the LLM: Hindi/Hinglish step words (fir, pahle, baad, wapas, ruk ...), a place named twice, a
+time ("2 minut") the rules did not turn into a wait, or home before the last place. The LLM plan keeps
+revisits and may use `home` as a stop in the middle; `home` as the last stop becomes "then come back".
+Simple commands ("test room jao", "go to lab 3 then library") still never call the LLM.
+

@@ -247,3 +247,53 @@ def test_navigator_core_serves_the_log_and_uses_a_preparsed_command(tmp_path):
            'steps': [], 'then_home': False}
     res = core.handle({'type': 'command', 'text': 'whatever', '_parsed': pre}, None)
     assert res['interpretation']['intent'] == 'stop'
+
+
+# ------------------------------------------------------------------ multi-step Hinglish goes to the LLM (lab, 16 Nov)
+def _lab_store(tmp_path):
+    s = PlaceStore(str(tmp_path / 'lab.json'))
+    s.add('Test room', 1, 1, 0)
+    s.add('Best', 2, 2, 0)
+    return s
+
+
+@pytest.mark.parametrize('text', [
+    'Nahin pahle to main test room jana hai FIR vahan se Tumhen best per jana hai FIR vahan se test per jakar '
+    'FIR vahan se Tumhen Wapas Aakar home per rukna hai',
+    'pahle test room jao na fir vahan se home per Wapas jakar Uske bad fir se test room per 2 minut ruk Ke '
+    'Uske bad Tum best per Wapas aao',
+    'go to test room, then best, then test room again',                 # same place twice
+    'go to test room for 2 minutes then best',                         # a wait the English rules miss
+    'go home and then go to best',                                     # home in the middle
+])
+def test_smart_policy_sends_multi_step_plans_to_the_llm(tmp_path, text):
+    post = Fake(reply(answer(targets=['Test room', 'Best'])))
+    c = CommandParser(_lab_store(tmp_path), groq_api_key=KEY, http_post=post, policy='smart').parse(text)
+    assert len(post.bodies) == 1 and c['llm']['used'], text
+
+
+@pytest.mark.parametrize('text', ['go to test room', 'test room jao', 'take this to best and come back',
+                                  'go to test room then best'])
+def test_smart_policy_keeps_simple_commands_offline(tmp_path, text):
+    post = Fake(reply(answer(targets=['Test room'])))
+    c = CommandParser(_lab_store(tmp_path), groq_api_key=KEY, http_post=post, policy='smart').parse(text)
+    assert not post.bodies and not c['llm']['used'], text
+
+
+def test_llm_plan_keeps_revisits_waits_and_a_home_stop(tmp_path):
+    """'test room, home, test room again (2 min), then best': the model's order survives the checks."""
+    plan = answer(targets=['Test room', 'home', 'Test room', 'Best'], waits=[0, 0, 120, 0], then_home=False)
+    post = Fake(reply(plan))
+    c = CommandParser(_lab_store(tmp_path), groq_api_key=KEY, http_post=post, policy='smart').parse(
+        'pahle test room jao na fir vahan se home per Wapas jakar Uske bad fir se test room per 2 minut ruk Ke '
+        'Uske bad Tum best per Wapas aao')
+    assert [s['place'] for s in c['steps']] == ['Test room', 'home', 'Test room', 'Best']
+    assert [s['wait_s'] for s in c['steps']] == [0.0, 0.0, 120.0, 0.0]
+    assert c['then_home'] is False
+
+
+def test_llm_home_at_the_end_becomes_then_home(tmp_path):
+    post = Fake(reply(answer(targets=['Test room', 'Best', 'home'])))
+    c = CommandParser(_lab_store(tmp_path), groq_api_key=KEY, http_post=post, policy='always').parse(
+        'test room fir best fir wapas home')
+    assert [s['place'] for s in c['steps']] == ['Test room', 'Best'] and c['then_home'] is True

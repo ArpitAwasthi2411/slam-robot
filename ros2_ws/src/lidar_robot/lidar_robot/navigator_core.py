@@ -647,7 +647,13 @@ class NavigatorCore:
         elif c['intent'] == 'navigate':
             stops = []
             for st in c.get('steps') or [{'place': n, 'wait_s': 0.0} for n in c['targets']]:
-                stop = self._stop_from_place(self.places.target(st['place']))
+                if st['place'] == 'home' and not self.places.target('home'):   # home as a stop mid-trip
+                    h = self.places.home
+                    if not h:
+                        raise ValueError('a stop at home was asked for, but no home spot is set')
+                    stop = Stop('home', h['x'], h['y'], h.get('yaw'))
+                else:
+                    stop = self._stop_from_place(self.places.target(st['place']))
                 stop.wait_s = float(st.get('wait_s') or 0.0)
                 stop.confirm = bool(st.get('confirm'))
                 stops.append(stop)
@@ -865,7 +871,8 @@ class NavigatorCore:
     def _plan_summary(self, c):
         steps = []
         if c['intent'] == 'navigate':
-            steps = [{'kind': 'go', 'label': st['place'], 'wait_s': st.get('wait_s', 0.0),
+            steps = [{'kind': 'home' if (st['place'] == 'home' and not self.places.target('home')) else 'go',
+                      'label': st['place'], 'wait_s': st.get('wait_s', 0.0),
                       'confirm': bool(st.get('confirm'))}
                      for st in (c.get('steps') or [{'place': n, 'wait_s': 0.0} for n in c['targets']])]
             if c.get('then_home'):
