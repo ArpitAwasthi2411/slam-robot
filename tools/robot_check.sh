@@ -2,9 +2,11 @@
 # One-shot health check while the robot runs: heat, power, CPU hogs, data rates, link events.
 #   bash ~/slam-robot/tools/robot_check.sh            (takes ~30 s; robot service must be running)
 # Send the whole output (or a photo of it) to Claude.
-set -u
+# ROS setup files use unset variables, so source them before turning on 'set -u'
+# (with -u first, the script exited silently inside setup.bash).
 source /opt/ros/humble/setup.bash 2>/dev/null
 source ~/ros2_ws/install/setup.bash 2>/dev/null
+set -u
 
 echo "== Heat + power =="
 if command -v vcgencmd >/dev/null; then
