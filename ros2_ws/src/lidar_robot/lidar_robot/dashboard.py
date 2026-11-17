@@ -32,7 +32,7 @@ from lidar_robot.auth import UserStore
 from lidar_robot.dashboard_server import DashboardServer
 from lidar_robot.explorer import MapAutoSaver
 from lidar_robot.kinematics import yaw_from_quaternion, quaternion_from_yaw, wrap_angle
-from lidar_robot import map_mode
+from lidar_robot import laptop_slam, map_mode
 from lidar_robot.mapsave import save_map
 from lidar_robot.pihealth import PiHealth, pi_is_hot
 from lidar_robot.vision_rules import clean_phone_detections
@@ -64,6 +64,10 @@ class DashboardNode(Node):
         self.declare_parameter('map_mode_file', '')            # app's map-mode choice (map_mode.py)
         self.declare_parameter('map_autosave_s', 180.0)        # save the live map this often while mapping (0 = off)
         self.declare_parameter('map_save_timeout_s', 120.0)    # Cartographer write_state on a big map can take a minute
+        self.declare_parameter('slam_host', 'pi')              # 'laptop': Cartographer runs on the laptop (laptop_slam.py)
+        self.declare_parameter('slam_save_dir', laptop_slam.DEFAULT_SAVE_DIR)   # where the laptop writes saved maps
+        self.declare_parameter('map_copy_timeout_s', 120.0)    # wait this long for the laptop's copy to reach ~/maps
+        self.declare_parameter('use_odometry', True)
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
         self.global_frame = gp('global_frame')
         self.fallback_frame = gp('fallback_frame')
@@ -77,6 +81,7 @@ class DashboardNode(Node):
         self.lock = threading.Lock()
         self.map_msg = None
         self.map_version = 0
+        self.map_t = None              # monotonic time of the last /map
         self.map_cache = None          # (version, dict)
         self.scan_msg = None           # latest scan; turned into app points only when an app asks
         self.scan_pts, self.scan_pts_of = [], None
@@ -151,6 +156,13 @@ class DashboardNode(Node):
         self.map_saver = map_mode.PeriodicMapSaver(self.save_map, float(self.get_parameter('map_autosave_s').value),
                                                    self.map_dir)
         self.create_timer(5.0, self._autosave_tick)
+        # who builds the map: the laptop riding on the robot follows this (scripts/laptop_slam.py)
+        self.slam_host = str(self.get_parameter('slam_host').value)
+        self.slam_save_dir = str(self.get_parameter('slam_save_dir').value) or laptop_slam.DEFAULT_SAVE_DIR
+        self.started, self._t0 = time.time(), time.monotonic()
+        self.slam_host_pub = self.create_publisher(String, 'slam_host', latched)
+        self._publish_slam_host()
+        self.create_timer(2.0, self._publish_slam_host)
         self._carto = None
         try:                                # Cartographer trajectory services, for "Set position"
             from cartographer_ros_msgs.srv import FinishTrajectory, GetTrajectoryStates, StartTrajectory
@@ -182,6 +194,7 @@ class DashboardNode(Node):
         with self.lock:
             self.map_msg = msg
             self.map_version += 1
+            self.map_t = time.monotonic()
 
     def _on_scan(self, msg: LaserScan):
         if self.laser_tf is None:
@@ -402,6 +415,8 @@ class DashboardNode(Node):
             'map_name': os.path.basename(self.map_file)[:-9] if self.map_file.endswith('.pbstream') else '',
             'switching': self.switching,
             'slam_error': self.slam_error,
+            'slam_host': self.slam_host,
+            'slam_warning': self._slam_warning(),
             'places': self.places,
             'vision': self.vision if time.monotonic() - self.vision_t < 2.0 else None,
             'camera': time.monotonic() - self.camera_t < 2.0,
@@ -665,6 +680,26 @@ class DashboardNode(Node):
         time.sleep(2.0)                     # let the app get its answer and show the message
         os._exit(map_mode.RESTART_CODE)     # launch sees this code, shuts down, systemd restarts it
 
+    def _publish_slam_host(self):
+        self.slam_host_pub.publish(String(data=laptop_slam.status_message(
+            self.slam_host, self.slam_mode, self.map_file, self.started, self.slam_save_dir, self.map_dir,
+            bool(self.get_parameter('use_odometry').value))))
+
+    def _slam_warning(self):
+        """The laptop builds the map: say so in the app when its map stops coming (cable, laptop asleep)."""
+        if self.slam_host != 'laptop' or self.slam_mode != 'mapping' or self.switching:
+            return None
+        now = time.monotonic()
+        if self.map_t is None:
+            if now - self._t0 > 30:
+                return ('No map from the laptop yet: start python3 scripts/laptop_slam.py on the laptop '
+                        'and check the Ethernet cable.')
+            return None
+        if now - self.map_t > 15:
+            return (f'The laptop\'s map stopped {now - self.map_t:.0f} s ago: check the Ethernet cable and that '
+                    'laptop_slam.py is running. The robot stops by itself when its map position gets old.')
+        return None
+
     def _write_pbstream(self, path, timeout=None):
         """Ask Cartographer to save its full state (needed for slam_mode:=localization). A department-size map
         on a busy Pi takes far longer than 10 s (17 Nov: every save said 'Cartographer not answering')."""
@@ -672,7 +707,10 @@ class DashboardNode(Node):
         if not self.write_state_cli or not self.write_state_cli.service_is_ready():
             return None
         req = self._WriteState.Request()
-        req.filename = path
+        laptop = self.slam_host == 'laptop' and self.slam_mode == 'mapping'
+        # on the laptop, Cartographer writes into its own folder; laptop_slam.py copies the file here
+        req.filename = os.path.join(self.slam_save_dir, os.path.basename(path)) if laptop else path
+        t_req = time.time()
         req.include_unfinished_submaps = True
         with self.lock:
             fut = self.write_state_cli.call_async(req)
@@ -680,6 +718,15 @@ class DashboardNode(Node):
         while not fut.done() and time.monotonic() - t0 < timeout:
             time.sleep(0.05)
         if fut.done() and fut.result() is not None and fut.result().status.code == 0:
+            if laptop:
+                wait = float(self.get_parameter('map_copy_timeout_s').value)
+                t1 = time.monotonic()
+                while not laptop_slam.file_arrived(path, t_req) and time.monotonic() - t1 < wait:
+                    time.sleep(0.5)
+                if not laptop_slam.file_arrived(path, t_req):
+                    self.get_logger().warn(f'the laptop saved {os.path.basename(path)} but its copy did not reach '
+                                           f'{self.map_dir} in {wait:.0f} s (is laptop_slam.py running? SSH key?)')
+                    return None
             self.get_logger().info(f'Cartographer state saved: {path}')
             return path
         self.get_logger().warn('Could not save .pbstream (Cartographer busy or not running)')

@@ -13,6 +13,8 @@ Arguments
   use_odometry  true        fuse ESP32 encoder odometry into Cartographer
   slam          true        start Cartographer + occupancy grid
   slam_mode     mapping     mapping | localization (needs map:=<file>.pbstream, odometry on)
+  slam_host     pi          pi | laptop: while mapping, Cartographer runs on the laptop on the Ethernet
+                            cable (scripts/laptop_slam.py, docs/laptop_slam.md); localization stays on the Pi
   map           ''          saved Cartographer state for localization
   map_mode_file ~/maps/map_mode.json   the app's choice (Map tab: freeze / continue / new map): wins over
                             slam_mode/map when the file exists ('' or off = ignore it). See map_mode.py
@@ -58,6 +60,7 @@ def _setup(context):
     use_odom = _truthy(cfg('use_odometry'))
     slam = _truthy(cfg('slam'))
     slam_mode = cfg('slam_mode')
+    slam_host = cfg('slam_host') if cfg('slam_host') in ('pi', 'laptop') else 'pi'
     map_file = os.path.expanduser(cfg('map'))
     # the app's map mode (Map tab: freeze / continue / new / use) wins over ROBOT_ARGS (map_mode.py)
     from lidar_robot.map_mode import RESTART_CODE, resolve
@@ -150,7 +153,12 @@ def _setup(context):
         parameters=[params, {'serial_port': esp_port, 'publish_tf': use_odom,
                              'exclude_ports': lidar_port}]))
 
-    if slam:
+    laptop_maps = slam and slam_mode == 'mapping' and slam_host == 'laptop'
+    if laptop_maps:
+        # the laptop on the Ethernet cable runs Cartographer (scripts/laptop_slam.py); only ONE may run
+        actions.append(LogInfo(msg='[bringup] slam_host:=laptop: the map is built on the laptop '
+                                   '(python3 scripts/laptop_slam.py there). No Cartographer on the Pi.'))
+    elif slam:
         if slam_mode == 'localization':
             lua = 'cartographer_localization.lua'
             extra = [f'-load_state_filename={map_file}', '-load_frozen_state=true']
@@ -234,6 +242,9 @@ def _setup(context):
                                  'slam_mode': slam_mode if slam else 'off',
                                  'map_file': map_file if slam else '',
                                  'map_mode_file': mode_file,
+                                 'slam_host': slam_host if laptop_maps else 'pi',
+                                 'slam_save_dir': cfg('slam_save_dir'),
+                                 'use_odometry': use_odom,
                                  'carto_config_dir': os.path.join(share, 'config')}])
         actions.append(dash)
         # app map-mode switch: the dashboard exits with RESTART_CODE -> stop everything; systemd
@@ -249,6 +260,7 @@ def _setup(context):
 def generate_launch_description():
     args = [
         ('use_odometry', 'true'), ('slam', 'true'), ('slam_mode', 'mapping'), ('map', ''),
+        ('slam_host', 'pi'), ('slam_save_dir', '/tmp/pathik_maps'),
         ('map_mode_file', '~/maps/map_mode.json'),
         ('nav_mode', 'planner'), ('dashboard', 'true'), ('places', '~/maps/places.json'),
         ('lidar_port', 'auto'),

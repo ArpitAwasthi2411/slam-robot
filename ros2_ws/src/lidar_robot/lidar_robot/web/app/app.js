@@ -1382,6 +1382,8 @@ function renderMapMode(st) {
         : ago !== null ? ` Autosaved ${ago ? ago + ' min ago' : 'just now'} as ${as.name}.` : ' Autosave every 3 min.';
   }
   if (!sw && st.slam_error && Date.now() / 1000 - st.slam_error.t < 600) $('#mm-text').textContent += ' ' + st.slam_error.msg;
+  if (!sw && !frozen && st.slam_host === 'laptop') $('#mm-text').textContent += ' Map built on the laptop.';
+  if (!sw && st.slam_warning) $('#mm-text').textContent += ' ' + st.slam_warning;
   $('#mm-switching').hidden = !sw;
   if (sw) $('#mm-switching').textContent = sw.say || 'Restarting…';
   $('#mm-btns').hidden = !!sw;

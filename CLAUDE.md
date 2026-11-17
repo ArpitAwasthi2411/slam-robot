@@ -68,6 +68,8 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
   Docker (`Dockerfile`, `deploy/pi/docker-compose.yml`, `scripts/pathik.sh`) is built by CI but not installed on the Pi.
 - CI: `robot-image.yml` (tests → image → ghcr.io/arpitawasthi2411/slam-robot), `android.yml` (APK release),
   `firmware.yml` (S3 + classic on cores 2.0.17 and 3.0.7).
+- Laptop mapping: `slam_host:=laptop` on the Pi + `scripts/laptop_slam.py` on a laptop on the Ethernet cable runs
+  Cartographer (`cartographer_laptop.lua`), records, copies saved maps to the Pi (`laptop_slam.py`, `docs/laptop_slam.md`).
 - Voice on the robot: `voice_node.py` (push-to-talk → arecord → `voice.py` Groq Whisper / Vosk → navigator command →
   reply via `/speech/say`), `speech.py` Speaker (Piper / espeak), `scripts/setup_voice.sh`, `docs/STEPS_voice.md`.
 - Vision on the robot: `vision_node.py` (Camera Module 3 via libcamera/GStreamer subprocess, 5 frames/s to Python, YOLO11n NCNN det_rate 2/s on core 3,
@@ -125,6 +127,7 @@ Open problems / TODO (priority order):
    PIN-last flow; stand in the path (must ask) and put a chair there (must reroute silently).
 9. Nav2 backend (2026-11-11): `bash scripts/setup_nav2.sh`, `nav_mode:=nav2`, first test on blocks (docs/nav2.md),
    then 10 trips per backend and compare.
+11. Laptop mapping (docs/laptop_slam.md): laptop setup, `slam_host:=laptop`, map the department with the laptop on board.
 8. Conversation agent + map fixes (2026-11-10): flash firmware v2.8, deploy, write the notebook in the app, run
    `tools/eval_chat.py` with the key; map one corridor and check `odom_guard` in /robot/status and the jump log.
 
@@ -132,6 +135,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-17 (night): laptop mapping: Pi `slam_host:=laptop` starts no Cartographer while mapping; dashboard publishes
+  latched /slam_host (host, mode, map, boot, save_dir, map_dir); scripts/laptop_slam.py on the laptop (Ethernet) starts/
+  restarts/stops Cartographer + grid node from it, records ~/bags/laptop_<time>, RViz, rsyncs saved .pbstream files to
+  the Pi; dashboard write_state goes to the laptop's save_dir and waits for the copy; app Map card shows laptop status +
+  warning when /map stops (robot stops via map_tf_timeout). cartographer_laptop.lua (10 cm nodes, 4 threads, sampling 0.3).
+  test_laptop_slam.py. Not run on the robot yet.
 - 2026-11-17: department mapping run on 16 Nov lost its map: no fan, Pi ~80 °C at 100 % CPU, never saved
   (map was steadier than before). map_mode.PeriodicMapSaver: dashboard autosaves the live map every 3 min
   (`map_autosave_s`) and at once when hot, as ~/maps/autosave_<start>, newest 3 kept, Map tab shows it.

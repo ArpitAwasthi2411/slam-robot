@@ -183,3 +183,7 @@ turn bends the map); `gyro_scale` from the Spin test.
 
 The Cartographer changes are **not tested on the robot yet**. If mapping gets worse or Cartographer logs
 "Ignored subdivision", set `num_subdivisions_per_laser_scan` and `num_accumulated_range_data` back to 1.
+
+## Mapping with a laptop on the robot
+
+For a big floor, let a laptop on the Ethernet cable build the map while the Pi drives: docs/laptop_slam.md.
