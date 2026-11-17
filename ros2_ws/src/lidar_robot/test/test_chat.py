@@ -292,3 +292,10 @@ def test_speak_is_dropped_when_it_could_say_something_else(tmp_path):
     agent, parser, _, _ = make(tmp_path, say('Principal Mr. X hain.', 'knowledge', ['k99'], speak='प्रिंसिपल मिस्टर एक्स हैं।'))
     r = agent.handle('principal kaun hai', parser)
     assert r['reply'] == DONT_KNOW and r.get('speak') is None
+
+
+def test_replies_are_never_in_urdu_script(tmp_path):
+    agent, parser, fake, _ = make(tmp_path, say('HOD Dr. Meera Rao hain.', 'knowledge', ['k1']))
+    agent.handle('ایچ او ڈی کون ہے؟', parser)
+    sysmsg = fake.bodies[0]['messages'][0]['content']
+    assert 'Never write Urdu or Arabic script' in sysmsg

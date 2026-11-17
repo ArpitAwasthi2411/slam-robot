@@ -11,6 +11,7 @@ import importlib.util
 import io
 import json
 import math
+import re
 import os
 import time
 import urllib.error
@@ -143,6 +144,9 @@ def _http_post(url, body, headers, timeout):
         raise LLMError(kind, detail, e.code) from None
 
 
+URDU = re.compile('[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff]')
+
+
 # ------------------------------------------------------------------ engines
 class GroqWhisper:
     """Whisper on Groq (needs GROQ_API_KEY + internet). language None = detect (English, Hindi, Hinglish)."""
@@ -159,10 +163,25 @@ class GroqWhisper:
     def transcribe(self, wav):
         if not self.key:
             raise RuntimeError('no GROQ_API_KEY')
+        r = self._ask(wav, self.language)
+        # Whisper often writes spoken Hindi in Urdu (Arabic) script; the robot can neither read nor speak it.
+        # Ask again with Hindi forced, which comes back in Devanagari.
+        if not self.language and URDU.search(r['text']):
+            try:
+                r2 = self._ask(wav, 'hi')
+                if r2['text'] and not URDU.search(r2['text']):
+                    r2['retried'] = 'urdu script -> hi'
+                    return r2
+            except Exception:
+                pass
+        return r
+
+    def _ask(self, wav, language):
         fields = {'model': self.model, 'response_format': 'verbose_json', 'temperature': '0',
-                  'prompt': 'Commands for a campus robot: go to Lab 3, HOD office, come back, wait, stop, charge.'}
-        if self.language:
-            fields['language'] = self.language
+                  'prompt': 'Commands for a campus robot: go to Lab 3, HOD office, come back, wait, stop, charge. '
+                            'HOD kaun hai? Lab 3 jao, phir wapas aao. एचओडी कौन है?'}
+        if language:
+            fields['language'] = language
         body, ctype = multipart(fields, {'file': ('speech.wav', wav, 'audio/wav')})
         r = self._post(GROQ_STT_URL, body, {'Authorization': f'Bearer {self.key}', 'Content-Type': ctype},
                        self.timeout)

@@ -24,6 +24,7 @@ import subprocess
 import threading
 import time
 
+ARABIC = re.compile('[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff]')
 DEVANAGARI = re.compile('[ऀ-ॿ]')
 PRIORITY_KEYS = {'recovery_ask', 'battery', 'confirm', 'estop', 'voice_reply', 'dock'}
 PIPER_DIRS = ['~/piper', '/opt/piper', '/usr/local/share/piper']
@@ -170,6 +171,8 @@ class Speaker:
         Returns True if queued."""
         if not (self.enabled and text):
             return False
+        if ARABIC.search(text) and not DEVANAGARI.search(text):
+            text = 'Sorry, please say that again.'      # Urdu/Arabic script: no voice here can read it
         key = key or text
         now = self.clock()
         if now - self._last.get(key, -1e9) < (self.min_gap_s if gap_s is None else gap_s):

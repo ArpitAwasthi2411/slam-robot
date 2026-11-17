@@ -144,6 +144,10 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
   Robot mic: USB card found, button OK, but the lapel mic records very quietly (peak ~900/32767, likely a phone-
   style TRRS plug in the TRS mic jack) -> voice.boost() scales quiet recordings up to half scale (max x30, never
   plain silence); TRRS->TRS splitter suggested. mic_device/speech_device set to plughw:CARD=Device,DEV=0 on the Pi.
+  Splitter fixed the mic. Then Whisper wrote spoken Hindi in Urdu script and the chat replied in Urdu script (the
+  answer itself was right: HOD Dr. Shashi Gurung) -> GroqWhisper retries with language=hi when the text is Urdu
+  script (Devanagari back); chat prompt: replies in English or Roman Hinglish, never Urdu script; Speaker never
+  reads Arabic script (says 'Sorry, please say that again.'). Right wheel would not go forward: R_EN/RPWM wiring.
 
 - 2026-11-16 (lab, later): Test AI works on the robot (gpt-oss-20b, ~0.8 s), but the rules were "sure" about
   long Hinglish multi-step plans and flattened them. commands.py `_multi_step_doubt` (SEQ_HI step words, a place

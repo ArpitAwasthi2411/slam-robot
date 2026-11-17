@@ -47,3 +47,11 @@ def test_speaker_rate_is_clamped():
     from lidar_robot.speech import Speaker
     assert Speaker(runner=lambda t: None, rate=5).rate == 2.0
     assert Speaker(runner=lambda t: None, rate=0.1).rate == 0.6
+
+
+def test_urdu_script_is_never_spoken_as_gibberish():
+    from lidar_robot.speech import Speaker
+    said = []
+    s = Speaker(runner=said.append)
+    s.say('ہمارے شعبے کے ایچ او ڈی ڈاکٹر ششی گرنگ ہیں')
+    assert s.spoken[0] == 'Sorry, please say that again.'

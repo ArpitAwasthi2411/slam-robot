@@ -270,3 +270,19 @@ def test_quiet_microphone_is_boosted_but_silence_is_not():
         prepare(write_wav(16000, noise))
     loud = [int(20000 * math.sin(i / 8.0)) for i in range(16000)]
     assert boost(loud)[1] == 1.0
+
+
+def test_urdu_script_transcript_is_asked_again_in_hindi():
+    from lidar_robot.voice import GroqWhisper
+    calls = []
+
+    def post(url, body, headers, timeout):
+        forced = b'name="language"' in body
+        calls.append(forced)
+        return {'text': 'एचओडी कौन है?' if forced else 'ایچ او ڈی کون ہے؟', 'language': 'hindi' if forced else 'urdu'}
+    r = GroqWhisper('k', http_post=post).transcribe(b'RIFF')
+    assert r['text'] == 'एचओडी कौन है?' and r['retried'] and calls == [False, True]
+    # normal English / Hinglish: one call only
+    calls.clear()
+    r = GroqWhisper('k', http_post=lambda *a: calls.append(1) or {'text': 'HOD kaun hai', 'language': 'en'}).transcribe(b'RIFF')
+    assert r['text'] == 'HOD kaun hai' and len(calls) == 1
