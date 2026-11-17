@@ -60,6 +60,15 @@ def cpu_times(stat_text):
     return total - idle, total
 
 
+def pi_is_hot(h, temp_c=78.0):
+    """PiHealth sample -> True when the live map should be saved at once: >= temp_c or throttled now.
+    'throttled' may be an int, '0x50005', 'throttled=0x0' or None."""
+    t = h.get('throttled')
+    if not isinstance(t, int):
+        t = parse_throttled(str(t)) if t is not None else 0
+    return (h.get('temp_c') or 0) >= temp_c or bool((t or 0) & 0xF)
+
+
 def level_of(temp_c, throttled, cpu_pct):
     """'ok' | 'warn' | 'bad' and a short sentence for the app."""
     now = (throttled or 0) & 0xF

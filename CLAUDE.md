@@ -139,6 +139,8 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
   `speech_pause_s` 0.3) and streamed into aplay; chat answers carry `speak` (Devanagari for Hindi/Hinglish,
   checked against the reply) for the hi_IN voice; kiosk skips the second round trip for chat answers and says
   "One second." / "एक सेकंड।" after 2.5 s; voice_reply never rate-dropped. Tests in test_map_mode/test_speech/test_chat.
+  Lab same day: the autosave check crashed the dashboard 5 s after start (PiHealth 'throttled' is a string on the
+  Pi) -> pihealth.pi_is_hot() parses every format, the tick is wrapped so autosave can never stop the app.
 
 - 2026-11-16 (lab, later): Test AI works on the robot (gpt-oss-20b, ~0.8 s), but the rules were "sure" about
   long Hinglish multi-step plans and flattened them. commands.py `_multi_step_doubt` (SEQ_HI step words, a place

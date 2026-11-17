@@ -187,3 +187,11 @@ def test_autosave_keeps_only_the_newest_drives(tmp_path):
     left = sorted(p.name for p in tmp_path.iterdir())
     assert 'cse_floor.pbstream' in left and 'autosave_2026-11-10_1000.pbstream' not in left
     assert len([n for n in left if n.endswith('.pbstream') and n.startswith('autosave_')]) == 3
+
+
+def test_pi_is_hot_accepts_every_throttled_format():
+    from lidar_robot.pihealth import pi_is_hot as hot
+    assert not hot({'temp_c': 50, 'throttled': '0x0'}) and not hot({'temp_c': 50, 'throttled': 0})
+    assert not hot({'temp_c': None, 'throttled': None}) and not hot({})
+    assert hot({'temp_c': 50, 'throttled': '0x50005'}) and hot({'temp_c': 50, 'throttled': 'throttled=0x4'})
+    assert hot({'temp_c': 79, 'throttled': '0x0'}) and hot({'temp_c': 50, 'throttled': 2})

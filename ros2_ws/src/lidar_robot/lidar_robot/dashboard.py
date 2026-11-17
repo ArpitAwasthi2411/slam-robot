@@ -34,7 +34,7 @@ from lidar_robot.explorer import MapAutoSaver
 from lidar_robot.kinematics import yaw_from_quaternion, quaternion_from_yaw, wrap_angle
 from lidar_robot import map_mode
 from lidar_robot.mapsave import save_map
-from lidar_robot.pihealth import PiHealth
+from lidar_robot.pihealth import PiHealth, pi_is_hot
 from lidar_robot.vision_rules import clean_phone_detections
 from lidar_robot import scan_points
 from lidar_robot.tuning import TelemetryBuffer, TestRunner, ranges_for_app, WHEEL_RANGES
@@ -216,12 +216,14 @@ class DashboardNode(Node):
                                    f"throttled {h.get('throttled')})", throttle_duration_sec=60.0)
 
     def _autosave_tick(self):
-        with self.lock:
-            version = self.map_version if self.map_msg is not None else None
-        h = self.pihealth.sample()
-        hot = (h.get('temp_c') or 0) >= 78 or bool((h.get('throttled') or 0) & 0xF)
-        if self.map_saver.tick(time.monotonic(), self.slam_mode == 'mapping' and not self.switching, version, hot):
-            self.get_logger().info(f'autosaving the live map as {self.map_saver.name}' + (' (Pi is hot)' if hot else ''))
+        try:                                # an autosave problem must never take the app down
+            with self.lock:
+                version = self.map_version if self.map_msg is not None else None
+            hot = pi_is_hot(self.pihealth.sample())
+            if self.map_saver.tick(time.monotonic(), self.slam_mode == 'mapping' and not self.switching, version, hot):
+                self.get_logger().info(f'autosaving the live map as {self.map_saver.name}' + (' (Pi is hot)' if hot else ''))
+        except Exception as e:
+            self.get_logger().warning(f'map autosave check failed: {e}', throttle_duration_sec=60.0)
 
     def _on_robot_status(self, msg):
         try:
