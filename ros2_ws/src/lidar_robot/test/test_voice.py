@@ -253,3 +253,20 @@ def test_voice_api_is_for_any_logged_in_user_and_the_simulator_pretends(tmp_path
     st = b.get_state()['voice']
     assert st['last_heard'] == 'go to lab 3' and st['mic'] is False
     json.dumps(st)
+
+
+def test_quiet_microphone_is_boosted_but_silence_is_not():
+    import math
+    from lidar_robot.voice import boost, prepare, write_wav
+    # speech-like tone with a peak of ~900 (the lapel mic on the robot's USB card, 17 Nov)
+    quiet = [int(900 * math.sin(i / 8.0)) if 8000 <= i < 24000 else 0 for i in range(32000)]
+    wav, facts = prepare(write_wav(16000, quiet))
+    assert facts['gain'] > 10 and facts['seconds'] > 0.9
+    # plain room noise stays as it is, and is still "nothing heard"
+    noise = [((i * 7919) % 200) - 100 for i in range(32000)]
+    assert boost(noise)[1] == 1.0
+    import pytest
+    with pytest.raises(ValueError):
+        prepare(write_wav(16000, noise))
+    loud = [int(20000 * math.sin(i / 8.0)) for i in range(16000)]
+    assert boost(loud)[1] == 1.0

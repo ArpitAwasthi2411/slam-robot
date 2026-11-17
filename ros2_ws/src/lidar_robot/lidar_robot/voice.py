@@ -84,11 +84,23 @@ def speech_bounds(samples, rate, frame_ms=30, threshold_db=-42.0, pad_ms=200):
     return max(0, loud[0] - pad), min(len(samples), loud[-1] + n + pad), len(loud) * n / float(rate)
 
 
+def boost(samples, target_peak=16000, max_gain=30.0, min_peak=400):
+    """Quiet microphone (e.g. a phone-style lapel mic in a sound card's mic jack: peak ~1000 of 32767) ->
+    scale it up so the peak is about half of full scale. Nothing is done to plain silence (peak < min_peak),
+    so room noise is never blown up into fake words. Returns (samples, gain)."""
+    peak = max((abs(x) for x in samples), default=0)
+    if peak < min_peak or peak >= target_peak:
+        return samples, 1.0
+    g = min(max_gain, target_peak / float(peak))
+    return [max(-32768, min(32767, int(x * g))) for x in samples], round(g, 1)
+
+
 def prepare(data, min_speech_s=0.25):
     """Recorded WAV -> 16 kHz mono WAV with the silence trimmed, plus facts. Raises ValueError with a
     sentence the robot can say ("I didn't hear anything")."""
     rate, s = read_wav(data)
     s = resample(s, rate, 16000)
+    s, gain = boost(s)
     b = speech_bounds(s, 16000)
     if b is None:
         raise ValueError("I didn't hear anything. Hold the button and speak a bit louder.")
@@ -96,7 +108,7 @@ def prepare(data, min_speech_s=0.25):
     dur = len(s) / 16000.0
     if b[2] < min_speech_s:
         raise ValueError("That was too short. Hold the button while you speak.")
-    return write_wav(16000, s), {'seconds': round(dur, 2), 'level_db': round(level_dbfs(s), 1)}
+    return write_wav(16000, s), {'seconds': round(dur, 2), 'level_db': round(level_dbfs(s), 1), 'gain': gain}
 
 
 def multipart(fields, files):

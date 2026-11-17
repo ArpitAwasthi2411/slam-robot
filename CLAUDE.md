@@ -141,6 +141,9 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
   "One second." / "एक सेकंड।" after 2.5 s; voice_reply never rate-dropped. Tests in test_map_mode/test_speech/test_chat.
   Lab same day: the autosave check crashed the dashboard 5 s after start (PiHealth 'throttled' is a string on the
   Pi) -> pihealth.pi_is_hot() parses every format, the tick is wrapped so autosave can never stop the app.
+  Robot mic: USB card found, button OK, but the lapel mic records very quietly (peak ~900/32767, likely a phone-
+  style TRRS plug in the TRS mic jack) -> voice.boost() scales quiet recordings up to half scale (max x30, never
+  plain silence); TRRS->TRS splitter suggested. mic_device/speech_device set to plughw:CARD=Device,DEV=0 on the Pi.
 
 - 2026-11-16 (lab, later): Test AI works on the robot (gpt-oss-20b, ~0.8 s), but the rules were "sure" about
   long Hinglish multi-step plans and flattened them. commands.py `_multi_step_doubt` (SEQ_HI step words, a place
