@@ -62,6 +62,7 @@ class DashboardNode(Node):
         self.declare_parameter('carto_config_dir', '')
         self.declare_parameter('map_file', '')                 # the saved map in use (bringup passes it)
         self.declare_parameter('map_mode_file', '')            # app's map-mode choice (map_mode.py)
+        self.declare_parameter('map_autosave_s', 180.0)        # save the live map this often while mapping (0 = off)
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
         self.global_frame = gp('global_frame')
         self.fallback_frame = gp('fallback_frame')
@@ -145,6 +146,9 @@ class DashboardNode(Node):
         self.map_file = str(self.get_parameter('map_file').value)
         self.map_mode_file = str(self.get_parameter('map_mode_file').value)
         self.switching = None              # {'mode', 'map', 'say'} once a map-mode switch started
+        self.map_saver = map_mode.PeriodicMapSaver(self.save_map, float(self.get_parameter('map_autosave_s').value),
+                                                   self.map_dir)
+        self.create_timer(5.0, self._autosave_tick)
         self._carto = None
         try:                                # Cartographer trajectory services, for "Set position"
             from cartographer_ros_msgs.srv import FinishTrajectory, GetTrajectoryStates, StartTrajectory
@@ -210,6 +214,14 @@ class DashboardNode(Node):
         if h.get('level') == 'bad':
             self.get_logger().warn(f"Raspberry Pi: {h['text']} (temp {h.get('temp_c')} C, "
                                    f"throttled {h.get('throttled')})", throttle_duration_sec=60.0)
+
+    def _autosave_tick(self):
+        with self.lock:
+            version = self.map_version if self.map_msg is not None else None
+        h = self.pihealth.sample()
+        hot = (h.get('temp_c') or 0) >= 78 or bool((h.get('throttled') or 0) & 0xF)
+        if self.map_saver.tick(time.monotonic(), self.slam_mode == 'mapping' and not self.switching, version, hot):
+            self.get_logger().info(f'autosaving the live map as {self.map_saver.name}' + (' (Pi is hot)' if hot else ''))
 
     def _on_robot_status(self, msg):
         try:
@@ -381,6 +393,7 @@ class DashboardNode(Node):
             'tune': rs.get('tune'), 'fw': rs.get('fw'), 'telemetry': rs.get('telemetry'),
             'turns': odom.get('turns'), 'sep': rs.get('sep'), 'gyro_scale': rs.get('gyro_scale'), 'test_running': bool(self.tests.result.get('running')),
             'autosave': self.autosave.info,
+            'map_autosave': self.map_saver.info if self.slam_mode == 'mapping' else None,
             'slam_mode': self.slam_mode,
             'map_name': os.path.basename(self.map_file)[:-9] if self.map_file.endswith('.pbstream') else '',
             'switching': self.switching,

@@ -266,3 +266,29 @@ def test_only_admins_change_what_the_robot_tells_people():
     assert required_role('POST', '/api/nav', {'type': 'knowledge_add'}) == 'admin'
     assert required_role('POST', '/api/nav', {'type': 'knowledge_remove'}) == 'admin'
     assert required_role('POST', '/api/nav', {'type': 'command'}) == 'staff'
+
+
+# ------------------------------------------------------------------ the robot's Hindi voice
+def test_hinglish_answer_comes_with_a_devanagari_version_for_the_speaker(tmp_path):
+    agent, parser, fake, _ = make(tmp_path, say('HOD Dr. Meera Rao hain, unka cabin HOD office mein hai.',
+                                                'knowledge', ['k1'],
+                                                speak='एचओडी डॉक्टर मीरा राव हैं, उनका केबिन एचओडी ऑफिस में है।'))
+    r = agent.handle('hod kaun hai?', parser)
+    assert 'Meera Rao' in r['reply'] and r['speak'].startswith('एचओडी')
+    schema = fake.bodies[0]['response_format']['json_schema']['schema']
+    assert 'speak' in schema['required'] and 'Devanagari' in fake.bodies[0]['messages'][0]['content']
+
+
+def test_speak_is_dropped_when_it_could_say_something_else(tmp_path):
+    # English reply, Latin "speak": nothing for the Hindi voice
+    agent, parser, _, _ = make(tmp_path, say('The library is open from 9 am to 5 pm.', 'knowledge', ['k2'],
+                                             speak='The library is open.'))
+    assert agent.handle('library timings?', parser).get('speak') is None
+    # a number the checked reply does not have
+    agent, parser, _, _ = make(tmp_path, say('Library 9 se 5 baje tak khuli hai.', 'knowledge', ['k2'],
+                                             speak='लाइब्रेरी 9 से 11 बजे तक खुली है।'))
+    assert agent.handle('library kab khulti hai', parser).get('speak') is None
+    # a guard replaced the reply: the old Devanagari must not be spoken
+    agent, parser, _, _ = make(tmp_path, say('Principal Mr. X hain.', 'knowledge', ['k99'], speak='प्रिंसिपल मिस्टर एक्स हैं।'))
+    r = agent.handle('principal kaun hai', parser)
+    assert r['reply'] == DONT_KNOW and r.get('speak') is None

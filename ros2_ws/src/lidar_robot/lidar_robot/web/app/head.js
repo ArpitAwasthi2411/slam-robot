@@ -265,6 +265,7 @@
 
   // ---- Ask: a question is answered at once (shown, and spoken by the robot); a trip is shown, then the PIN
   const ANSWERS = ['chat', 'status', 'explain', 'find'];
+  const HINGLISH = /\b(kya|kaun|kahan|kab|kaise|kitn[ae]|hai|hain|ka|ki|ke|mujhe|batao|bataiye|chalo|jao|kitab|kamra)\b/i;
   function askChips() {
     const pl = (S.st && S.st.places) || { places: [], rooms: [] };
     const thing = ((pl.rooms || []).find(r => (r.contents || []).length) || {}).contents;
@@ -293,18 +294,25 @@
     asking = true; kioskIdle();
     $('k-text').value = ''; bubble('q', text); $('a-msg').textContent = 'Thinking…';
     S.ov = { mood: 'thinking', line: 'Let me think…', sub: text, always: true };
+    // a long think: say so out loud instead of standing silent (only once, and never before 2.5 s)
+    let answered = false;
+    const filler = setTimeout(() => { if (!answered) nav({ type: 'say', text: /[a-z]/i.test(text) && !/[\u0900-\u097f]/.test(text) && !HINGLISH.test(text) ? 'One second.' : 'एक सेकंड।' }).catch(() => {}); }, 2500);
     try {
       const r = await nav({ type: 'command', text, dry_run: true, source: 'head' });
+      answered = true; clearTimeout(filler);
       const it = r.interpretation || {};
       S.ov = null;
       if (it.intent === 'stop') { await nav({ type: 'command', text, source: 'head' }); bubble('a', 'Stopped.'); }
       else if (ANSWERS.includes(it.intent) || it.intent === 'unknown' || !it.intent) {
-        const done = it.intent && it.intent !== 'unknown' ? await nav({ type: 'command', text, source: 'head' }) : r;
-        const reply = done.answer || done.status || (done.interpretation || it).reply || "I didn't understand that.";
+        // a conversation answer is already in the dry run: no second round trip (that was half the wait)
+        const done = it.intent && it.intent !== 'unknown' && it.intent !== 'chat'
+          ? await nav({ type: 'command', text, source: 'head' }) : r;
+        const di = done.interpretation || it;
+        const reply = done.answer || done.status || di.reply || "I didn't understand that.";
         bubble('a', reply); $('a-msg').textContent = '';
         S.ov = { mood: 'happy', line: reply.length > 90 ? reply.slice(0, 88) + '…' : reply, sub: '', answer: true };
         setTimeout(() => { if (S.ov && S.ov.answer) S.ov = null; }, 9000);
-        say(reply);
+        say(reply, reply === di.reply ? di.speak : null);
       } else {                                           // it wants the robot to move: show it, then the PIN
         const stops = ((r.plan || {}).steps || []).map(x => x.label || x.name).filter(Boolean);
         const what = it.intent === 'return_home' ? 'Go home' : it.intent === 'dock' ? 'Go and charge'
@@ -313,12 +321,13 @@
         bubble('a', `${what}. I need the PIN to start.`); $('a-msg').textContent = '';
         if (await needPin('Enter the PIN and I start.', `${what}?`)) {
           const done = await nav({ type: 'command', text, source: 'head', priority: 1 });
-          const reply = (done.interpretation || it).reply || 'On my way.';
-          bubble('a', reply); say(reply);
+          const di = done.interpretation || it, reply = di.reply || 'On my way.';
+          bubble('a', reply); say(reply, di.reply ? di.speak : null);
           setTimeout(closeSheets, 1200);
         } else bubble('a', 'Okay, I stay here.');
       }
     } catch (e) { S.ov = null; $('a-msg').textContent = e.message || String(e); }
+    answered = true; clearTimeout(filler);
     asking = false;
   }
   $('ic-ask').onclick = e => { e.stopPropagation(); haptic(10); S.faceT = performance.now(); openAsk(); };
@@ -446,15 +455,15 @@
   window.__pathikBack = () => { openSettings(); return true; };   // Android back -> PIN -> settings (exit there)
 
   // ------------------------------------------------------------------ speaking + errands
-  async function say(text) {
+  async function say(text, speak) {
     S.saying = text; render();
     try {
       if (DEMO) {
         if (window.PathikNative && PathikNative.speak) PathikNative.speak(text);
         else if (window.speechSynthesis) { const u = new SpeechSynthesisUtterance(text); u.lang = 'en-IN'; speechSynthesis.speak(u); }
-      } else await nav({ type: 'say', text });
+      } else await nav({ type: 'say', text: speak || text });   // Hindi/Hinglish answers come in Devanagari too
     } catch (e) { /* the robot can't speak: the subtitle still shows it */ }
-    await sleep(700 + 62 * text.length);                     // let it finish before the next line
+    await sleep(900 + 75 * text.length);                     // let it finish before the next line (slower voice)
     if (S.saying === text) S.saying = '';
   }
   const lastFail = () => JSON.stringify(((S.st || {}).nav || {}).last_failure || null);

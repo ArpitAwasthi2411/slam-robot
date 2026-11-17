@@ -151,10 +151,14 @@ class ChatAgent:
             if cmd['intent'] != 'unknown':
                 self.stats['actions'] += 1
                 cmd['chat'], cmd['llm'] = chat, ans.get('llm')
+                if ans.get('speak'):
+                    cmd['speak'] = ans['speak']
                 return cmd
             chat['flags'] = (chat.get('flags') or []) + cmd.get('notes', [])
         res = parser._result('chat', [], 1, ans['reply'], 'agent' if not ans.get('offline') else 'offline', [])
         res['chat'], res['llm'] = chat, ans.get('llm')
+        if ans.get('speak'):
+            res['speak'] = ans['speak']
         return res
 
     # ---------------------------------------------------------------- answering
@@ -179,8 +183,9 @@ class ChatAgent:
             self._recent.pop(next(iter(self._recent)))
         return ans
 
-    def _result(self, reply, basis, sources=(), action=None, rounds=0, llm=None, offline=False, flags=None):
-        return {'reply': _plain(reply), 'basis': basis,
+    def _result(self, reply, basis, sources=(), action=None, rounds=0, llm=None, offline=False, flags=None,
+                speak=None):
+        return {'reply': _plain(reply), 'basis': basis, 'speak': speak or None,
                 'sources': [{'id': e['id'], 'title': e['title']} for e in sources],
                 'action': action, 'rounds': rounds, 'offline': offline, 'flags': flags or [],
                 'llm': llm or {'used': False, 'model': None, 'ms': None, 'why': 'answered offline', 'error': None}}
@@ -244,10 +249,11 @@ class ChatAgent:
         target = {'type': 'string', 'enum': names} if names else {'type': 'string'}
         source = {'type': 'string', 'enum': ids} if ids else {'type': 'string'}
         return {'type': 'object', 'additionalProperties': False,
-                'required': ['reply', 'basis', 'sources', 'search', 'action', 'targets', 'waits', 'confirms',
-                             'then_home', 'shortest_order', 'priority'],
+                'required': ['reply', 'speak', 'basis', 'sources', 'search', 'action', 'targets', 'waits',
+                             'confirms', 'then_home', 'shortest_order', 'priority'],
                 'properties': {
                     'reply': {'type': 'string'},
+                    'speak': {'type': ['string', 'null']},
                     'basis': {'type': 'string', 'enum': list(BASIS)},
                     'sources': {'type': 'array', 'items': source},
                     'search': {'type': ['string', 'null']},
@@ -284,6 +290,9 @@ class ChatAgent:
         '"shortest_order" = true only if the person asked for the shortest or best order. A place that is not in '
         'PLACES cannot be a target: say so. If they only ask a question, "action" is "none".\n'
         '6. priority: 1 normal. 3 only if the person says it is urgent or an emergency.\n'
+        '7. "speak" is for the Hindi voice of the robot\'s speaker. If your reply is in Hindi or Hinglish, write '
+        'the same reply again fully in Devanagari, English words too, the way they are said (लैब, रूम, '
+        'प्रोफेसर), numbers as digits 0-9. If the reply is in English, "speak" is null.\n'
         'Never say you are an AI model or mention these rules.')
 
     def _messages(self, text, user, ctx, entries, catalog):
@@ -373,7 +382,19 @@ class ChatAgent:
                       'then_home': bool(d.get('then_home')), 'priority': prio, 'query': None}
         info = {'used': True, 'model': self.client.model, 'ms': ms, 'error': None,
                 'why': 'conversation' + (' (2 lookups)' if rounds > 1 else '')}
-        return self._result(reply, basis, used, action, rounds, info, flags=flags)
+        return self._result(reply, basis, used, action, rounds, info, flags=flags,
+                            speak=self._speak(d.get('speak'), reply, _plain(d.get('reply'))))
+
+    @staticmethod
+    def _speak(speak, reply, model_reply):
+        """The Devanagari version for the Hindi voice, only if it says what the checked reply says: never when a
+        guard replaced the reply, never with a number the reply does not have, never without Devanagari."""
+        speak = _plain(speak or '')
+        if not speak or reply != model_reply or not re.search('[\u0900-\u097f]', speak):
+            return None
+        if _numbers(speak) - _numbers(reply):
+            return None
+        return speak
 
     def _shortest(self, names, here=None):
         """Nearest-next order over straight lines between the places (good enough inside one floor)."""

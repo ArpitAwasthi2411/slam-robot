@@ -98,7 +98,7 @@ def test_pin_is_asked_last_and_never_for_questions():
     # Ask: answers (chat / status / explain / find) go straight through; a trip needs the PIN first
     ask = body('async function ask(text)')
     answers = ask[ask.index('ANSWERS.includes'):ask.index('it wants the robot to move')]
-    assert 'needPin' not in answers and 'say(reply)' in answers
+    assert 'needPin' not in answers and 'say(reply' in answers
     trip = ask[ask.index('it wants the robot to move'):]
     assert trip.index('needPin(') < trip.index("await nav({ type: 'command', text, source: 'head', priority: 1 })")
     errand = body('async function startErrand()')

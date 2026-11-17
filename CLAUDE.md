@@ -84,7 +84,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Next lab day: **`docs/STEPS_lab_16nov.md`** (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-11-16**
+**Last updated: 2026-11-17**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -131,6 +131,14 @@ Open problems / TODO (priority order):
 Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 2026**.
 
 ## Session log (newest first, one line each)
+
+- 2026-11-17: department mapping run on 16 Nov lost its map: no fan, Pi ~80 °C at 100 % CPU, never saved
+  (map was steadier than before). map_mode.PeriodicMapSaver: dashboard autosaves the live map every 3 min
+  (`map_autosave_s`) and at once when hot, as ~/maps/autosave_<start>, newest 3 kept, Map tab shows it.
+  Fan on Pi pins 4 (5 V) + 14 (GND). Robot voice stays on the Pi: Piper slower (`speech_rate` 1.15,
+  `speech_pause_s` 0.3) and streamed into aplay; chat answers carry `speak` (Devanagari for Hindi/Hinglish,
+  checked against the reply) for the hi_IN voice; kiosk skips the second round trip for chat answers and says
+  "One second." / "एक सेकंड।" after 2.5 s; voice_reply never rate-dropped. Tests in test_map_mode/test_speech/test_chat.
 
 - 2026-11-16 (lab, later): Test AI works on the robot (gpt-oss-20b, ~0.8 s), but the rules were "sure" about
   long Hinglish multi-step plans and flattened them. commands.py `_multi_step_doubt` (SEQ_HI step words, a place

@@ -1374,6 +1374,13 @@ function renderMapMode(st) {
     ? `Driving on the frozen map ${st.map_name || ''}. Nothing new is added to it.`
     : st.map_name ? `Mapping live, on top of ${st.map_name}. Freeze it when it looks right.`
       : 'Mapping live. Freeze the map when it looks right: the robot then only finds itself on it and nothing new gets drawn in.';
+  const as = st.map_autosave;
+  if (!sw && !frozen && as) {
+    const ago = as.saved_at ? Math.max(0, Math.round((Date.now() / 1000 - as.saved_at) / 60)) : null;
+    $('#mm-text').textContent += as.state === 'saving' ? ' Autosaving now…'
+      : as.state === 'error' || as.state === 'partial' ? ` Autosave failed: ${as.error || 'unknown'}.`
+        : ago !== null ? ` Autosaved ${ago ? ago + ' min ago' : 'just now'} as ${as.name}.` : ' Autosave every 3 min.';
+  }
   $('#mm-switching').hidden = !sw;
   if (sw) $('#mm-switching').textContent = sw.say || 'Restarting…';
   $('#mm-btns').hidden = !!sw;

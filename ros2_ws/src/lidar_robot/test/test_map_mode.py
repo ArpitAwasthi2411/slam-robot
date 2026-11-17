@@ -144,3 +144,46 @@ def test_app_has_the_map_mode_card():
         assert f'id="{i}"' in html
     assert "post('/api/slam'" in js and "get('/api/slam')" in js and 'renderMapMode(st)' in js
     assert "p === '/api/slam'" in demo
+
+
+# ------------------------------------------------------------------ autosave while mapping
+def test_autosave_while_mapping_only_when_the_map_changed(tmp_path):
+    from lidar_robot.map_mode import PeriodicMapSaver
+    saved = []
+    s = PeriodicMapSaver(lambda n: saved.append(n) or 'ok', period_s=180, map_dir=str(tmp_path), threaded=False)
+    assert not s.tick(0, True, 1)                        # just started
+    assert s.tick(91, True, 2) and saved == [s.name]      # first save after half a period
+    assert not s.tick(200, True, 2)                       # standing still: same map, no save
+    assert not s.tick(200, True, 3)                       # changed, but not due yet
+    assert s.tick(272, True, 3) and len(saved) == 2
+    assert not s.tick(1000, False, 9)                     # localization: never
+    assert s.info['state'] == 'saved' and s.name.startswith('autosave_')
+
+
+def test_autosave_at_once_when_the_pi_is_hot_and_never_crashes(tmp_path):
+    from lidar_robot.map_mode import PeriodicMapSaver
+    saved = []
+    s = PeriodicMapSaver(lambda n: saved.append(n) or 'ok', period_s=180, map_dir=str(tmp_path), threaded=False)
+    s.tick(0, True, 1)
+    assert s.tick(10, True, 2, hot=True)                  # hot: now
+    assert not s.tick(40, True, 3, hot=True)              # at most once a minute
+    assert s.tick(71, True, 4, hot=True)
+
+    def boom(n):
+        raise ValueError('no /map received yet')
+    b = PeriodicMapSaver(boom, period_s=10, map_dir=str(tmp_path), threaded=False)
+    b.tick(0, True, 1)
+    assert b.tick(5, True, 2) and b.info['state'] == 'error' and 'no /map' in b.info['error']
+    assert PeriodicMapSaver(boom, period_s=0, map_dir=str(tmp_path), threaded=False).tick(99, True, 5) is False
+
+
+def test_autosave_keeps_only_the_newest_drives(tmp_path):
+    from lidar_robot.map_mode import PeriodicMapSaver
+    for i in range(5):
+        for ext in ('.pbstream', '.pgm', '.yaml'):
+            (tmp_path / f'autosave_2026-11-1{i}_1000{ext}').write_text('x')
+    (tmp_path / 'cse_floor.pbstream').write_text('x')
+    PeriodicMapSaver(lambda n: 'ok', map_dir=str(tmp_path), keep=3).prune()
+    left = sorted(p.name for p in tmp_path.iterdir())
+    assert 'cse_floor.pbstream' in left and 'autosave_2026-11-10_1000.pbstream' not in left
+    assert len([n for n in left if n.endswith('.pbstream') and n.startswith('autosave_')]) == 3

@@ -43,6 +43,15 @@ Nothing else matters if this is wrong.
 
 - `vcgencmd get_throttled` = `0x0` under load, Pi below 70 °C (`tools/cpu_report.py`). An overloaded or
   under-powered Pi delivers late data, and late data smears the map.
+- **A fan on the Pi.** On 16 Nov, mapping the department without one, the Pi reached about 80 °C at 100 % CPU,
+  slowed itself down and the map was never saved. Fan red → header pin 4 (5 V), black → pin 14 (GND); pins
+  6/8/10 (ESP32) and 9/11 (button) stay as they are. Check with `watch -n 2 vcgencmd measure_temp`.
+- Start the robot without the camera and voice for the mapping drive (`vision:=false voice:=false` in
+  ROBOT_ARGS for that run): Cartographer then has the CPU to itself.
+- **Autosave:** while mapping, the dashboard saves the live map every 3 min (`map_autosave_s`) and at once when
+  the Pi gets hot (≥ 78 °C or throttled), as `~/maps/autosave_<date>_<time>`. One name per robot start, so a
+  restart never overwrites the drive before it; the newest 3 are kept. The Map tab shows "Autosaved N min
+  ago". After a crash: Map tab → Continue mapping → the autosave, and drive on from there.
 - LiDAR rigid and level, nothing of the robot's body in its 360° view.
 - Battery charged (voltage sag slows the motors unevenly late in the run).
 - Doors of the rooms you want **open**; few people around (early morning or after hours).

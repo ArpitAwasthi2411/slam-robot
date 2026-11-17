@@ -92,6 +92,12 @@ triggers this. Settings: `button_*`, `offline_home_s`, `network_check_s` in `con
 4. "हॉड ऑफिस जाओ" / "HOD office jao": Hindi / Hinglish (best with the Groq key).
 5. Say nothing: "I didn't hear anything". Mumble: "Sorry, I didn't catch that".
 6. Volume: `speech_volume: 0.6` in the YAML, restart.
+7. Speed: `speech_rate: 1.15` (1.0 = the voice's own speed; 1.3 = slower still), `speech_pause_s: 0.3` between
+   sentences. Piper streams into the speaker, so the first sentence starts while the rest is being made.
+8. Hindi: answers in Hindi or Hinglish come from the conversation agent with a Devanagari copy (`speak`) and are
+   spoken by the Hindi voice (hi_IN-pratham); English answers use the English voice. Ask "HOD kaun hai?" from the
+   face screen: the subtitle stays in Latin letters, the speaker says it in Hindi.
+9. Face screen: if an answer takes more than 2.5 s the robot says "One second." / "एक सेकंड।" first.
 
 ## Problems
 

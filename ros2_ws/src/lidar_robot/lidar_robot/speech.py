@@ -9,7 +9,10 @@
   (important keys like a question to a person or a low battery always get through).
 * Volume 0..1.5 (piper: samples scaled before aplay; espeak: amplitude).
 * Text with Devanagari letters uses the Hindi voice; everything else (also Hinglish in Latin letters)
-  the English one.
+  the English one. The conversation agent sends Hindi/Hinglish answers in Devanagari for this reason.
+* Speed: Piper length_scale (rate, 1.0 = the voice's own speed, 1.2 = 20 % slower) with a short pause
+  between sentences; espeak words per minute (speed). Piper streams straight into aplay, so the first
+  sentence plays while the rest is still being made (much less waiting on a Pi 4).
 """
 import array
 import glob
@@ -46,6 +49,31 @@ def find_voice(lang, explicit=''):
     return None
 
 
+def piper_args(exe, model, rate=1.0, pause_s=0.3):
+    """Piper command: raw 16-bit audio on stdout, slower by `rate`, `pause_s` of silence after each sentence."""
+    return [exe, '--model', model, '--output_raw', '--length_scale', f'{rate:.2f}',
+            '--sentence_silence', f'{pause_s:.2f}']
+
+
+def stream_pcm(src, dst, volume, chunk=4096):
+    """Copy 16-bit PCM from src to dst as it arrives (volume applied), keeping sample boundaries.
+    Returns the number of bytes written."""
+    carry, n = b'', 0
+    read = getattr(src, 'read1', src.read)
+    while True:
+        data = read(chunk)
+        if not data:
+            break
+        data = carry + data
+        cut = len(data) - len(data) % 2
+        carry = data[cut:]
+        out = scale_pcm(data[:cut], volume)
+        dst.write(out)
+        dst.flush()
+        n += len(out)
+    return n
+
+
 def scale_pcm(raw, volume):
     """16-bit little-endian mono PCM bytes * volume, clipped."""
     if abs(volume - 1.0) < 1e-3:
@@ -60,8 +88,11 @@ def scale_pcm(raw, volume):
 
 class Speaker:
     def __init__(self, enabled=True, voice='en-in', speed=150, min_gap_s=8.0, runner=None, clock=time.monotonic,
-                 engine='auto', volume=1.0, voice_en='', voice_hi='', max_per_min=8, audio_device=''):
+                 engine='auto', volume=1.0, voice_en='', voice_hi='', max_per_min=8, audio_device='',
+                 rate=1.15, pause_s=0.3):
         self.enabled = enabled
+        self.rate = max(0.6, min(2.0, float(rate)))
+        self.pause_s = max(0.0, min(1.5, float(pause_s)))
         self.voice, self.speed, self.min_gap_s = voice, speed, min_gap_s
         self.volume = max(0.0, min(1.5, float(volume)))
         self.max_per_min = max_per_min
@@ -107,17 +138,30 @@ class Speaker:
                 rate = int(json.load(open(cfg)).get('audio', {}).get('sample_rate', rate))
             except (ValueError, OSError):
                 pass
-        p = subprocess.run([self.piper, '--model', model, '--output_raw'], input=text.encode(),
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30)
         cmd = ['aplay', '-q', '-r', str(rate), '-f', 'S16_LE', '-t', 'raw', '-c', '1']
         if self.audio_device:
             cmd[1:1] = ['-D', self.audio_device]
-        subprocess.run(cmd + ['-'], input=scale_pcm(p.stdout, self.volume), stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, timeout=60)
+        tts = subprocess.Popen(piper_args(self.piper, model, self.rate, self.pause_s), stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        play = subprocess.Popen(cmd + ['-'], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        try:
+            tts.stdin.write(text.encode())
+            tts.stdin.close()
+            stream_pcm(tts.stdout, play.stdin, self.volume)
+            play.stdin.close()
+            play.wait(timeout=60)
+            tts.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        finally:
+            for proc in (tts, play):
+                if proc.poll() is None:
+                    proc.kill()
 
     def _run_espeak(self, text):
         v = 'hi' if DEVANAGARI.search(text) else self.voice
-        subprocess.run([self._espeak, '-v', v, '-s', str(self.speed), '-a', str(int(100 * self.volume)), text],
+        subprocess.run([self._espeak, '-v', v, '-s', str(int(self.speed / self.rate)), '-a', str(int(100 * self.volume)), text],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
 
     # ------------------------------------------------------------ public

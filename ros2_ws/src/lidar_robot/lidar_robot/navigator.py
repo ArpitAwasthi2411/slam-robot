@@ -110,6 +110,8 @@ class NavigatorNode(Node):
         d('front_cone_deg', 25.0)
         d('dwell_s', 3.0)
         d('speech', True)                  # speak through a speaker on the Pi (needs espeak-ng)
+        d('speech_rate', 1.15)            # 1.0 = the voice's own speed; higher = slower, clearer
+        d('speech_pause_s', 0.3)          # silence between sentences (s)
         d('speech_voice', 'en-in')        # espeak voice (fallback when Piper is not installed)
         d('speech_engine', 'auto')         # auto (Piper, else espeak) | piper | espeak
         d('speech_volume', 1.0)            # 0 .. 1.5
@@ -176,7 +178,8 @@ class NavigatorNode(Node):
         self.speaker = Speaker(enabled=bool(g('speech')), voice=str(g('speech_voice')), engine=str(g('speech_engine')),
                                volume=float(g('speech_volume')), voice_en=str(g('speech_voice_en')),
                                voice_hi=str(g('speech_voice_hi')), max_per_min=int(g('speech_max_per_min')),
-                               audio_device=str(g('speech_device')))
+                               audio_device=str(g('speech_device')), rate=float(g('speech_rate')),
+                               pause_s=float(g('speech_pause_s')))
         if self.speaker.enabled and not self.speaker.available:
             self.get_logger().info('robot voice off: run scripts/setup_voice.sh (Piper) or install espeak-ng, '
                                    'and connect a speaker')
@@ -637,7 +640,9 @@ class NavigatorNode(Node):
             with self.core_lock:
                 says, self.core.say_queue = self.core.say_queue, []
             for key, text in says:
-                self.speaker.say(text, key=key, gap_s=12.0 if key in ('make_way', 'thanks') else 3.0)
+                # a person's own question is always answered (also a quick "ek second" followed by the answer)
+                self.speaker.say(text, key=key, gap_s=12.0 if key in ('make_way', 'thanks')
+                                 else 0.0 if key == 'voice_reply' else 3.0)
         except Exception as e:                           # stop, report, keep the node alive
             self.get_logger().error(f'navigator step failed: {e}\n{traceback.format_exc()}')
             self.cmd_pub.publish(Twist())

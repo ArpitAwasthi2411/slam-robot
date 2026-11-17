@@ -134,3 +134,81 @@ def plan_switch(action, current_mode, current_map, map_dir, name=None, map_name=
     return {'save_as': None, 'mode': 'localization', 'map': f,
             'say': f'Driving on {os.path.basename(f)[:-9]} (frozen). The robot restarts in about 20 s; '
                    'then check the position and tap Position OK.'}
+
+
+class PeriodicMapSaver:
+    """Saves the live map while mapping, so a crash, a hot Pi or a flat battery never loses a whole drive.
+
+        saver = PeriodicMapSaver(save_fn, period_s=180)      # save_fn(name) -> text, may raise ValueError
+        saver.tick(now, mapping=True, map_version=v, hot=False)   # call every few seconds; starts a save when due
+
+    * Every period_s while mapping, but only when the map changed since the last save (standing still = no save).
+    * At once when the Pi gets hot (hot=True), at most once a minute: heat is what killed the 16 Nov drive.
+    * One name per robot start (autosave_<date>_<time>), so a restart never overwrites the drive before it;
+      the app lists it with the other maps and "Continue mapping" picks up from there. Only the newest
+      `keep` autosaves are kept.
+    * The save runs in a thread (Cartographer takes a few seconds to write); never two at once.
+    """
+
+    def __init__(self, save_fn, period_s=180.0, map_dir='~/maps', keep=3, clock=time.localtime, threaded=True):
+        self.save_fn, self.period_s, self.keep = save_fn, float(period_s), int(keep)
+        self.map_dir = os.path.expanduser(map_dir)
+        self.name = time.strftime('autosave_%Y-%m-%d_%H%M', clock())
+        self.threaded = threaded
+        self._last_t = None            # monotonic time of the last save start
+        self._last_hot_t = -1e9
+        self._last_version = None
+        self._busy = False
+        self._first_ref = None         # first tick: the first save comes half a period after it
+        self.info = {'state': 'idle', 'name': self.name, 'saved_at': None, 'error': None}
+
+    def due(self, now, mapping, map_version, hot=False):
+        if not mapping or self._busy or map_version is None or map_version == self._last_version:
+            return False
+        if hot and now - self._last_hot_t >= 60.0:
+            return True
+        if self._last_t is None:
+            return now - self._first_ref >= self.period_s * 0.5
+        return now - self._last_t >= self.period_s
+
+    def tick(self, now, mapping, map_version, hot=False):
+        if self._first_ref is None:
+            self._first_ref = now
+        if self.period_s <= 0 or not self.due(now, mapping, map_version, hot):
+            return False
+        if hot:
+            self._last_hot_t = now
+        self._last_t, self._last_version, self._busy = now, map_version, True
+        self.info['state'] = 'saving'
+        if self.threaded:
+            import threading
+            threading.Thread(target=self._save, daemon=True).start()
+        else:
+            self._save()
+        return True
+
+    def _save(self):
+        try:
+            text = self.save_fn(self.name)
+            ok = 'WARNING' not in str(text)
+            self.info.update(state='saved' if ok else 'partial', saved_at=int(time.time()),
+                             error=None if ok else 'picture saved, Cartographer state not (is SLAM running?)')
+            self.prune()
+        except Exception as e:                          # never take the dashboard down for an autosave
+            self.info.update(state='error', error=str(e)[:200])
+        finally:
+            self._busy = False
+
+    def prune(self):
+        """Delete autosaves older than the newest `keep` (all their files: .pbstream .pgm .yaml)."""
+        try:
+            names = sorted({n.split('.')[0] for n in os.listdir(self.map_dir) if n.startswith('autosave_')},
+                           reverse=True)
+        except OSError:
+            return
+        for old in names[self.keep:]:
+            for ext in ('.pbstream', '.pgm', '.yaml'):
+                try:
+                    os.remove(os.path.join(self.map_dir, old + ext))
+                except OSError:
+                    pass
