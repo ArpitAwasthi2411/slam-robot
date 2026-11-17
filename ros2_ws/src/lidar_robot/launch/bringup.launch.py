@@ -170,7 +170,7 @@ def _setup(context):
             # never get painted into it as walls (the LiDAR scan handles them live)
             grid_args = ['-publish_period_sec', '10.0', '-include_unfrozen_submaps', 'false']
         else:
-            grid_args = ['-publish_period_sec', '2.0']
+            grid_args = ['-publish_period_sec', '4.0']   # whole grid every 4 s: big maps cost CPU in every subscriber
         actions.append(Node(
             package='cartographer_ros', executable='cartographer_occupancy_grid_node',
             name='cartographer_occupancy_grid_node', output='screen',

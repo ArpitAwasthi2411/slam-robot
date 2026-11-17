@@ -270,7 +270,9 @@ def test_mapping_configs_trust_good_odometry_in_corridors():
     assert 'use_online_correlative_scan_matching = false' in live
     assert 'ceres_scan_matcher.translation_weight = 20.' in live
     assert 'odometry_rotation_weight = 1e5' in live and 'odometry_rotation_weight = 1e3' not in live
-    assert 'constraint_builder.min_score = 0.65' in live and live.rstrip().endswith('return options')
+    assert 'constraint_builder.min_score = 0.72' in live and live.rstrip().endswith('return options')
+    # 17 Nov: a node per scan (0.05 m) made the department-size pose graph eat 100 % CPU and tear the map
+    assert 'motion_filter.max_distance_meters = 0.20' in live and 'constraint_builder.sampling_ratio = 0.15' in live
     hq = _lua('cartographer_mapping_hq.lua')
     assert hq.index('include "cartographer_odom.lua"') < hq.index('num_background_threads = 4')
     assert hq.rstrip().endswith('return options') and 'max_num_final_iterations' in hq

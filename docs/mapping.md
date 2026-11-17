@@ -48,6 +48,11 @@ Nothing else matters if this is wrong.
   6/8/10 (ESP32) and 9/11 (button) stay as they are. Check with `watch -n 2 vcgencmd measure_temp`.
 - Start the robot without the camera and voice for the mapping drive (`vision:=false voice:=false` in
   ROBOT_ARGS for that run): Cartographer then has the CPU to itself.
+- **Big maps (17 Nov):** Cartographer now adds a pose-graph node every 20 cm (was 5 cm = every scan, which made a
+  department-size graph eat 100 % CPU and tear the map), tries fewer loop closures, and needs a stronger match
+  (0.72) so look-alike labs are not snapped onto each other; the grid is published every 4 s; the navigator rebuilds
+  its costmap at most every 8 s while idle. Freeze saves in the background (up to 2 min) and only restarts once the
+  file exists; a failed Freeze says so in the Map tab.
 - **Autosave:** while mapping, the dashboard saves the live map every 3 min (`map_autosave_s`) and at once when
   the Pi gets hot (≥ 78 °C or throttled), as `~/maps/autosave_<date>_<time>`. One name per robot start, so a
   restart never overwrites the drive before it; the newest 3 are kept. The Map tab shows "Autosaved N min

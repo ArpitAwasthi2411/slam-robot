@@ -63,6 +63,7 @@ class DashboardNode(Node):
         self.declare_parameter('map_file', '')                 # the saved map in use (bringup passes it)
         self.declare_parameter('map_mode_file', '')            # app's map-mode choice (map_mode.py)
         self.declare_parameter('map_autosave_s', 180.0)        # save the live map this often while mapping (0 = off)
+        self.declare_parameter('map_save_timeout_s', 120.0)    # Cartographer write_state on a big map can take a minute
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
         self.global_frame = gp('global_frame')
         self.fallback_frame = gp('fallback_frame')
@@ -146,6 +147,7 @@ class DashboardNode(Node):
         self.map_file = str(self.get_parameter('map_file').value)
         self.map_mode_file = str(self.get_parameter('map_mode_file').value)
         self.switching = None              # {'mode', 'map', 'say'} once a map-mode switch started
+        self.slam_error = None             # {'t', 'msg'} when the last Freeze could not save
         self.map_saver = map_mode.PeriodicMapSaver(self.save_map, float(self.get_parameter('map_autosave_s').value),
                                                    self.map_dir)
         self.create_timer(5.0, self._autosave_tick)
@@ -399,6 +401,7 @@ class DashboardNode(Node):
             'slam_mode': self.slam_mode,
             'map_name': os.path.basename(self.map_file)[:-9] if self.map_file.endswith('.pbstream') else '',
             'switching': self.switching,
+            'slam_error': self.slam_error,
             'places': self.places,
             'vision': self.vision if time.monotonic() - self.vision_t < 2.0 else None,
             'camera': time.monotonic() - self.camera_t < 2.0,
@@ -613,12 +616,31 @@ class DashboardNode(Node):
             raise ValueError(f'Not now: {why}.')
         plan = map_mode.plan_switch(str(body.get('action', '')), self.slam_mode, self.map_file, self.map_dir,
                                     name=body.get('name'), map_name=body.get('map'))
+        self.slam_error = None
         if plan['save_as']:
+            # Saving a big map takes up to a minute or two: do it in the background so the app never times out,
+            # show "Saving the map…", and only restart once the file is really there.
+            self.switching = {'mode': plan['mode'], 'map': os.path.basename(plan['map']), 'saving': True,
+                              'say': 'Saving the map: this can take a minute on a big map. Keep the robot still.'}
+            threading.Thread(target=self._save_then_switch, args=(plan,), daemon=True).start()
+            return {'ok': True, 'say': self.switching['say'], 'mode': plan['mode'], 'saving': True,
+                    'map': os.path.basename(plan['map'])}
+        return self._switch_now(plan)
+
+    def _save_then_switch(self, plan):
+        try:
             self._finish_active_trajectories()           # final optimisation: the saved map is the best one
             saved = self.save_map(plan['save_as'])
             if 'WARNING' in saved or not os.path.isfile(plan['map']):
-                raise ValueError('Could not save the .pbstream (Cartographer not answering), the map was not '
-                                 'frozen. Try again in a few seconds.')
+                raise ValueError('Cartographer did not write the map file')
+            self._switch_now(plan)
+        except Exception as e:
+            self.switching = None
+            self.slam_error = {'t': int(time.time()), 'msg': f'Could not save the map ({e}). The map is NOT frozen. '
+                               'Wait a minute and tap Freeze map again.'}
+            self.get_logger().error(f'freeze failed: {e}')
+
+    def _switch_now(self, plan):
         map_mode.write_mode(self.map_mode_file, plan['mode'], plan['map'])
         auto = bool(os.environ.get('INVOCATION_ID'))
         say = plan['say'] + ('' if auto else ' (Started by hand, not by robot.service: start it again yourself.)')
@@ -643,8 +665,10 @@ class DashboardNode(Node):
         time.sleep(2.0)                     # let the app get its answer and show the message
         os._exit(map_mode.RESTART_CODE)     # launch sees this code, shuts down, systemd restarts it
 
-    def _write_pbstream(self, path):
-        """Ask Cartographer to save its full state (needed for slam_mode:=localization)."""
+    def _write_pbstream(self, path, timeout=None):
+        """Ask Cartographer to save its full state (needed for slam_mode:=localization). A department-size map
+        on a busy Pi takes far longer than 10 s (17 Nov: every save said 'Cartographer not answering')."""
+        timeout = float(timeout or self.get_parameter('map_save_timeout_s').value)
         if not self.write_state_cli or not self.write_state_cli.service_is_ready():
             return None
         req = self._WriteState.Request()
@@ -653,7 +677,7 @@ class DashboardNode(Node):
         with self.lock:
             fut = self.write_state_cli.call_async(req)
         t0 = time.monotonic()
-        while not fut.done() and time.monotonic() - t0 < 10.0:
+        while not fut.done() and time.monotonic() - t0 < timeout:
             time.sleep(0.05)
         if fut.done() and fut.result() is not None and fut.result().status.code == 0:
             self.get_logger().info(f'Cartographer state saved: {path}')

@@ -1381,6 +1381,7 @@ function renderMapMode(st) {
       : as.state === 'error' || as.state === 'partial' ? ` Autosave failed: ${as.error || 'unknown'}.`
         : ago !== null ? ` Autosaved ${ago ? ago + ' min ago' : 'just now'} as ${as.name}.` : ' Autosave every 3 min.';
   }
+  if (!sw && st.slam_error && Date.now() / 1000 - st.slam_error.t < 600) $('#mm-text').textContent += ' ' + st.slam_error.msg;
   $('#mm-switching').hidden = !sw;
   if (sw) $('#mm-switching').textContent = sw.say || 'Restarting…';
   $('#mm-btns').hidden = !!sw;

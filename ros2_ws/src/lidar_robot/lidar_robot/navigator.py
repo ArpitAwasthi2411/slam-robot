@@ -52,7 +52,7 @@ from lidar_robot.follower import FollowerParams
 from lidar_robot.footprint import Footprint
 from lidar_robot.speech import Speaker
 from lidar_robot.kinematics import compose_2d, yaw_from_quaternion
-from lidar_robot.navigator_core import NavigatorCore
+from lidar_robot.navigator_core import IDLE, NavigatorCore
 from lidar_robot.netcheck import network_ok
 from lidar_robot.places import PlaceStore
 from lidar_robot import scan_points
@@ -110,6 +110,7 @@ class NavigatorNode(Node):
         d('front_cone_deg', 25.0)
         d('dwell_s', 3.0)
         d('speech', True)                  # speak through a speaker on the Pi (needs espeak-ng)
+        d('map_rebuild_idle_s', 8.0)      # while idle, rebuild the costmap from a changing map at most this often
         d('speech_rate', 1.15)            # 1.0 = the voice's own speed; higher = slower, clearer
         d('speech_pause_s', 0.3)          # silence between sentences (s)
         d('speech_voice', 'en-in')        # espeak voice (fallback when Piper is not installed)
@@ -228,6 +229,7 @@ class NavigatorNode(Node):
         self.bridge_estop = False
         self.map_hash = None
         self.map_job = None                      # latest map waiting for the worker
+        self.map_rebuild_idle_s = float(self.get_parameter('map_rebuild_idle_s').value)
         self.map_event = threading.Event()
         threading.Thread(target=self._map_worker, daemon=True).start()
 
@@ -313,10 +315,19 @@ class NavigatorNode(Node):
 
     def _map_worker(self):
         """Builds the costmap off the executor thread, then swaps it in (keeps the 20 Hz loop smooth)."""
+        last_build = 0.0
         while rclpy.ok():
             if not self.map_event.wait(1.0):
                 continue
+            # While mapping, the whole grid changes every few seconds. Rebuilding the costmap each time kept a core
+            # busy at idle (17 Nov, with the Pi at 100 %). Idle: at most every map_rebuild_idle_s; driving: at once.
+            idle = getattr(self.core, 'state', IDLE) == IDLE
+            wait = (self.map_rebuild_idle_s if idle else 0.0) - (time.monotonic() - last_build)
+            if wait > 0:
+                time.sleep(min(wait, 1.0))
+                continue                          # the event stays set: look again
             self.map_event.clear()
+            last_build = time.monotonic()
             job = self.map_job
             if job is None:
                 continue

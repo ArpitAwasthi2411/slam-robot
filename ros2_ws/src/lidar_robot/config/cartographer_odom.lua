@@ -65,20 +65,26 @@ TRAJECTORY_BUILDER_2D.ceres_scan_matcher.translation_weight = 20.
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.rotation_weight = 40.
 
 TRAJECTORY_BUILDER_2D.motion_filter.max_time_seconds = 5.0   -- standing still adds no new nodes (0.5 grew the graph + CPU load every minute)
-TRAJECTORY_BUILDER_2D.motion_filter.max_distance_meters = 0.05
-TRAJECTORY_BUILDER_2D.motion_filter.max_angle_radians = math.rad(1.0)
+TRAJECTORY_BUILDER_2D.motion_filter.max_distance_meters = 0.20  -- a node every 20 cm (0.05 = a node per scan: on a
+                                                               -- department-size drive the pose graph grew to thousands of
+                                                               -- nodes, loop-closure search took 100 % CPU, scans were
+                                                               -- matched late and the map tore; 17 Nov)
+TRAJECTORY_BUILDER_2D.motion_filter.max_angle_radians = math.rad(3.0)
 
 -- the whole-map optimisation: trust wheel distance AND gyro heading between nodes (defaults; the old 1e3
 -- for rotation was for slipping wheels without a gyro and let corridors bend)
 POSE_GRAPH.optimization_problem.odometry_translation_weight = 1e5
 POSE_GRAPH.optimization_problem.odometry_rotation_weight = 1e5
 
-POSE_GRAPH.optimize_every_n_nodes = 40
+POSE_GRAPH.optimize_every_n_nodes = 60          -- with 20 cm nodes = every ~12 m of driving
 POSE_GRAPH.optimization_problem.ceres_solver_options.num_threads = 2   -- leave cores for the Python nodes (all 4 busy = stale odometry = "position lost")
 -- loop closures: corridors with identical doors look alike. A wrong closure folds the map, a missed one only
 -- leaves a little drift, so be strict.
-POSE_GRAPH.constraint_builder.min_score = 0.65
-POSE_GRAPH.constraint_builder.global_localization_min_score = 0.70
-POSE_GRAPH.constraint_builder.max_constraint_distance = 15.
+POSE_GRAPH.constraint_builder.min_score = 0.72   -- labs with identical bench rows: 0.65 snapped one lab onto another
+POSE_GRAPH.constraint_builder.sampling_ratio = 0.15           -- fewer loop-closure tries per node (default 0.3): half the CPU
+POSE_GRAPH.constraint_builder.global_sampling_ratio = 0.001
+POSE_GRAPH.global_sampling_ratio = 0.001
+POSE_GRAPH.constraint_builder.global_localization_min_score = 0.75
+POSE_GRAPH.constraint_builder.max_constraint_distance = 10.   -- only look for loop closures nearby
 
 return options

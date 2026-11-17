@@ -148,6 +148,11 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
   answer itself was right: HOD Dr. Shashi Gurung) -> GroqWhisper retries with language=hi when the text is Urdu
   script (Devanagari back); chat prompt: replies in English or Roman Hinglish, never Urdu script; Speaker never
   reads Arabic script (says 'Sorry, please say that again.'). Right wheel would not go forward: R_EN/RPWM wiring.
+  Evening: department map half done, then 100 % CPU, map tore (labs snapped together) and Freeze/autosave failed
+  ('Cartographer not answering', write_state waited only 10 s). Fixes: cartographer_odom.lua motion filter 0.20 m / 3 deg
+  (was 0.05 m = a node per scan), optimize every 60, constraint sampling 0.15, min_score 0.72, max distance 10 m; grid
+  every 4 s; navigator costmap rebuild <= every 8 s when idle (`map_rebuild_idle_s`); dashboard write_state waits
+  `map_save_timeout_s` 120 s, Freeze saves in a background thread (switching.saving) and reports `slam_error`.
 
 - 2026-11-16 (lab, later): Test AI works on the robot (gpt-oss-20b, ~0.8 s), but the rules were "sure" about
   long Hinglish multi-step plans and flattened them. commands.py `_multi_step_doubt` (SEQ_HI step words, a place
