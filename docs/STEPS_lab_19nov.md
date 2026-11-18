@@ -10,6 +10,11 @@ What changed in the code since 18 Nov (all pulled in step 1):
 - After **Freeze**, the robot is placed where it stood, no Set position needed.
 - Navigator / app server no longer run twice internally (idle CPU, "position lost" stalls).
 - Repo now holds the Pi's own settings (marker 72.5 mm, USB sound card), so `git pull` never conflicts.
+- Doors: side ultrasonics no longer stop the robot at door frames; "no path" through doors fixed; rooms of any
+  shape (tap corners); "corridor near X" / "X ke bahar" commands.
+- Review of 19 Nov: the "robot placed where it was frozen" step never worked before (it waited for Cartographer
+  inside a timer and always timed out): fixed. A crashed node (app, navigator, motor link, LiDAR) now restarts by
+  itself in 3 s instead of staying dead.
 
 ---
 
@@ -87,6 +92,10 @@ sudo nmcli con add type ethernet ifname eth0 con-name robot-link ipv4.method man
 
 ## 7. Start map building on the laptop
 
+Note: the Pi remembers the last choice in the app (`~/maps/map_mode.json`). After 18 Nov it is "drive on
+`Cse_department_aids`", so the laptop does nothing until you pick **Continue mapping** or **New map** in step 8
+(terminal 1 then says it started Cartographer). That is expected.
+
 Terminal 1:
 ```bash
 python3 ~/slam-robot/scripts/laptop_slam.py
@@ -117,6 +126,10 @@ a recording. Drive:
 
 If the cable comes out, the robot stops by itself within 10 s: plug it back in within 15 s and carry on.
 
+If terminal 1 says **"Cartographer stopped by itself: starting it again"**, the laptop lost the map it was building
+and starts a blank one. Stop driving. The app's autosave (every 3 min) has the map up to then: Map → **Use a saved
+map** → the newest `autosave_…`, then **Continue mapping** on it (same as step 8, standing at 0, 0, 0°).
+
 ## 9. Freeze
 
 Stop the robot → Map → **Freeze map**, name `cse_department` → wait (up to 2 min). Terminal 1 says the map was copied
@@ -130,6 +143,16 @@ ls -lh ~/pathik_maps/ ~/bags/ | tail
 After the restart the robot appears where it was frozen (no Set position needed; if it is wrong, Map → Set position).
 Push the joystick: the robot marker follows along the walls. Save places (Map tab → save place): HOD office,
 labs, stairs, entrance, home spot.
+
+## 10b. Doors, rooms, "outside X" (new code, first try)
+
+1. Measure the robot: widest point side to side (wheels included) / 2 = half width; axle → front bumper; axle →
+   back edge. Put them in `config/robot_params.yaml` (`footprint_half_width`, `footprint_front`, `footprint_rear`;
+   `robot_half_width` = half width + 0.03 in BOTH places it appears). Both the LiDAR stop zone and the planner use them.
+2. Map tab → Room tool → tap the corners of Ravi sir's cabin → Save room. Draw the corridor too (name it "Corridor").
+3. Send: `stand in the corridor near Ravi sir's cabin`. Must stop in the corridor in front of his door, facing it.
+4. Send a trip through the narrowest door: it must not stop at the frame. If it says "narrow passage", it is
+   driving on its real width: watch it.
 
 ## 11. Back to normal + backup
 
@@ -154,3 +177,6 @@ rsync -av arpit@169.254.1.2:~/maps/ ~/pathik_maps/
 | 9 Freeze time + file size | | |
 | 10 robot placed right after Freeze? | | |
 | 10 places saved | | |
+| 10b robot width / front / rear (cm) | | |
+| 10b "corridor near …" stopped where? | | |
+| 10b narrowest door: passed / stopped | | |

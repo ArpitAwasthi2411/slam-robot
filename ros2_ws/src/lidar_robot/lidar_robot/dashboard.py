@@ -160,7 +160,10 @@ class DashboardNode(Node):
         self._start_pose = map_mode.startup_pose(saved, self.slam_mode, self.map_file, time.time())
         self._start_pose_t0 = time.monotonic()
         if self._start_pose:
-            self.create_timer(3.0, self._apply_start_pose)
+            # in its own thread, NOT a timer: a timer callback that waits for a Cartographer service answer
+            # deadlocks (the answer is processed by the same mutually-exclusive callback group), so it never
+            # got through and always gave up after 90 s
+            threading.Thread(target=self._start_pose_loop, daemon=True).start()
         self.map_saver = map_mode.PeriodicMapSaver(self.save_map, float(self.get_parameter('map_autosave_s').value),
                                                    self.map_dir)
         self.create_timer(5.0, self._autosave_tick)
@@ -247,6 +250,15 @@ class DashboardNode(Node):
                 self.get_logger().info(f'autosaving the live map as {self.map_saver.name}' + (' (Pi is hot)' if hot else ''))
         except Exception as e:
             self.get_logger().warning(f'map autosave check failed: {e}', throttle_duration_sec=60.0)
+
+    def _start_pose_loop(self):
+        while self._start_pose and rclpy.ok():
+            time.sleep(3.0)
+            try:
+                self._apply_start_pose()
+            except Exception as e:                       # never let it take the app down
+                self.get_logger().warn(f'start position after Freeze failed: {e}')
+                return
 
     def _apply_start_pose(self):
         """Right after a Freeze, put the robot where it stood when the map was frozen (Cartographer otherwise

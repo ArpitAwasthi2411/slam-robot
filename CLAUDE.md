@@ -135,6 +135,13 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-19 (review): pyflakes clean; read navigator/dashboard/bridge/launch/laptop_slam. Fixed: dashboard
+  `_apply_start_pose` ran in a timer and waited for Cartographer's service -> deadlock (default mutually-exclusive
+  callback group), so "placed where frozen" always timed out: now a thread. Launch: respawn (3 s) for bridge, LiDAR,
+  navigator, dashboard, voice, vision, grid node; Cartographer only in localization (mapping restart = blank map).
+  Spoken "Going outside X" / "I am outside X". Guards in test_compute.py. Known, not changed: laptop Cartographer
+  crash restarts a blank map (autosave is the backup); LiDAR stop zone uses robot_half_width 0.25 vs body 0.21
+  (measure, docs/STEPS_lab_19nov.md 10b).
 - 2026-11-18 (doors/rooms): lab reports: robot stopped at doors, "no path" where the map has space, rooms only as
   rectangles. Side ultrasonics heard door frames: in-path zone = body (0.21+0.03 m), echoes within `us_wall_tol`
   0.12 m of a mapped wall ignored, whole arcs explained by the map never remembered (they closed doors for 60 s);

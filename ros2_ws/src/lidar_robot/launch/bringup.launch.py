@@ -75,6 +75,8 @@ def _setup(context):
     plan = _truthy(cfg('cpu_plan'))
     from lidar_robot.cpu_plan import cpu_prefix
     pre = lambda n: cpu_prefix(n, plan)  # noqa: E731
+    # a crashed node comes back by itself (before: the app or the motors stayed dead until robot.service restarted)
+    again = {'respawn': True, 'respawn_delay': 3.0}
 
     if slam and slam_mode == 'localization':
         if not map_file or not os.path.isfile(map_file):
@@ -142,14 +144,14 @@ def _setup(context):
                        '--pitch', '0', '--roll', '0', '--frame-id', 'base_link', '--child-frame-id', 'imu_link']))
 
     actions.append(Node(
-        package='sllidar_ros2', executable='sllidar_node', name='sllidar_node', output='screen',
+        package='sllidar_ros2', executable='sllidar_node', name='sllidar_node', output='screen', **again,
         parameters=[{'channel_type': 'serial', 'serial_port': lidar_port,
                      'serial_baudrate': 115200, 'frame_id': 'laser', 'inverted': False,
                      'angle_compensate': True, 'scan_mode': 'Sensitivity'}]))
 
     # In LiDAR-only mode Cartographer owns odom->base_link, so the bridge must not publish it.
     actions.append(Node(
-        package='lidar_robot', executable='esp32_bridge', name='esp32_bridge', output='screen',
+        package='lidar_robot', executable='esp32_bridge', name='esp32_bridge', output='screen', **again,
         parameters=[params, {'serial_port': esp_port, 'publish_tf': use_odom,
                              'exclude_ports': lidar_port}]))
 
@@ -170,6 +172,9 @@ def _setup(context):
         actions.append(Node(
             package='cartographer_ros', executable='cartographer_node', name='cartographer_node',
             output='screen',
+            # localization reloads the same saved map: safe to restart. Mapping would start a blank map in a new
+            # frame (places would no longer match), so there a crash stays visible instead (autosave has the map)
+            **(again if slam_mode == 'localization' else {}),
             arguments=['-configuration_directory', os.path.join(share, 'config'),
                        '-configuration_basename', lua] + extra,
             remappings=[('scan', '/scan'), ('odom', '/odom')]))
@@ -181,7 +186,7 @@ def _setup(context):
             grid_args = ['-publish_period_sec', '4.0']   # whole grid every 4 s: big maps cost CPU in every subscriber
         actions.append(Node(
             package='cartographer_ros', executable='cartographer_occupancy_grid_node',
-            name='cartographer_occupancy_grid_node', output='screen',
+            name='cartographer_occupancy_grid_node', output='screen', **again,
             prefix=pre('cartographer_occupancy_grid_node'),
             arguments=['-resolution', '0.05'] + grid_args))
 
@@ -198,7 +203,7 @@ def _setup(context):
                                        f'planner. Install it with: sudo apt install ros-humble-navigation2'))
     if nav_mode in ('planner', 'nav2'):
         actions.append(Node(
-            package='lidar_robot', executable='navigator', name='navigator', output='screen',
+            package='lidar_robot', executable='navigator', name='navigator', output='screen', **again,
             parameters=[params, {'global_frame': goal_frame, 'places_file': places,
                                  'require_localization_confirm': slam and slam_mode == 'localization',
                                  'use_vision': vision, 'nav_backend': 'nav2' if nav2 else 'pathik'}]))
@@ -226,17 +231,17 @@ def _setup(context):
 
     if vision:
         actions.append(Node(
-            package='lidar_robot', executable='vision', name='vision', output='screen',
+            package='lidar_robot', executable='vision', name='vision', output='screen', **again,
             prefix=pre('vision'),
             parameters=[params, {'camera': cfg('camera'), 'laser_yaw': float(cfg('laser_yaw'))}]))
 
     if voice:
-        actions.append(Node(package='lidar_robot', executable='voice', name='voice', output='screen',
+        actions.append(Node(package='lidar_robot', executable='voice', name='voice', output='screen', **again,
                             prefix=pre('voice'), parameters=[params]))
 
     if _truthy(cfg('dashboard')):
         dash = Node(
-            package='lidar_robot', executable='dashboard', name='dashboard', output='screen',
+            package='lidar_robot', executable='dashboard', name='dashboard', output='screen', **again,
             prefix=pre('dashboard'),
             parameters=[params, {'global_frame': goal_frame, 'nav_mode': nav_mode,
                                  'slam_mode': slam_mode if slam else 'off',

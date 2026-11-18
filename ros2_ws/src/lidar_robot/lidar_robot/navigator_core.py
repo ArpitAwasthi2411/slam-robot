@@ -88,6 +88,11 @@ def _reason_code(planner_error):
     return 'NO_PATH'
 
 
+
+def _at(label):
+    """'at Lab 3' / 'outside Lab 3' for spoken sentences."""
+    return label if label.startswith('outside ') else f'at {label}'
+
 class NavigatorCore:
     def __init__(self, places, planner_params=None, follower_params=None, parser=None,
                  dwell_s=3.0, auto_return_s=0.0, max_replans=3, plan_retry_s=2.0, max_plan_attempts=3,
@@ -1093,7 +1098,8 @@ class NavigatorCore:
                 return 0.0, 0.0
             if m.source not in ('explore',) and m.current.label not in ('map goal', 'drawn path') \
                     and not m.current.label.startswith('point '):
-                self.say_queue.append(('arrived', f'Arrived at {m.current.label}.'))
+                self.say_queue.append(('arrived', f'I am {m.current.label}.' if m.current.label.startswith('outside ')
+                                       else f'Arrived at {m.current.label}.'))
             self._log(f'arrived at {m.current.label}')
             self.follower.clear()
             self._replans = 0
@@ -1103,7 +1109,7 @@ class NavigatorCore:
             if m.current.confirm:
                 self._confirm_until = now + self.confirm_timeout_s
                 self._set(CONFIRM, f'at {m.current.label}: waiting for OK')
-                self.say_queue.append(('confirm', f'I am at {m.current.label}. Please press OK on the app when you are done.'))
+                self.say_queue.append(('confirm', f'I am {_at(m.current.label)}. Please press OK on the app when you are done.'))
                 self._log(f'waiting for OK at {m.current.label}')
             if m.source == 'explore' and self.explore_params.scan_spin:
                 w = self.explore_params.scan_speed
@@ -1202,7 +1208,8 @@ class NavigatorCore:
             self._announced = key
             if not (stop.via or m.source in ('explore',) or stop.label in ('map goal', 'drawn path', 'map point')
                     or stop.label.startswith('point ') or stop.dock):
-                self.say_queue.append(('going', f'Going to {stop.label}.'))
+                self.say_queue.append(('going', f'Going {stop.label}.' if stop.label.startswith('outside ')
+                                       else f'Going to {stop.label}.'))
         self.follower.set_path(path, stop.yaw, tight=bool(bad))
         self.tight_spots = bad[:20]
         if bad:

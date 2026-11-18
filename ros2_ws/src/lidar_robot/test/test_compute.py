@@ -301,3 +301,19 @@ def test_tf_listeners_have_their_own_node():
     for f in glob.glob(os.path.join(os.path.dirname(__file__), '..', 'lidar_robot', '*.py')):
         src = open(f).read()
         assert 'TransformListener(self.tf_buffer, self' not in src, f
+
+
+def test_no_service_wait_inside_a_dashboard_timer():
+    """A timer callback that waits for a Cartographer answer deadlocks (same mutually-exclusive callback group):
+    the start pose after Freeze must run in a thread (19 Nov review)."""
+    src = open(os.path.join(os.path.dirname(__file__), '..', 'lidar_robot', 'dashboard.py')).read()
+    assert 'create_timer(3.0, self._apply_start_pose)' not in src
+    assert 'target=self._start_pose_loop' in src
+
+
+def test_crashed_nodes_come_back():
+    src = open(os.path.join(os.path.dirname(__file__), '..', 'launch', 'bringup.launch.py')).read()
+    assert "again = {'respawn': True" in src
+    for exe in ('esp32_bridge', 'navigator', 'dashboard', 'sllidar_node'):
+        line = next(ln for ln in src.splitlines() if f"executable='{exe}'" in ln)
+        assert '**again' in line, exe
