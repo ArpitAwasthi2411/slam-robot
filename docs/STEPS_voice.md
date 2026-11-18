@@ -113,3 +113,17 @@ triggers this. Settings: `button_*`, `offline_home_s`, `network_check_s` in `con
 Tests without the robot: `test/test_voice.py` (WAV fixtures in `test/fixtures/voice/`, made with espeak-ng),
 the simulator (`POST /api/voice {"action": "stop", "text": "go to lab 3"}` pretends the mic heard it), and the
 app's demo (hold "Talk to the robot").
+
+## One voice for English and Hindi
+
+Piper has only two Hindi voices: `hi_IN-priyamvada-medium` (female) and `hi_IN-pratham-medium` (male). With
+`speech_one_voice: hi` (default) the chosen Hindi voice also reads English, with an Indian accent, so the robot always
+sounds like the same person. Listen to them all and pick one:
+
+```bash
+sudo bash ~/slam-robot/scripts/setup_voice.sh voices plughw:CARD=Device,DEV=0
+```
+
+Then set `speech_voice_hi:` to the name you liked in `config/robot_params.yaml`, `colcon build`, restart the robot.
+If the Hindi voice's English is hard to understand, set `speech_one_voice: ''` (English voice for English again).
+

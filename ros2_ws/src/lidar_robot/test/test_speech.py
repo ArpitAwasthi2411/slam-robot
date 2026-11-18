@@ -55,3 +55,26 @@ def test_urdu_script_is_never_spoken_as_gibberish():
     s = Speaker(runner=said.append)
     s.say('ہمارے شعبے کے ایچ او ڈی ڈاکٹر ششی گرنگ ہیں')
     assert s.spoken[0] == 'Sorry, please say that again.'
+
+
+def test_one_voice_for_both_languages():
+    """17 Nov kiosk: English came in one person's voice, Hindi in another's. One Hindi voice now reads both."""
+    from lidar_robot.speech import pick_lang
+    v = {'en': '/v/en_US-lessac-medium.onnx', 'hi': '/v/hi_IN-priyamvada-medium.onnx'}
+    assert pick_lang('The library is on the first floor.', v, 'hi') == 'hi'
+    assert pick_lang('लाइब्रेरी पहली मंज़िल पर है।', v, 'hi') == 'hi'
+    assert pick_lang('The library is on the first floor.', v, '') == 'en'       # old behaviour: two people
+    assert pick_lang('लाइब्रेरी', v, '') == 'hi' and pick_lang('लाइब्रेरी', v, 'en') == 'hi'   # English can't read it
+    assert pick_lang('Hello', {'en': '/v/en.onnx'}, 'hi') == 'en'               # no Hindi voice installed
+    assert pick_lang('Hello', {'hi': '/v/hi.onnx'}, '') == 'hi'
+
+
+def test_voice_chosen_by_name(tmp_path, monkeypatch):
+    from lidar_robot import speech
+    (tmp_path / 'voices').mkdir()
+    for n in ('hi_IN-pratham-medium', 'hi_IN-priyamvada-medium'):
+        (tmp_path / 'voices' / f'{n}.onnx').write_bytes(b'x')
+    monkeypatch.setattr(speech, 'PIPER_DIRS', [str(tmp_path)])
+    assert speech.find_voice('hi').endswith('hi_IN-pratham-medium.onnx')                 # first one by default
+    assert speech.find_voice('hi', 'hi_IN-priyamvada-medium').endswith('priyamvada-medium.onnx')
+    assert speech.find_voice('hi', 'missing-voice').endswith('pratham-medium.onnx')      # unknown name: default

@@ -40,9 +40,15 @@ def find_piper():
 
 
 def find_voice(lang, explicit=''):
-    """explicit path, else the first ~/piper/voices/<lang>_*.onnx (en_US-lessac-medium, hi_IN-pratham-medium ...)."""
+    """explicit path or voice name (hi_IN-priyamvada-medium), else the first ~/piper/voices/<lang>_*.onnx."""
     if explicit and os.path.isfile(os.path.expanduser(explicit)):
         return os.path.expanduser(explicit)
+    if explicit:
+        name = explicit if explicit.endswith('.onnx') else explicit + '.onnx'
+        for d in PIPER_DIRS:
+            p = os.path.join(os.path.expanduser(d), 'voices', os.path.basename(name))
+            if os.path.isfile(p):
+                return p
     for d in PIPER_DIRS:
         hits = sorted(glob.glob(os.path.join(os.path.expanduser(d), 'voices', f'{lang}_*.onnx')))
         if hits:
@@ -87,11 +93,23 @@ def scale_pcm(raw, volume):
     return a.tobytes()
 
 
+def pick_lang(text, voices, one_voice='hi'):
+    """Which voice reads this text. Devanagari needs the Hindi voice. With one_voice='hi' the Hindi voice reads
+    English too (Indian-accented English), so the robot is always the SAME person; '' = English voice for
+    Latin text, Hindi voice for Devanagari (two different people: 17 Nov kiosk complaint)."""
+    if DEVANAGARI.search(text) and voices.get('hi'):
+        return 'hi'
+    if one_voice in ('hi', 'en') and voices.get(one_voice):
+        return one_voice
+    return 'en' if voices.get('en') else 'hi'
+
+
 class Speaker:
     def __init__(self, enabled=True, voice='en-in', speed=150, min_gap_s=8.0, runner=None, clock=time.monotonic,
                  engine='auto', volume=1.0, voice_en='', voice_hi='', max_per_min=8, audio_device='',
-                 rate=1.15, pause_s=0.3):
+                 rate=1.15, pause_s=0.3, one_voice='hi'):
         self.enabled = enabled
+        self.one_voice = one_voice
         self.rate = max(0.6, min(2.0, float(rate)))
         self.pause_s = max(0.0, min(1.5, float(pause_s)))
         self.voice, self.speed, self.min_gap_s = voice, speed, min_gap_s
@@ -129,7 +147,7 @@ class Speaker:
         return None
 
     def _run_piper(self, text):
-        lang = 'hi' if DEVANAGARI.search(text) and self.voices.get('hi') else 'en'
+        lang = pick_lang(text, self.voices, self.one_voice)
         model = self.voices.get(lang) or self.voices.get('en') or self.voices.get('hi')
         rate = 22050
         cfg = model + '.json'
@@ -161,7 +179,7 @@ class Speaker:
                     proc.kill()
 
     def _run_espeak(self, text):
-        v = 'hi' if DEVANAGARI.search(text) else self.voice
+        v = 'hi' if DEVANAGARI.search(text) or self.one_voice == 'hi' else self.voice
         subprocess.run([self._espeak, '-v', v, '-s', str(int(self.speed / self.rate)), '-a', str(int(100 * self.volume)), text],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
 

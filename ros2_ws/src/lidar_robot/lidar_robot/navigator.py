@@ -118,6 +118,7 @@ class NavigatorNode(Node):
         d('speech_volume', 1.0)            # 0 .. 1.5
         d('speech_voice_en', '')           # Piper voice .onnx ('' = first ~/piper/voices/en_*.onnx)
         d('speech_voice_hi', '')           # Hindi voice ('' = first ~/piper/voices/hi_*.onnx)
+        d('speech_one_voice', 'hi')        # hi = the Hindi voice speaks everything (one person); '' = English voice for English
         d('speech_max_per_min', 8)         # rate limit (questions to people, battery always get through)
         d('speech_device', '')             # ALSA output device ('' = default)
         d('auto_return_s', 0.0)
@@ -180,7 +181,7 @@ class NavigatorNode(Node):
                                volume=float(g('speech_volume')), voice_en=str(g('speech_voice_en')),
                                voice_hi=str(g('speech_voice_hi')), max_per_min=int(g('speech_max_per_min')),
                                audio_device=str(g('speech_device')), rate=float(g('speech_rate')),
-                               pause_s=float(g('speech_pause_s')))
+                               pause_s=float(g('speech_pause_s')), one_voice=str(g('speech_one_voice')))
         if self.speaker.enabled and not self.speaker.available:
             self.get_logger().info('robot voice off: run scripts/setup_voice.sh (Piper) or install espeak-ng, '
                                    'and connect a speaker')

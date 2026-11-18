@@ -135,6 +135,10 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-18: one robot voice: kiosk answers came in two people's voices (en_US-lessac for English, hi_IN-pratham for
+  Hindi). speech.pick_lang + `speech_one_voice: hi` (default): the Hindi Piper voice reads English too (Indian accent),
+  so it is always the same person; `speech_voice_hi` takes a name (hi_IN-priyamvada-medium female / hi_IN-pratham-medium
+  male, Piper's only two Hindi voices); `setup_voice.sh voices [device]` plays every voice in English + Hindi to pick by ear.
 - 2026-11-17 (night): laptop mapping: Pi `slam_host:=laptop` starts no Cartographer while mapping; dashboard publishes
   latched /slam_host (host, mode, map, boot, save_dir, map_dir); scripts/laptop_slam.py on the laptop (Ethernet) starts/
   restarts/stops Cartographer + grid node from it, records ~/bags/laptop_<time>, RViz, rsyncs saved .pbstream files to

@@ -5,6 +5,8 @@
 #   sudo bash ~/slam-robot/scripts/setup_voice.sh            install (needs internet once, ~300 MB download)
 #   sudo bash ~/slam-robot/scripts/setup_voice.sh test       record 4 s, play it back, Piper says a sentence
 #   sudo bash ~/slam-robot/scripts/setup_voice.sh status     what is installed, which sound cards, the button
+#   sudo bash ~/slam-robot/scripts/setup_voice.sh voices [plughw:CARD=Device,DEV=0]
+#                                 hear every voice say the same English + Hindi lines, then pick one
 #
 # Online speech recognition (better, Hinglish) uses GROQ_API_KEY from ~/robot.env: nothing to install.
 # Wiring of the button: hardware/CONNECTIONS_esp32s3.md (Pi pin 11 = GPIO17 and pin 9 = GND).
@@ -20,6 +22,7 @@ PIPER_REL="2023.11.14-2"
 VOICES="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"
 VOICE_EN="en/en_US/lessac/medium/en_US-lessac-medium"
 VOICE_HI="hi/hi_IN/pratham/medium/hi_IN-pratham-medium"
+VOICE_HI2="hi/hi_IN/priyamvada/medium/hi_IN-priyamvada-medium"   # the only two Hindi voices Piper has
 VOSK_EN="vosk-model-small-en-in-0.4"
 VOSK_HI="vosk-model-small-hi-0.22"
 as_user() { sudo -u "$U" -H "$@"; }
@@ -72,7 +75,7 @@ EOF
       rm -f "$H/piper.tgz"
     fi
     as_user mkdir -p "$PIPER/voices"
-    for v in "$VOICE_EN" "$VOICE_HI"; do
+    for v in "$VOICE_EN" "$VOICE_HI" "$VOICE_HI2"; do
       f="$PIPER/voices/$(basename "$v")"
       [ -f "$f.onnx" ] || fetch "$VOICES/$v.onnx" "$f.onnx"
       [ -f "$f.onnx.json" ] || fetch "$VOICES/$v.onnx.json" "$f.onnx.json"
@@ -102,6 +105,34 @@ EOF
     else
       espeak-ng "Hello, I am Pathik" && echo "espeak-ng: OK (Piper not installed)"
     fi
+    ;;
+  voices)
+    [ -x "$PIPER/piper" ] || { echo "Piper not installed: sudo bash $0 install"; exit 1; }
+    for v in "$VOICE_HI" "$VOICE_HI2"; do        # fetch the Hindi voices if an older install lacks one
+      f="$PIPER/voices/$(basename "$v")"
+      if [ ! -f "$f.onnx" ] && curl -s -m 8 -o /dev/null https://huggingface.co; then
+        fetch "$VOICES/$v.onnx" "$f.onnx"; fetch "$VOICES/$v.onnx.json" "$f.onnx.json"
+      fi
+    done
+    DEV=(); [ -n "${2:-}" ] && DEV=(-D "$2")
+    EN="Hello, I am Pathik. The library is on the first floor. Please follow me."
+    HI="नमस्ते, मैं पथिक हूँ। लाइब्रेरी पहली मंज़िल पर है। मेरे साथ चलिए।"
+    n=0
+    for m in "$PIPER"/voices/*.onnx; do
+      n=$((n + 1)); name=$(basename "$m" .onnx)
+      rate=$(sed -n 's/.*"sample_rate": *\([0-9]*\).*/\1/p' "$m.json" 2>/dev/null | head -1); rate=${rate:-22050}
+      lines=("$EN"); case "$name" in hi_*) lines+=("$HI") ;; esac
+      echo "== $n) $name   $( [[ $name == hi_* ]] && echo '(English + Hindi: can be the ONE voice)' || echo '(English only)')"
+      for t in "${lines[@]}"; do
+        echo "$t" | as_user "$PIPER/piper" --model "$m" --output_raw --length_scale 1.15 --sentence_silence 0.3 2>/dev/null \
+          | as_user aplay -q "${DEV[@]}" -r "$rate" -f S16_LE -t raw -c 1 -
+        sleep 0.6
+      done
+    done
+    echo
+    echo "Pick one in ~/slam-robot/ros2_ws/src/lidar_robot/config/robot_params.yaml (then colcon build + restart):"
+    echo "  speech_voice_hi: hi_IN-priyamvada-medium     # or hi_IN-pratham-medium"
+    echo "  speech_one_voice: hi                         # that voice speaks English too = always the same person"
     ;;
   status)
     echo "Piper       : $([ -x "$PIPER/piper" ] && echo "$PIPER/piper" || echo missing)"

@@ -126,7 +126,8 @@ navigator:
     speech_rate: 1.15                 # speaking speed: 1.0 = the voice's own, 1.15 = 15 % slower (clearer), max 2.0
     speech_pause_s: 0.3               # pause between sentences (s)
     speech_voice_en: ''               # '' = first ~/piper/voices/en_*.onnx
-    speech_voice_hi: ''               # '' = first ~/piper/voices/hi_*.onnx (used for Devanagari text)
+    speech_voice_hi: ''               # '' = first ~/piper/voices/hi_*.onnx, or a name: hi_IN-priyamvada-medium (female) / hi_IN-pratham-medium (male)
+    speech_one_voice: hi              # hi = the Hindi voice reads English too: always the same person. '' = English voice for English
     speech_max_per_min: 8             # announcements per minute (questions / battery always get through)
     speech_device: ''                 # ALSA output ('' = default; e.g. plughw:CARD=Device,DEV=0)
 
