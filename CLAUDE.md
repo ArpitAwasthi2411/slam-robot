@@ -83,7 +83,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Current status (update every session)
 
-Next lab day: **`docs/STEPS_lab_18nov.md`** (INA226, dock contact sense, voices, laptop mapping); before that `docs/STEPS_lab_16nov.md` (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
+Next lab day: **`docs/STEPS_lab_19nov.md`** (laptop mapping of the department, encoder check, CPU report); INA226/dock in `docs/STEPS_lab_18nov.md`; before that `docs/STEPS_lab_16nov.md` (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
 **Last updated: 2026-11-17**
@@ -135,6 +135,8 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-18 (night): the Pi's local edits (marker 0.0725, mic/speech_device plughw:CARD=Device,DEV=0, lua slices) are
+  now in the repo yaml, so `git checkout -- config/ && git pull` on the Pi never conflicts. docs/STEPS_lab_19nov.md.
 - 2026-11-18 (CPU review): tf2_ros (Humble) TransformListener(buffer, node, spin_thread=True) adds the GIVEN node to a
   second executor: navigator, dashboard and goal_controller were each spun by two executors (every timer/scan//tf woke
   both: idle CPU; a slow callback on the TF thread froze the TF buffer -> 'position lost' stalls). Now

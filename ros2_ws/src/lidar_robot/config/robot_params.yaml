@@ -131,7 +131,7 @@ navigator:
     speech_one_voice: ''              # '' = English voice for English, Hindi voice for Devanagari (18 Nov: both Hindi
                                       # voices read English badly). hi = the Hindi voice reads everything
     speech_max_per_min: 8             # announcements per minute (questions / battery always get through)
-    speech_device: ''                 # ALSA output ('' = default; e.g. plughw:CARD=Device,DEV=0)
+    speech_device: plughw:CARD=Device,DEV=0   # the robot's USB sound card (17 Nov); '' = ALSA default
 
 vision:
   ros__parameters:
@@ -156,7 +156,7 @@ vision:
     dock_marker: true            # look for the dock marker (/vision/dock_marker, ~10 Hz)
     marker_dict: DICT_4X4_50
     marker_id: 0
-    marker_size_m: 0.08          # black square side, without the white border
+    marker_size_m: 0.0725        # black square side, without the white border (18 Nov print measured 72.5 mm)
     marker_rate: 10.0            # only while docking (navigator asks); capped at out_fps
     marker_always: false         # true = look for the marker all the time (bench test with marker_webcam)
     phone_timeout: 1.0           # s: the phone in the head stopped sending people boxes -> the Pi's own YOLO again
@@ -167,7 +167,7 @@ voice:
   ros__parameters:
     button_gpio: 17              # BCM: header pin 11, button to GND (pin 9). NOT 14/15 (ESP32 UART)
     button_chip: gpiochip0
-    mic_device: ''               # ALSA input ('' = default; USB card e.g. plughw:CARD=Device,DEV=0, see arecord -L)
+    mic_device: plughw:CARD=Device,DEV=0   # the robot's USB sound card (17 Nov; see arecord -L); '' = ALSA default
     speaker_device: ''           # for the "listening" beep
     max_record_s: 8.0
     stt_model: whisper-large-v3-turbo   # Groq Whisper (GROQ_API_KEY)
