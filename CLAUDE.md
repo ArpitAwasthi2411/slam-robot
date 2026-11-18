@@ -135,6 +135,13 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-18 (doors/rooms): lab reports: robot stopped at doors, "no path" where the map has space, rooms only as
+  rectangles. Side ultrasonics heard door frames: in-path zone = body (0.21+0.03 m), echoes within `us_wall_tol`
+  0.12 m of a mapped wall ignored, whole arcs explained by the map never remembered (they closed doors for 60 s);
+  planner despeckle + unknown doorway streak fill + tight-radius fallback ("narrow passage"); app Room tool takes
+  tapped corners (any shape, Undo, Save room); relative places ("corridor near X", "X ke bahar/paas/saamne",
+  steps `side: outside`, LLM `sides`, relative.outside_spot walks out through the door). test_doors_rooms.py (13).
+  Not run on the robot.
 - 2026-11-18 (night): the Pi's local edits (marker 0.0725, mic/speech_device plughw:CARD=Device,DEV=0, lua slices) are
   now in the repo yaml, so `git checkout -- config/ && git pull` on the Pi never conflicts. docs/STEPS_lab_19nov.md.
 - 2026-11-18 (CPU review): tf2_ros (Humble) TransformListener(buffer, node, spin_thread=True) adds the GIVEN node to a

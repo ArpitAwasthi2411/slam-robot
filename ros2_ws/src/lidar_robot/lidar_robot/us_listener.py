@@ -53,17 +53,22 @@ class UltrasonicListener:
                 out.append((rng, self._mount(frame)))
         return out
 
-    def front_clearance(self, half_width):
-        return front_clearance_from_ranges(self.readings(), half_width)
+    def front_clearance(self, half_width, ignore=None, margin=0.05):
+        return front_clearance_from_ranges(self.readings(), half_width, ignore=ignore, margin=margin)
 
     def points_base(self):
         return [range_point(r, m) for r, m in self.readings() if r is not None and m is not None]
 
-    def arc_base(self, half_angle_deg=15.0, max_range=1.2):
-        """Points across each beam (base_link) for echoes nearer than max_range: the blocker's likely extent."""
+    def arc_base(self, half_angle_deg=15.0, max_range=1.2, grouped=False):
+        """Points across each beam (base_link) for echoes nearer than max_range: the blocker's likely extent.
+        grouped=True: one list per echo, so the navigator can drop a whole echo that the map explains."""
         ha = math.radians(half_angle_deg)
         out = []
         for r, m in self.readings():
             if r is not None and m is not None and r <= max_range:
-                out += range_arc(r, m, ha)
+                arc = range_arc(r, m, ha)
+                if grouped:
+                    out.append(arc)
+                else:
+                    out += arc
         return out

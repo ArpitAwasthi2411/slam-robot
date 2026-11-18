@@ -202,8 +202,12 @@ class NavigatorCore:
         self.scan_world = pts
 
     def update_us_world(self, pts):
-        """Live ultrasonic echoes (nearer than ~1.2 m) as world points across each beam."""
-        self.us_world = pts
+        """Live ultrasonic echoes (nearer than ~1.2 m) in the map frame: a list of arcs (one list of points per
+        echo, across its beam), or a flat list of points (each point its own echo)."""
+        if pts and isinstance(pts[0][0], (list, tuple)):
+            self.us_world = [list(a) for a in pts if a]
+        else:
+            self.us_world = [[p] for p in pts]
 
     def remember_us(self, now=None, log=True):
         """Keep what the ultrasonics see right now as a temporary obstacle for the plans.
@@ -217,10 +221,18 @@ class NavigatorCore:
         rx, ry, ryaw = self._pose
         q = 0.05
         new_echoes = []
-        for x, y in self.us_world:
-            if self.planner.has_map() and self.planner.clearance(x, y) < self.us_wall_skip_m:
-                continue                                   # that's a wall already on the map
-            new_echoes.append((x, y))
+        mapped = self.planner.has_map()
+        for arc in self.us_world:
+            # an HC-SR04 reports the NEAREST surface anywhere in its ~30 deg cone: when a mapped wall (a door frame)
+            # lies on this echo's arc, the map explains the echo. Keeping the rest of the arc closed doors for 60 s
+            # (18 Nov: "space on the map but no path" after a stop at a door).
+            if mapped and any(self.planner.near_wall(x, y, self.us_wall_skip_m) for x, y in arc):
+                continue
+            for x, y in arc:
+                if mapped and self.planner.clearance(x, y) < self.us_wall_skip_m:
+                    continue                               # that's a wall already on the map
+                new_echoes.append((x, y))
+        for x, y in new_echoes:
             d = math.hypot(x - rx, y - ry) or 1.0
             ux, uy = (x - rx) / d, (y - ry) / d
             # an echo only gives the near face: assume the thing is us_depth_m deep, keep us_margin_m
@@ -563,6 +575,23 @@ class NavigatorCore:
     def _stop_from_place(p):
         return Stop(p['name'], p['x'], p['y'], p.get('yaw'))
 
+    def _outside_stop(self, p, res=None):
+        """'corridor near Ravi sir's cabin': the nearest open spot outside the place's room, facing it."""
+        from lidar_robot.relative import outside_spot
+        spot = None
+        if self.planner.has_map():
+            spot = outside_spot(p, self.places, self.planner.is_free, self.planner.clearance,
+                                need=self.planner.p.robot_radius + 0.12)
+        if spot is None:
+            if res is not None:
+                res.setdefault('notes', []).append(f'no open spot found outside {p["name"]}: going to the place itself')
+            return self._stop_from_place(p)
+        if res is not None:
+            res.setdefault('notes', []).append(
+                f'outside {p["name"]}: {spot["walk_m"]:.1f} m from the saved spot'
+                + (f', out of the room "{spot["room"]}"' if spot['room'] else ''))
+        return Stop('outside ' + p['name'], spot['x'], spot['y'], spot['yaw'])
+
     def _mission_by_id(self, mid):
         if self.queue.active and self.queue.active.id == mid:
             return self.queue.active
@@ -656,6 +685,8 @@ class NavigatorCore:
                     if not h:
                         raise ValueError('a stop at home was asked for, but no home spot is set')
                     stop = Stop('home', h['x'], h['y'], h.get('yaw'))
+                elif st.get('side') == 'outside':
+                    stop = self._outside_stop(self.places.target(st['place']), res)
                 else:
                     stop = self._stop_from_place(self.places.target(st['place']))
                 stop.wait_s = float(st.get('wait_s') or 0.0)
@@ -876,7 +907,8 @@ class NavigatorCore:
         steps = []
         if c['intent'] == 'navigate':
             steps = [{'kind': 'home' if (st['place'] == 'home' and not self.places.target('home')) else 'go',
-                      'label': st['place'], 'wait_s': st.get('wait_s', 0.0),
+                      'label': ('outside ' if st.get('side') == 'outside' else '') + st['place'],
+                      'wait_s': st.get('wait_s', 0.0),
                       'confirm': bool(st.get('confirm'))}
                      for st in (c.get('steps') or [{'place': n, 'wait_s': 0.0} for n in c['targets']])]
             if c.get('then_home'):
@@ -1139,7 +1171,21 @@ class NavigatorCore:
                                          radius=self.planner.p.robot_radius + stop.margin)
             if path is None:
                 path = self.planner.plan(pose[:2], (stop.x, stop.y), extra)
-            if path is not None and self.body_checks and not stop.margin:
+            if path is None and not stop.margin:
+                # a door the usual berth calls too narrow: plan with the body's real half width (+3 cm), check the
+                # whole rectangle along it and drive slowly ("tight"). 18 Nov: "space on the map but no path".
+                tight_r = self.footprint.half_width + 0.03
+                if tight_r < self.planner.p.robot_radius - 0.01:
+                    err = self.planner.last_error
+                    path = self.planner.plan(pose[:2], (stop.x, stop.y), extra, radius=tight_r)
+                    if path is not None:
+                        bad = check_path(self.planner, path, self.footprint, start_yaw=pose[2], end_yaw=stop.yaw) \
+                            if self.body_checks else []
+                        bad = bad or [(path[len(path) // 2][0], path[len(path) // 2][1])]   # always drive it slowly
+                        self._log(f'narrow passage on the way to {stop.label}: planned with my real width', 'warn')
+                    else:
+                        self.planner.last_error = err
+            elif path is not None and self.body_checks and not stop.margin:
                 path, bad = self._fit_body(path, pose, stop, extra)
         if path is None:
             m.attempts += 1

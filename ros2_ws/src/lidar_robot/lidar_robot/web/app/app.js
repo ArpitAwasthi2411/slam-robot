@@ -869,7 +869,7 @@ cv.addEventListener('wheel', e => { e.preventDefault(); view.scale = clamp(view.
 cv.addEventListener('contextmenu', e => e.preventDefault());
 
 // ------------------------------------------------------------------ map tools: goal (like RViz 2D Goal Pose), route, measure
-const T = { tool: null, drag: null, route: [], loop: false, sent: null, draw: null };
+const T = { tool: null, drag: null, route: [], loop: false, sent: null, draw: null, corners: [] };
 const DRAG_PX = 14;                                   // shorter drags = tap (no heading)
 const headingOf = d => d.px > DRAG_PX ? Math.atan2(d.b[1] - d.a[1], d.b[0] - d.a[0]) : null;
 const deg = r => `${Math.round(((r * 57.2958) % 360 + 360) % 360)}°`;
@@ -878,6 +878,7 @@ function setTool(tool) {
   $('#m-hint').classList.add('gone');
   T.drag = null;
   if (T.tool !== 'route') { T.route = []; }
+  if (T.tool !== 'room') { T.corners = []; }
   if (T.tool !== 'draw') closePath();
   if (T.tool && S.tab !== 'drive' && S.tab !== 'map') setTab('map');
   $$('.tool[data-tool]').forEach(b => { const on = b.dataset.tool === T.tool; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
@@ -900,7 +901,11 @@ function renderMode() {
   } else if (T.tool === 'draw' && !T.draw) {
     html = `<span class="grow"><b>Draw a path.</b> Drag your finger the way the robot should drive.</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'room') {
-    html = `<span class="grow"><b>Room.</b> Drag a box over a room, then say what is in it (“3D printer, oscilloscope”).</span><button class="btn ghost" data-m="close">Done</button>`;
+    const n = T.corners.length;
+    html = n ? `<span class="grow"><b>${n} corner${n > 1 ? 's' : ''}.</b> Tap the next corner of the room${n >= 3 ? ', or save it' : ''}.</span>
+        <button class="btn ghost" data-m="undo">Undo</button><button class="btn grad" data-m="room" ${n >= 3 ? '' : 'disabled'}>Save room</button>
+        <button class="btn ghost" data-m="close" aria-label="Close">✕</button>`
+      : `<span class="grow"><b>Room.</b> Tap its corners one by one (any shape), or drag a box for a square room.</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'locate') {
     html = `<span class="grow"><b>Set position.</b> Press where the robot really is, drag the way it faces.</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'measure') {
@@ -917,7 +922,8 @@ function renderMode() {
 async function modeAction(a) {
   haptic(10);
   if (a === 'close') { T.sent = null; setTool(T.tool); return; }
-  if (a === 'undo') { T.route.pop(); renderMode(); mapDirty = true; return; }
+  if (a === 'undo') { (T.tool === 'room' ? T.corners : T.route).pop(); renderMode(); mapDirty = true; return; }
+  if (a === 'room') { await saveRoom(T.corners.map(p => [+p[0].toFixed(2), +p[1].toFixed(2)])); return; }
   if (a === 'cancel') {
     try { await nav({ type: 'cancel' }); toast('Goal canceled'); } catch (e) { toast(e.message, true); }
     T.sent = null; renderMode(); return;
@@ -970,16 +976,24 @@ function roomDialog(title, room) {
     <label>Other names (optional)<input name="aliases" maxlength="120" placeholder="electronics lab" value="${esc(room ? (room.aliases || []).join(', ') : '')}"></label>`,
     'Save room', room ? 'Delete room' : null);
 }
+async function saveRoom(polygon) {
+  const f = await roomDialog('New room');
+  if (!f || f.action !== 'ok') { mapDirty = true; return; }
+  try {
+    await nav({ type: 'add_room', name: f.name, polygon, contents: f.contents, aliases: f.aliases });
+    toast(`Room ${f.name} saved`); haptic(20); T.corners = []; renderMode(); mapDirty = true;
+  } catch (e) { toast(e.message, true); }
+}
 async function toolRelease(d) {
   if (T.tool === 'draw') { await finishDrawing(d.pts || []); return; }
   if (T.tool === 'room') {
+    if (d.px <= DRAG_PX || T.corners.length) {      // a tap = one corner of a room of any shape
+      if (T.corners.length >= 40) { toast('40 corners at most', true); return; }
+      T.corners.push([d.a[0], d.a[1]]); haptic(12); renderMode(); mapDirty = true; return;
+    }
     const [x0, y0] = d.a, [x1, y1] = d.b;
     if (Math.abs(x1 - x0) < 0.7 || Math.abs(y1 - y0) < 0.7) { toast('Drag a bigger box over the room', true); return; }
-    const f = await roomDialog('New room');
-    if (!f || f.action !== 'ok') { mapDirty = true; return; }
-    const polygon = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(p => [+p[0].toFixed(2), +p[1].toFixed(2)]);
-    try { await nav({ type: 'add_room', name: f.name, polygon, contents: f.contents, aliases: f.aliases }); toast(`Room ${f.name} saved`); haptic(20); }
-    catch (e) { toast(e.message, true); }
+    await saveRoom([[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(p => [+p[0].toFixed(2), +p[1].toFixed(2)]));
     return;
   }
   if (T.tool === 'locate') {
@@ -1031,6 +1045,14 @@ function drawTools() {
       cx.fillStyle = '#2a1a10'; cx.fillText(String(i + 1), x, y + 0.5 * DPR);
     });
     cx.textBaseline = 'alphabetic';
+  }
+  // room corners tapped so far (any shape), closed back to the first corner
+  if (T.corners.length) {
+    cx.save(); cx.strokeStyle = PAL.orange; cx.fillStyle = A(PAL.orange, 0.12); cx.lineWidth = 2 * DPR; cx.setLineDash([6 * DPR, 4 * DPR]);
+    cx.beginPath(); T.corners.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
+    if (T.corners.length > 2) { cx.closePath(); cx.fill(); }
+    cx.stroke(); cx.restore();
+    T.corners.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); cx.fillStyle = i ? PAL.orange : PAL.teal; cx.beginPath(); cx.arc(x, y, 6 * DPR, 0, 7); cx.fill(); });
   }
   // drawn path: live stroke, then the checked path with blocked stretches in red
   const glowLine = (pts, color, w, dash) => {

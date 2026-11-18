@@ -64,8 +64,11 @@ class Planner:
         if h == 0 or w == 0:
             self._base = None
             return
-        occ = grid.occ[:h * f, :w * f].reshape(h, f, w, f).any(axis=(1, 3))
-        unk = grid.unknown[:h * f, :w * f].reshape(h, f, w, f).all(axis=(1, 3))
+        fine_occ = despeckle(grid.occ)                    # LiDAR specks (legs walking past) no longer block corridors
+        fine_unk = fill_unknown_holes(grid.unknown, fine_occ)   # 1-cell unseen streaks in doorways
+        occ = fine_occ[:h * f, :w * f].reshape(h, f, w, f).any(axis=(1, 3))
+        unk = fine_unk[:h * f, :w * f].reshape(h, f, w, f).all(axis=(1, 3))
+        self._occ_only = occ                              # mapped walls only (not unknown): near_wall()
         blocked = occ | (unk if not p.allow_unknown else np.zeros_like(unk))
         self._meta = (w, h, grid.resolution * f, grid.origin_x, grid.origin_y)
         self._occ_static = blocked
@@ -112,6 +115,19 @@ class Planner:
             return False
         cx, cy = self.world_to_cell(x, y)
         return self._inside(cx, cy) and not self._base[1][cy, cx]
+
+    def near_wall(self, x, y, tol=0.12):
+        """True when (x, y) is within tol of a MAPPED wall (unknown space does not count). The navigator uses it to
+        ignore ultrasonic echoes from door frames it already knows about."""
+        if not self.has_map() or getattr(self, '_occ_only', None) is None:
+            return False
+        cx, cy = self.world_to_cell(x, y)
+        r = max(1, int(round(tol / self._meta[2])))      # cells: 0.12 m on the 0.10 m grid = 1 cell around
+        w, h = self._meta[0], self._meta[1]
+        x0, x1, y0, y1 = max(0, cx - r), min(w, cx + r + 1), max(0, cy - r), min(h, cy + r + 1)
+        if x0 >= x1 or y0 >= y1:
+            return False
+        return bool(self._occ_only[y0:y1, x0:x1].any())
 
     def clearance(self, x, y):
         """Distance (m) from (x, y) to the nearest mapped obstacle; 0 outside the map."""
@@ -270,6 +286,38 @@ class Planner:
             if not math.isfinite(c) or c > max_cost:
                 return False
         return True
+
+
+def _window_count(mask, r):
+    """Number of True cells in the (2r+1)^2 window around every cell (the cell itself included)."""
+    m = np.pad(mask.astype(np.int32), r)
+    c = m.cumsum(0).cumsum(1)
+    c = np.pad(c, ((1, 0), (1, 0)))
+    k = 2 * r + 1
+    return c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]
+
+
+def despeckle(occ):
+    """Drop occupied blobs of 1-2 cells (5-10 cm specks: a leg that walked past while mapping, LiDAR noise).
+    A cell stays when its 5x5 window holds at least 2 other occupied cells, so every wall, wall end and dotted
+    wall stays; only isolated specks go."""
+    if occ.size == 0:
+        return occ
+    return occ & ((_window_count(occ, 2) - 1) >= 2)
+
+
+def fill_unknown_holes(unknown, occ, passes=2):
+    """Unknown cells with >= 5 free (seen, not occupied) neighbours become free: the thin unseen streaks a
+    doorway often has. A frontier (unknown on one whole side) never has 5 free neighbours, so it stays."""
+    unk = unknown.copy()
+    for _ in range(passes):
+        free = ~unk & ~occ
+        n = _window_count(free, 1) - free.astype(np.int32)
+        fill = unk & (n >= 5)
+        if not fill.any():
+            break
+        unk &= ~fill
+    return unk
 
 
 def _chamfer(d):

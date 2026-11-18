@@ -24,15 +24,20 @@ def range_arc(rng, mount, half_angle=math.radians(15.0), step=0.05):
     return out
 
 
-def front_clearance_from_ranges(readings, half_width, max_age=None):
+def front_clearance_from_ranges(readings, half_width, max_age=None, ignore=None, margin=0.05):
     """readings: iterable of (range_m_or_None, mount). Returns the forward distance (from the robot
-    centre) to the nearest ultrasonic obstacle that lies inside the robot's corridor, or inf."""
+    centre) to the nearest ultrasonic obstacle that lies inside the robot's corridor, or inf.
+
+    ignore(px, py) -> True skips an echo (base_link point): the navigator passes "this is a wall already on
+    the map", so a door frame beside the robot no longer stops it (18 Nov). The LiDAR still sees real walls."""
     best = float('inf')
     for rng, mount in readings:
         if rng is None or mount is None:
             continue
         px, py = range_point(rng, mount)
-        if px > 0 and abs(py) <= half_width + 0.05:
+        if px > 0 and abs(py) <= half_width + margin:
+            if ignore is not None and ignore(px, py):
+                continue
             best = min(best, px)
     return best
 

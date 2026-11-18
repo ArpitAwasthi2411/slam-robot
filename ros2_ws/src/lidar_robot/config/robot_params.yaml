@@ -64,6 +64,7 @@ navigator:
     slow_distance: 0.80
     blocked_after: 5.0           # s stopped by an obstacle before planning a route around it (people usually move by then)
     us_memory_s: 60.0            # s an obstacle seen only by the ultrasonics stays on the plan (LiDAR can't see low boxes)
+    us_wall_tol: 0.12            # m: ultrasonic echoes this close to a mapped wall (door frames) never stop or block the robot
     robot_half_width: 0.25
     front_cone_deg: 25.0
     # The body shape (v2.4). base_link = centre of the drive axle. MEASURE these on your robot:

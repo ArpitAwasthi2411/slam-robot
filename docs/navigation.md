@@ -220,3 +220,19 @@ or the mounted phone in head mode) together with the LiDAR / ultrasonic stop:
 
 Not yet tried on the robot: check that the person check agrees with what you see (stand in the path: it must
 ask; put a chair there: it must reroute without speaking).
+
+## Doors, rooms of any shape, "outside X" (18 Nov)
+
+- **Door frames:** the side ultrasonics hear the frame when the robot passes a door. Echoes within `us_wall_tol`
+  (0.12 m) of a mapped wall never stop the robot and are never remembered as a blocker; the in-path zone is the real
+  body width (half width 0.21 + 0.03 m). A box in the open is still remembered as before.
+- **"Space on the map but no path":** single-cell specks are removed from the planning map, one-cell unseen streaks
+  in doorways are treated as floor, and if both plans fail the planner tries once more with the body half width
+  + 3 cm (slow, logged as "narrow passage").
+- **Rooms of any shape:** Map tab → Room tool → tap the corners one by one (Undo removes the last), then **Save room**
+  (3+ corners). Dragging still draws a rectangle.
+- **Relative places:** "stand in the corridor near Ravi sir's cabin", "go outside the HOD office", "Ravi sir ke cabin
+  ke bahar khade raho", "Lab 3 ke paas jao". The robot walks out of the place's room through its door (over free
+  floor, `relative.py`) and stops at the first open spot outside it, facing the room. Best when the room is drawn on
+  the map; without a room it stops ≥ 0.8 m from the place in open space. The LLM gets the same choice (`sides`).
+  Not run on the robot yet.

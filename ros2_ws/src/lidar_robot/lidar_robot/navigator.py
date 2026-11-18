@@ -129,7 +129,8 @@ class NavigatorNode(Node):
         d('network_check_s', 10.0)
         d('max_replans', 3)
         d('pose_timeout', 1.0)          # wheel odometry (odom->base_link) older than this = position lost
-        d('map_tf_timeout', 10.0)       # SLAM's map->odom correction may lag this much (it changes slowly)
+        d('map_tf_timeout', 10.0)
+        d('us_wall_tol', 0.12)          # m: an ultrasonic echo this close to a mapped wall is the wall (door frames)       # SLAM's map->odom correction may lag this much (it changes slowly)
         d('odom_frame', 'odom')
         d('require_localization_confirm', False)   # bringup sets true in slam_mode:=localization
         d('llm_model', 'openai/gpt-oss-20b')   # Groq; retired names are mapped to a current model (llm.py)
@@ -159,6 +160,7 @@ class NavigatorNode(Node):
         self.cone = math.radians(float(g('front_cone_deg')))
         self.pose_timeout = float(g('pose_timeout'))
         self.map_tf_timeout = float(g('map_tf_timeout'))
+        self.us_wall_tol = float(g('us_wall_tol'))
         self._last_corr = None           # last map->odom correction: a sudden change = the map 'jumped'
         self._corr_jumps = []
         self.odom_frame = g('odom_frame')
@@ -402,7 +404,7 @@ class NavigatorNode(Node):
                                                     msg.angle_increment, msg.range_min, pose, laser=laser)
             us = self.us.points_base()
             pts += to_world(us, pose)                          # things below the LiDAR plane
-            us_arc = to_world(self.us.arc_base(), pose)       # the whole beam, for the blocker memory
+            us_arc = [to_world(a, pose) for a in self.us.arc_base(grouped=True)]   # each echo's beam, for the memory
             with self.core_lock:
                 self.core.update_scan_world(pts)
                 self.core.update_us_world(us_arc)
@@ -642,7 +644,7 @@ class NavigatorNode(Node):
             front = 0.0                                  # no fresh scan: never drive forward
             with self.core_lock:
                 self.core.update_scan_base([])           # ...and don't trust old body checks
-        front = min(front, self.us.front_clearance(self.half_width))
+        front = min(front, self._us_front(pose))
         try:
             with self.core_lock:
                 jumps, self._corr_jumps = self._corr_jumps, []
@@ -673,6 +675,18 @@ class NavigatorNode(Node):
             cmd.linear.x, cmd.angular.z = float(v), float(w)
             self.cmd_pub.publish(cmd)
         self._was_active = active
+
+    def _us_front(self, pose):
+        """Ultrasonic clearance ahead. Only echoes inside the body's real width (+3 cm) count, and echoes on a
+        wall that is already on the map are skipped: passing a door, the side sensors see the frame (18 Nov)."""
+        fp = self.core.footprint
+        planner = self.core.planner
+        ignore = None
+        if pose is not None and planner.has_map():
+            def ignore(px, py):
+                wx, wy = to_world([(px, py)], pose)[0]
+                return planner.near_wall(wx, wy, tol=self.us_wall_tol)
+        return self.us.front_clearance(fp.half_width, ignore=ignore, margin=0.03)
 
     def _on_vision(self, msg: String):
         try:

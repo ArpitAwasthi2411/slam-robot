@@ -60,6 +60,13 @@ SEQ_HI = re.compile(r'\b(?:fir|phir|pahle|pehle|baad|wapas|waapas|vapas|wapis|ru
                     r'aakar|akar|uske|iske|tab|phr|fr)\b')
 TIME_WORD = re.compile(r'\b(?:\d+|one|two|three|four|five|ten|ek|do|teen|char|paanch|das)\s*'
                        r'(?:min|mins|minute|minutes|minut|minat|sec|secs|second|seconds|hour|hours|ghanta|ghante)\b')
+# "stand in the corridor near Ravi sir's cabin", "HOD office ke bahar": stop OUTSIDE the place, not in it
+NEAR_BEFORE = re.compile(r'\b(?:near|nearby|outside|out side|in front of|infront of|next to|beside|besides|by|opposite|'
+                         r'close to|just outside|at the door of|at the entrance of|corridor (?:near|outside|of|by))'
+                         r'\s+(?:(?:the|a|an|of)\s+)?$')
+NEAR_AFTER = re.compile(r'^\s*(?:(?:s|sir|sirs|madam|mam|maam|ji|ke|ki|ka|cabin|office|room|lab)\s+){0,4}(?:ke|ki|ka|k)\s+'
+                        r'(?:paas|pass|bahar|baahar|bahr|saamne|samne|samane|bagal|darwaze|aage)\b')
+CORRIDOR = re.compile(r'\b(corridor|corridors|hallway|hall way|gallery|passage|lobby|gali|galiyara)\b')
 HOME_STOP = 'home'                     # a target meaning the home spot, for "go home first, then ..."
 SPLIT = re.compile(r'\s*(?:,|;|\bthen\b|\band then\b|\bafter that\b|\bfollowed by\b|\band\b)\s*')
 
@@ -250,6 +257,7 @@ class CommandParser:
             names = [p['name'] for p in found]
             res = self._result('navigate', names, prio, 'Going to ' + ' then '.join(names) + '.', 'rules', notes)
             res.update(self._steps_from_text(text, found))
+            res['reply'] = self._going(res['steps'])
             if res['then_home']:
                 res['reply'] = res['reply'][:-1] + ', then coming back.'
             return res
@@ -262,7 +270,7 @@ class CommandParser:
     def _schema(self, names):
         target = {'type': 'string', 'enum': names} if names else {'type': 'string'}
         return {'type': 'object', 'additionalProperties': False,
-                'required': ['intent', 'query', 'targets', 'priority', 'reply', 'waits', 'then_home', 'confirms'],
+                'required': ['intent', 'query', 'targets', 'priority', 'reply', 'waits', 'then_home', 'confirms', 'sides'],
                 'properties': {
                     'intent': {'type': 'string', 'enum': list(INTENTS)},
                     'query': {'type': ['string', 'null']},
@@ -271,7 +279,8 @@ class CommandParser:
                     'reply': {'type': 'string'},
                     'waits': {'type': 'array', 'items': {'type': 'number'}},
                     'then_home': {'type': 'boolean'},
-                    'confirms': {'type': 'array', 'items': {'type': 'boolean'}}}}
+                    'confirms': {'type': 'array', 'items': {'type': 'boolean'}},
+                    'sides': {'type': 'array', 'items': {'type': 'string', 'enum': ['at', 'outside']}}}}
 
     def _parse_llm(self, text):
         catalog = []
@@ -301,7 +310,10 @@ class CommandParser:
             'reply (one short friendly sentence to say back), '
             'waits (list of seconds to wait at each target, same order as targets, 0 if none), '
             'then_home (true if the user wants the robot to come back / return home at the very end), '
-            'confirms (list of true/false per target: true if the robot must wait there until someone presses OK). '
+            'confirms (list of true/false per target: true if the robot must wait there until someone presses OK), '
+            'sides (list per target: "outside" if the user wants the robot to stand near / outside / in front of '
+            'the place, e.g. "in the corridor near Ravi sir\'s cabin", "HOD office ke bahar", else "at"). '
+            'For "corridor near X" the target is X with side outside (not a corridor place). '
             'A target can be a room; if the user names a thing, pick the room whose room_contains has it. '
             'Never invent places. If a requested place is not in the list, leave it out and say so in reply. '
             'If the command is not about the robot, use intent unknown. '
@@ -326,6 +338,7 @@ class CommandParser:
             return res
         raw_waits = d.get('waits') if isinstance(d.get('waits'), list) else []
         raw_confirms = d.get('confirms') if isinstance(d.get('confirms'), list) else []
+        raw_sides = d.get('sides') if isinstance(d.get('sides'), list) else []
         kept = []                                         # (name, index in the model's list)
         for i, raw in enumerate(d.get('targets', []) or []):
             if str(raw).strip().lower() == HOME_STOP and not self.places.target(str(raw)):
@@ -372,23 +385,37 @@ class CommandParser:
                     w = 0.0
                 st['wait_s'] = max(st['wait_s'], min(MAX_WAIT_S, max(0.0, w)))
                 st['confirm'] = bool(st.get('confirm')) or (i < len(raw_confirms) and raw_confirms[i] is True)
+                if i < len(raw_sides) and raw_sides[i] == 'outside' and st['place'] != HOME_STOP:
+                    st['side'] = 'outside'
             res['steps'] = from_text['steps']
+            if 'targets' in from_text:
+                res['targets'] = from_text['targets']
             res['then_home'] = bool(d.get('then_home')) or from_text['then_home']
         return res
 
     # ---------------------------------------------------------------- multi-step plans
     def _steps_from_text(self, text, places):
-        """'take this to Lab 3, wait 2 mins, then come back' -> steps with waits + then_home."""
+        """'take this to Lab 3, wait 2 mins, then come back' -> steps with waits + then_home.
+        'wait in the corridor near Ravi sir's cabin' / 'HOD office ke bahar' -> that step gets side 'outside'."""
         t = normalize(text)
-        pos = []
+        pos, ends = [], []
         for p in places:
             best = None
             for label in [p['name']] + list(p.get('aliases', [])):
                 m = re.search(r'\b' + re.escape(normalize(label)) + r'\b', t) if normalize(label) else None
-                if m and (best is None or m.start() < best):
-                    best = m.start()
-            pos.append(best)
+                if m and (best is None or m.start() < best[0]):
+                    best = (m.start(), m.end())
+            pos.append(best[0] if best else None)
+            ends.append(best[1] if best else None)
         steps = [{'place': p['name'], 'wait_s': 0.0, 'confirm': False} for p in places]
+        for k, p in enumerate(places):
+            if pos[k] is None:
+                continue
+            before = re.sub(r"\b(?:sir|sirs|madam|mam|maam|ma am|dr|prof)\s*$", '', t[max(0, pos[k] - 30):pos[k]].rstrip()).rstrip() + ' '
+            if NEAR_BEFORE.search(before) or NEAR_AFTER.search(t[ends[k]:]):
+                steps[k]['side'] = 'outside'
+        drop = [k for k in range(len(steps) - 1) if CORRIDOR.search(normalize(places[k]['name']))
+                and steps[k + 1].get('side') == 'outside']          # "corridor near X": X decides the spot
         for m in WAIT.finditer(t):
             n = m.group(1)
             val = NUM_WORDS.get(n, None) if not n[0].isdigit() else float(n)
@@ -402,9 +429,22 @@ class CommandParser:
             before = [i for i, ps in enumerate(pos) if ps is not None and ps < m.start()]
             if steps:
                 steps[before[-1] if before else 0]['confirm'] = True
+        for k in reversed(drop):
+            nxt = steps[k + 1]
+            nxt['wait_s'] = max(nxt['wait_s'], steps[k]['wait_s'])
+            nxt['confirm'] = nxt['confirm'] or steps[k]['confirm']
+            del steps[k]
         first = min([ps for ps in pos if ps is not None], default=0)
         home = [m for m in HOME.finditer(t) if m.start() > first]
-        return {'steps': steps, 'then_home': bool(home and steps)}
+        out = {'steps': steps, 'then_home': bool(home and steps)}
+        if drop:
+            out['targets'] = [st['place'] for st in steps]
+        return out
+
+    @staticmethod
+    def _going(steps):
+        return 'Going to ' + ' then '.join(('outside ' if st.get('side') == 'outside' else '') + st['place']
+                                           for st in steps) + '.'
 
     @staticmethod
     def _pos_in(t, p):
