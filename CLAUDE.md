@@ -47,7 +47,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Software map
 
-- `firmware/robot_esp32s3/` **v2.8** (ODM lines carry running tick/yaw totals; S3, RGB status LED `L,r,g,b,ms`, Pi link on UART1 pins 47/8 + echo on USB,
+- `firmware/robot_esp32s3/` **v2.9** (GPIO 1 dock contact sense `DCK`; ODM lines carry running tick/yaw totals; S3, RGB status LED `L,r,g,b,ms`, Pi link on UART1 pins 47/8 + echo on USB,
   only well-formed command lines accepted, docking mode `D,1`, I2C scan `I`), `firmware/robot_esp32_classic/` v2.5.
   Serial protocol 115200 text: ESP→Pi `ODM, IMU, US, BAT, BMP, SPD, INFO`; Pi→ESP `V P S E R C G ? K W X T L D I`
   (`lidar_robot/protocol.py`).
@@ -83,7 +83,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 
 ## Current status (update every session)
 
-Next lab day: **`docs/STEPS_lab_16nov.md`** (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
+Next lab day: **`docs/STEPS_lab_18nov.md`** (INA226, dock contact sense, voices, laptop mapping); before that `docs/STEPS_lab_16nov.md` (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
 **Last updated: 2026-11-17**
@@ -135,6 +135,11 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-18 (dock): no charger on the dock yet, geometry-box plates, no springs. Firmware S3 **v2.9**: GPIO 1 = dock
+  contact sense (dock 12 V adapter on the plates -> 1 k / 200 R divider, DCK,<0|1>,<mV>, hysteresis 6/4 V, 0.3 s),
+  `#error` if USE_BAT_ADC too (INA226 now measures the battery). protocol DockPacket, bridge status `dock`, navigator
+  core.set_dock_contact, docking counts dock voltage as contact ("docked: on the contacts"). Wiring S6-S10 in
+  CONNECTIONS_esp32s3.md (INA226 voltage-only with the stock R100 shunt). docs/STEPS_lab_18nov.md. Firmware CI to check.
 - 2026-11-18 (later): listening test on the laptop: both Hindi voices read English badly, so back to two voices
   (`speech_one_voice: ''`), but both women: `speech_voice_hi: hi_IN-priyamvada-medium` (+ en_US-lessac for English).
   Chat prompt gets the Hindi verb gender of the voice (ChatAgent.gender_rule: ja rahi hoon / ja raha hoon).

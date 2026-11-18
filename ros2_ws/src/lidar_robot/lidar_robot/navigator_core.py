@@ -271,6 +271,10 @@ class NavigatorCore:
     def set_battery(self, volts, amps=None, src='ina226'):
         self.battery.update(volts, amps, src)
 
+    def set_dock_contact(self, on):
+        """Dock voltage on the robot's contact plates (firmware DCK line): None = no dock sensor."""
+        self.dock_contact = on
+
     def note_bump(self):
         """A bumper switch (or the simulator) reports contact: count it and find another route."""
         self.mlog.bump(self.queue.active, 'bumps')
@@ -1217,7 +1221,9 @@ class NavigatorCore:
         rear = -self.footprint.rear
         hw = self.footprint.half_width + 0.03
         rear_clear = not any(rear - 0.30 < x < rear and abs(y) < hw for x, y in self.scan_base)
-        v, w = self.docker.step(now, obs, pose, self.battery.info(), rear_clear)
+        info = dict(self.battery.info())
+        info['dock_contact'] = getattr(self, 'dock_contact', None)
+        v, w = self.docker.step(now, obs, pose, info, rear_clear)
         self.message = self.docker.message
         res = self.docker.result
         if res == 'docked':

@@ -39,7 +39,7 @@ from lidar_robot.ports import pick_esp32_port
 from lidar_robot.kinematics import (DiffDriveOdometry, quaternion_from_yaw,
                                     twist_to_wheels, limit_wheels)
 from lidar_robot.protocol import (parse_line, OdomPacket, InfoPacket, ImuPacket, UsPacket, SpdPacket,
-                                  BatPacket, BumpPacket,
+                                  BatPacket, BumpPacket, DockPacket,
                                   MODE_NAMES, MODE_ESTOP, parse_tune, format_tune, format_telemetry,
                                   format_velocity, format_stop, format_estop, format_dock,
                                   format_i2c_scan)
@@ -118,6 +118,8 @@ class Esp32Bridge(Node):
         self.battery = None                 # {"v", "a", "src"} from BAT lines (v2.4 firmware)
         self.last_bat = 0.0
         self.bumper = False
+        self.dock = None                    # {"contact", "v"} from DCK lines (v2.9 firmware, dock voltage sense)
+        self.last_dock = 0.0
         self.bumps = 0
         self.yaw_source = 'wheels'
         self.cmd = {'teleop': (Twist(), 0.0), 'nav': (Twist(), 0.0)}
@@ -289,6 +291,14 @@ class Esp32Bridge(Node):
                 self.battery = {'v': round(pkt.volts, 3), 'a': None if pkt.amps is None else round(pkt.amps, 3),
                                 'src': pkt.src}
                 self.last_bat = time.monotonic()
+            return
+        if isinstance(pkt, DockPacket):
+            with self.lock:
+                was = (self.dock or {}).get('contact')
+                self.dock = {'contact': pkt.contact, 'v': round(pkt.volts, 2)}
+                self.last_dock = time.monotonic()
+            if pkt.contact != was:
+                self.get_logger().info(f'dock contact: {"ON" if pkt.contact else "off"} ({pkt.volts:.1f} V)')
             return
         if isinstance(pkt, BumpPacket):
             with self.lock:
@@ -596,6 +606,7 @@ class Esp32Bridge(Node):
                 'battery': (dict(self.battery, fresh=True)
                             if self.battery and time.monotonic() - self.last_bat < 5.0 else None),
                 'bumper': self.bumper, 'bumps': self.bumps,
+                'dock': (self.dock if self.dock and time.monotonic() - self.last_dock < 3.0 else None),
                 'drops': dict(self.drops,
                               last=self.last_event[1] if self.last_event else None,
                               last_age=round(time.monotonic() - self.last_event[0]) if self.last_event else None,

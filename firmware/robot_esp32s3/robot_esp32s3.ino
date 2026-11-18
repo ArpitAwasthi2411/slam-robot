@@ -54,6 +54,9 @@
  *    W  save them to flash (kept after power-off)      X  back to factory defaults
  *    T,1 / T,0  stream / stop  SPD,<tgtL>,<measL>,<pwmL>,<tgtR>,<measR>,<pwmR>  (50 Hz)
  *    ESP32 -> Pi:  INFO,TUNE,<kp>,<ki>,<pwm_min>,<max_mms>,<accel>
+ *  v2.9 dock contact sense: the dock puts 12 V on the robot's two contact plates; a divider (1 k from the + plate,
+ *    2 x 100 R to GND) brings it to ~2 V on GPIO 1 (free since the INA226 measures the battery). Sends
+ *    DCK,<0|1>,<mV at the plates> on every change and once a second. The plates never touch the battery.
  *  v2.8 odometry totals: every ODM line also carries running tick totals (and the running gyro yaw), so a
  *       line lost on the serial link loses no motion on the Pi; gyro keeps integrating through an I2C error.
  *  v2.7 front docking + IMU check:
@@ -92,7 +95,7 @@
 #else
   #define USB_PORT Serial
 #endif
-#define FW_VERSION "2.8"
+#define FW_VERSION "2.9"
 #include <Wire.h>
 #include <Preferences.h>     // tuning values survive reboot (ESP32 flash)
 #include <esp_system.h>      // esp_reset_reason(): why the ESP32 restarted (sent in the READY line)
@@ -134,6 +137,14 @@
 #define BAT_ADC_PIN       1      // ADC1 channel 0 (ADC2 pins don't work reliably with Wi-Fi; ADC1 always does)
 #define BAT_DIVIDER       ((100.0f + 22.0f) / 22.0f)
 #define BAT_PERIOD_MS     500
+#define USE_DOCK_SENSE     1     // dock voltage on the contact plates -> GPIO 1 (needs USE_BAT_ADC 0)
+#define DOCK_SENSE_PIN     1      // same pin the old battery divider used
+#define DOCK_DIVIDER      ((1000.0f + 200.0f) / 200.0f)   // 1 k on top, 2 x 100 R in series below
+#define DOCK_ON_MV        6000   // plates above 6 V = on the dock (12 V adapter)
+#define DOCK_OFF_MV       4000   // below 4 V = off (hysteresis)
+#if USE_DOCK_SENSE && USE_BAT_ADC
+#error "GPIO 1 is either the battery divider (USE_BAT_ADC) or the dock sense (USE_DOCK_SENSE), not both"
+#endif
 #define BUMPER_PIN        2      // internal pull-up used: no external resistor needed
 #define BUMPER_HOLD_MS    500    // ignore Pi commands this long after a bump (the Pi replans)
 #define I2C_SDA      11
@@ -572,6 +583,34 @@ void batUpdate(unsigned long now) {
   if (src && LINK.availableForWrite() >= 32) LINK.printf("BAT,%ld,%ld,%d\n", mv, ma, src);
 }
 
+// ============================ DOCK CONTACT SENSE ==============================
+static bool dock_on = false;
+static uint8_t dock_votes = 0;
+static unsigned long last_dock_ms = 0, last_dock_tx = 0;
+
+void dockInit() {
+#if USE_DOCK_SENSE
+  analogSetPinAttenuation(DOCK_SENSE_PIN, ADC_11db);
+  LINK.printf("INFO,dock sense on GPIO %d (on above %d mV)\n", DOCK_SENSE_PIN, DOCK_ON_MV);
+#endif
+}
+
+void dockUpdate(unsigned long now) {
+#if USE_DOCK_SENSE
+  if (now - last_dock_ms < 100) return;
+  last_dock_ms = now;
+  long mv = (long)(analogReadMilliVolts(DOCK_SENSE_PIN) * DOCK_DIVIDER);
+  bool want = dock_on ? mv > DOCK_OFF_MV : mv > DOCK_ON_MV;
+  dock_votes = want != dock_on ? dock_votes + 1 : 0;           // 3 readings in a row (0.3 s) to change
+  bool changed = false;
+  if (dock_votes >= 3) { dock_on = want; dock_votes = 0; changed = true; }
+  if ((changed || now - last_dock_tx >= 1000) && LINK.availableForWrite() >= 24) {
+    last_dock_tx = now;
+    LINK.printf("DCK,%d,%ld\n", dock_on ? 1 : 0, mv);
+  }
+#endif
+}
+
 // ============================ BUMPERS ==========================================
 void bumperUpdate(unsigned long now) {
 #if USE_BUMPER
@@ -964,6 +1003,7 @@ void setup() {
   for (int i = 0; i < 2 && !imu_ok; i++) { delay(200); imuInit(); }   // a slow-starting GY-521: try again
 #endif
   batInit();
+  dockInit();
   loadTune();
   last_control_ms = millis();
   LINK.printf("INFO,READY,robot_esp32 v%s %s reset=%s link=uart%d/%d\n", FW_VERSION, BOARD_NAME,
@@ -1002,6 +1042,7 @@ void loop() {
   bumperUpdate(now);
   ledUpdate(now);
   batUpdate(now);
+  dockUpdate(now);
 
   // ---- arbitration: RC > Pi > idle ----
   bool rc_ok = rcValid(steering_last, steering_pw, STEERING_MIN, STEERING_MAX) &&

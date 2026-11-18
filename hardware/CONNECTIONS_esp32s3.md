@@ -112,6 +112,18 @@ Level shifter: **LV** → ESP32 3V3, **HV** → 5 V bus, **both GND** → GND.
 | S5 | ESP32 **GPIO 1** → **22 kΩ** → | GND | full battery 12.6 V → 2.27 V at the pin. Then set `USE_BAT_ADC 1` |
 **Check S4/S5 with the multimeter before plugging the wire into GPIO 1:** the midpoint must read < 2.5 V.
 
+**With the INA226 (Nov 2026) S4/S5 come off GPIO 1, which becomes the dock contact sense (firmware v2.9):**
+
+| # | From | To | Note |
+|---|---|---|---|
+| S6 | INA226 **VCC** / **GND** | ESP32 **3V3** / GND | |
+| S7 | INA226 **SDA** / **SCL** | ESP32 **GPIO 11** / **GPIO 12** | same bus as the MPU-6050; address 0x40 (A0, A1 to GND) |
+| S8 | Battery **+** (after BMS) → INA226 **IN+**, **IN−** → main switch → robot | | shunt **R010**; with the stock **R100**: voltage only, see docs/STEPS_lab_18nov.md |
+| S9 | Robot **+ contact plate** → **1 kΩ** → | ESP32 **GPIO 1** | 12 V on the plate → 2.0 V at the pin |
+| S10 | ESP32 **GPIO 1** → **100 Ω** → **100 Ω** → | GND | (200 Ω). Keep the 100 nF (C5). Robot **− plate** → robot GND |
+**The plates connect to nothing else** (not the battery): the dock's 12 V only tells the robot it has arrived.
+Check S9/S10 with the multimeter: 12 V on the plates must read **< 2.6 V** at GPIO 1 before the wire goes in.
+
 ## 8. ESP32-S3 ↔ Pi (GPIO UART, 3 wires, no USB cable)
 
 Both sides are 3.3 V: wire them **directly**, no level shifter. TX goes to RX (crossed).

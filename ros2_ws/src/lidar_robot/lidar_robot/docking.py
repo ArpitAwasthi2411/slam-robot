@@ -194,7 +194,7 @@ class FrontDocker:
             return 0.0, 0.0                                  # brief dropout: wait for the next frame
 
         if ph == 'contact':
-            touching = battery.get('charging') or (
+            touching = battery.get('charging') or battery.get('dock_contact') or (
                 self._v_start is not None and battery.get('v') is not None and battery['v'] - self._v_start >= p.volt_rise)
             if touching:
                 if getattr(self, '_touch_t', None) is None:
@@ -202,12 +202,12 @@ class FrontDocker:
                 if now - self._touch_t >= p.contact_hold_s:
                     self._enter('charging', now)
                     self.result = 'docked'
-                    self.message = 'docked: charging'
+                    self.message = 'docked: charging' if battery.get('charging') else 'docked: on the contacts'
                 return 0.0, 0.0
             self._touch_t = None
             moved = _dist(odom, self._contact_from)
             if now - self._t_phase > p.contact_timeout_s or moved > p.blind_m + 0.06:
-                return self._retry(now, 'DOCK_NO_CONTACT', 'reached the dock but no charging current')
+                return self._retry(now, 'DOCK_NO_CONTACT', 'reached the dock but no contact (no dock voltage / charging current)')
             self.message = 'touching the contacts…'
             w = 0.0
             if getattr(self, '_line_yaw', None) is not None and odom:

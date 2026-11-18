@@ -250,3 +250,23 @@ def test_simulator_robot_docks_nose_first_and_backs_off_for_the_next_task(tmp_pa
         b.tick(dt, clock.t)
         clock.t += dt
     assert b.nav.state == 'UNDOCKING' and b.cmd[0] < 0
+
+
+def test_dock_voltage_on_the_plates_counts_as_contact():
+    """No charger on the dock yet (18 Nov): 12 V on the contact plates (firmware DCK line) means docked."""
+    d = FrontDocker(DockParams())
+    d.start(0.0)
+    d.phase, d._v_start, d._t_phase, d._contact_from = 'contact', 11.6, 0.0, (0, 0, 0)
+    t = 0.0
+    while d.result is None and t < 5:
+        d.step(t, None, (0, 0, 0), {'charging': False, 'v': 11.6, 'dock_contact': True})
+        t += 0.1
+    assert d.result == 'docked' and 'contacts' in d.message
+
+
+def test_dck_line_parsing():
+    from lidar_robot.protocol import DockPacket, parse_line
+    assert parse_line('DCK,1,12150') == DockPacket(True, 12.15)
+    assert parse_line('DCK,0,40') == DockPacket(False, 0.04)
+    for bad in ('DCK,2,100', 'DCK,1', 'DCK,1,x', 'DCK,1,99999'):
+        assert parse_line(bad) is None

@@ -370,6 +370,9 @@ class NavigatorNode(Node):
             with self.core_lock:
                 self.core.note_bump()
         self._bumps_seen = bumps
+        dock = st.get('dock')
+        with self.core_lock:
+            self.core.set_dock_contact(None if dock is None else bool(dock.get('contact')))
         bat = st.get('battery') or {}
         if bat.get('v') is not None and bat.get('fresh', True):
             with self.core_lock:

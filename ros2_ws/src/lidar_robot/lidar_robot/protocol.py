@@ -80,7 +80,13 @@ class BumpPacket:
     pressed: bool
 
 
-Packet = Union[OdomPacket, InfoPacket, ImuPacket, UsPacket, SpdPacket, BatPacket, BumpPacket]
+@dataclass
+class DockPacket:
+    contact: bool             # dock voltage present on the robot's contact plates
+    volts: float              # voltage at the plates (after the divider is undone)
+
+
+Packet = Union[OdomPacket, InfoPacket, ImuPacket, UsPacket, SpdPacket, BatPacket, BumpPacket, DockPacket]
 
 
 def parse_line(line: str) -> Optional[Packet]:
@@ -143,6 +149,15 @@ def parse_line(line: str) -> Optional[Packet]:
         if not 1000 <= mv <= 60000 or src not in (1, 2):
             return None
         return BatPacket(mv / 1000.0, ma / 1000.0 if src == 1 else None, 'ina226' if src == 1 else 'adc')
+    if line.startswith('DCK,'):              # v2.9: DCK,<0|1>,<mV> dock voltage on the contact plates
+        parts = line.split(',')
+        if len(parts) != 3 or parts[1] not in ('0', '1'):
+            return None
+        try:
+            mv = int(parts[2])
+        except ValueError:
+            return None
+        return DockPacket(parts[1] == '1', mv / 1000.0) if 0 <= mv <= 30000 else None
     if line.startswith('BMP,'):
         v = line[4:]
         return BumpPacket(v == '1') if v in ('0', '1') else None
