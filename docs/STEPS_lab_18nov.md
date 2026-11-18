@@ -161,6 +161,23 @@ journalctl -u robot -f | grep "dock contact"          # Pi: robot running
 4. If it stops short with `DOCK_NO_CONTACT`: increase `dock_contact_dist_m` by 2 cm. If it pushes hard and stalls:
    decrease it.
 
+### 2.8 Optional, once 2.7 works: charge through the dock with the old 12 V charger
+
+A 12 V supply stops a 3S pack at ~12.0 V, about 80 % full (4.0 V per cell: gentle on the cells). Rules:
+- Only with the pack's **BMS** in place, and only while someone is in the room. Feel the charger and the diode after
+  10 minutes: warm is OK, hot is not.
+- Don't put a **nearly empty** pack (below ~10.5 V) on it: charge that one on the bench charger first.
+
+Robot side, added to 2.4 (the divider stays as it is):
+```
++ plate ──┬── 1 k → GPIO 1 (dock sense, unchanged)
+          └── 3 A fuse ── Schottky diode (SR560 / 1N5822, stripe towards the battery) ── battery + side
+                          (with the INA226 in series wiring A: join at IN−, so charging reads as negative current)
+− plate ── robot GND
+```
+The diode lets current go into the battery only: off the dock, the plates stay dead and a coin across them shorts
+nothing. It drops ~0.4 V, so expect ~11.6 V full (~65 %). Use an ordinary 1N4007 only with a charger of 1 A or less.
+
 ---
 
 ## 3. Voice
