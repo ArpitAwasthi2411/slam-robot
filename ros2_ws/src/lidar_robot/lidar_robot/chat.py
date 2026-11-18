@@ -92,6 +92,7 @@ class ChatAgent:
         self._talks = {}                     # user -> [(t, 'user'|'assistant', text)]
         self._recent = {}                    # (user, text) -> (t, answer): app preview + send = one call
         self._lock = threading.Lock()        # one conversation step at a time (requests come from threads)
+        self.voice_gender = 'female'         # the Hindi voice's person (speech_voice_hi): verb forms in Hindi
         self.stats = {'asked': 0, 'offline': 0, 'llm': 0, 'actions': 0, 'guarded': 0, 'second_lookups': 0}
 
     # ---------------------------------------------------------------- memory of the talk
@@ -265,6 +266,15 @@ class ChatAgent:
                     'shortest_order': {'type': 'boolean'},
                     'priority': {'type': 'integer', 'enum': [0, 1, 2, 3]}}}
 
+    @staticmethod
+    def gender_rule(gender):
+        """Hindi verbs follow the speaker: the robot's Hindi voice is a woman (priyamvada) or a man (pratham)."""
+        if gender == 'male':
+            return ('\nIn Hindi / Hinglish you speak as a male: main ja raha hoon, main bata sakta hoon '
+                    '(मैं जा रहा हूँ, मैं बता सकता हूँ).')
+        return ('\nIn Hindi / Hinglish you speak as a female: main ja rahi hoon, main bata sakti hoon '
+                '(मैं जा रही हूँ, मैं बता सकती हूँ).')
+
     SYSTEM = (
         'You are Pathik, a friendly indoor service robot in an engineering college. People talk to you by voice '
         'or in an app, in English, Hindi or Hinglish. Answer in the SAME language the person used: English, or Hindi / Hinglish written in Latin letters ("HOD Dr. Shashi Gurung hain"). Never write Urdu or Arabic script: a question in Urdu or Devanagari script is spoken Hindi, so answer it in Hinglish in Latin letters. '
@@ -302,7 +312,7 @@ class ChatAgent:
         facts = ('ROBOT: ' + json.dumps(robot, separators=(',', ':'), ensure_ascii=False)
                  + '\nPLACES: ' + json.dumps(catalog, separators=(',', ':'), ensure_ascii=False)
                  + '\nNOTEBOOK: ' + json.dumps(notebook, separators=(',', ':'), ensure_ascii=False))
-        msgs = [{'role': 'system', 'content': self.SYSTEM + '\n' + facts}]
+        msgs = [{'role': 'system', 'content': self.SYSTEM + self.gender_rule(self.voice_gender) + '\n' + facts}]
         for _, role, said in self.history(user):
             msgs.append({'role': role, 'content': said})
         msgs.append({'role': 'user', 'content': text})

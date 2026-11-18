@@ -135,6 +135,9 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-18 (later): listening test on the laptop: both Hindi voices read English badly, so back to two voices
+  (`speech_one_voice: ''`), but both women: `speech_voice_hi: hi_IN-priyamvada-medium` (+ en_US-lessac for English).
+  Chat prompt gets the Hindi verb gender of the voice (ChatAgent.gender_rule: ja rahi hoon / ja raha hoon).
 - 2026-11-18: one robot voice: kiosk answers came in two people's voices (en_US-lessac for English, hi_IN-pratham for
   Hindi). speech.pick_lang + `speech_one_voice: hi` (default): the Hindi Piper voice reads English too (Indian accent),
   so it is always the same person; `speech_voice_hi` takes a name (hi_IN-priyamvada-medium female / hi_IN-pratham-medium

@@ -107,7 +107,7 @@ def pick_lang(text, voices, one_voice='hi'):
 class Speaker:
     def __init__(self, enabled=True, voice='en-in', speed=150, min_gap_s=8.0, runner=None, clock=time.monotonic,
                  engine='auto', volume=1.0, voice_en='', voice_hi='', max_per_min=8, audio_device='',
-                 rate=1.15, pause_s=0.3, one_voice='hi'):
+                 rate=1.15, pause_s=0.3, one_voice=''):
         self.enabled = enabled
         self.one_voice = one_voice
         self.rate = max(0.6, min(2.0, float(rate)))

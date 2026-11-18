@@ -125,5 +125,7 @@ sudo bash ~/slam-robot/scripts/setup_voice.sh voices plughw:CARD=Device,DEV=0
 ```
 
 Then set `speech_voice_hi:` to the name you liked in `config/robot_params.yaml`, `colcon build`, restart the robot.
-If the Hindi voice's English is hard to understand, set `speech_one_voice: ''` (English voice for English again).
+18 Nov listening test: both Hindi voices read English badly, so the default is now two voices that are both women:
+`hi_IN-priyamvada-medium` for Hindi, `en_US-lessac-medium` for English (`speech_one_voice: ''`). Chat answers in
+Hindi use female verb forms (ja rahi hoon); with pratham they switch to male forms.
 

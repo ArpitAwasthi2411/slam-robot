@@ -299,3 +299,9 @@ def test_replies_are_never_in_urdu_script(tmp_path):
     agent.handle('ایچ او ڈی کون ہے؟', parser)
     sysmsg = fake.bodies[0]['messages'][0]['content']
     assert 'Never write Urdu or Arabic script' in sysmsg
+
+
+def test_hindi_verbs_follow_the_voice():
+    from lidar_robot.chat import ChatAgent
+    assert 'ja rahi hoon' in ChatAgent.gender_rule('female') and 'रही' in ChatAgent.gender_rule('female')
+    assert 'ja raha hoon' in ChatAgent.gender_rule('male')

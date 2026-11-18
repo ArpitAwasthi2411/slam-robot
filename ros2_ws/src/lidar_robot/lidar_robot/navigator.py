@@ -117,8 +117,8 @@ class NavigatorNode(Node):
         d('speech_engine', 'auto')         # auto (Piper, else espeak) | piper | espeak
         d('speech_volume', 1.0)            # 0 .. 1.5
         d('speech_voice_en', '')           # Piper voice .onnx ('' = first ~/piper/voices/en_*.onnx)
-        d('speech_voice_hi', '')           # Hindi voice ('' = first ~/piper/voices/hi_*.onnx)
-        d('speech_one_voice', 'hi')        # hi = the Hindi voice speaks everything (one person); '' = English voice for English
+        d('speech_voice_hi', 'hi_IN-priyamvada-medium')   # Hindi voice (a name or a path; missing = first ~/piper/voices/hi_*.onnx)
+        d('speech_one_voice', '')        # hi = the Hindi voice speaks everything (one person); '' = English voice for English
         d('speech_max_per_min', 8)         # rate limit (questions to people, battery always get through)
         d('speech_device', '')             # ALSA output device ('' = default)
         d('auto_return_s', 0.0)
@@ -174,6 +174,7 @@ class NavigatorNode(Node):
         self.chat = ChatAgent(GroqClient(key, model=str(g('chat_model')), timeout=float(g('llm_timeout')) + 2.0,
                                          log=self.llm_log),
                               self.knowledge, self.places, enabled=bool(g('chat_enabled')))
+        self.chat.voice_gender = 'male' if 'pratham' in str(g('speech_voice_hi')) else 'female'
         self.planner_params = PlannerParams(robot_radius=float(g('robot_radius')),
                                             soft_radius=float(g('soft_radius')),
                                             allow_unknown=bool(g('allow_unknown')))
