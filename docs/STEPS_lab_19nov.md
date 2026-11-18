@@ -100,7 +100,15 @@ Strap the laptop over or just in front of the wheel axle, lower than the LiDAR, 
 
 ## 8. Map
 
-App → Map → **New map**. The Map card says "Map built on the laptop"; terminal 1 says it started Cartographer and
+**Preferred: add to the saved map** (`Cse_department_aids`, 18 Nov) instead of starting over. Cartographer puts the
+new part where the OLD map started (0, 0, 0°), so the robot must stand exactly there when it continues:
+1. Map → **Use a saved map** → `Cse_department_aids`; after the restart check the robot's place (Set position if wrong).
+2. Drive slowly until Operate → **Position** reads about 0.0, 0.0 m, 0° (within ~10 cm, a few degrees).
+3. Map → **Continue mapping** → `Cse_department_aids` (the laptop fetches the map from the Pi by itself).
+4. First drive a few metres along an already-mapped part (it locks on), then into the new areas; finish in a mapped
+   corridor. Freeze under a NEW name (`cse_department_full`) so the old map stays as a fallback.
+
+**Or start fresh:** App → Map → **New map**. The Map card says "Map built on the laptop"; terminal 1 says it started Cartographer and
 a recording. Drive:
 - stand still 5 s, then straight first; half speed, slow turns, short pause after each turn;
 - corridor first; each lab: in, one slow loop, out the same way;
