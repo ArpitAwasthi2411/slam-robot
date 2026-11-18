@@ -105,6 +105,6 @@ def test_laptop_script_uses_the_shared_logic():
 def test_dashboard_saves_through_the_laptop():
     src = open(os.path.join(PKG, 'lidar_robot', 'dashboard.py')).read()
     assert "create_publisher(String, 'slam_host', latched)" in src
-    assert 'os.path.join(self.slam_save_dir, os.path.basename(path)) if laptop else path' in src
+    assert 'os.path.join(self.slam_save_dir, os.path.basename(path)) if laptop else part' in src
     assert 'laptop_slam.file_arrived(path, t_req)' in src
     assert "'slam_warning': self._slam_warning()" in src

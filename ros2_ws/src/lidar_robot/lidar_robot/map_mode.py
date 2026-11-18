@@ -43,17 +43,40 @@ def read_mode(path):
     if not isinstance(d, dict) or d.get('mode') not in MODES:
         return None
     m = str(d.get('map') or '')
-    return {'mode': d['mode'], 'map': os.path.expanduser(m) if m else '', 'since': d.get('since')}
+    pose = d.get('pose')
+    try:
+        pose = {k: float(pose[k]) for k in ('x', 'y', 'yaw')} if isinstance(pose, dict) else None
+    except (KeyError, TypeError, ValueError):
+        pose = None
+    return {'mode': d['mode'], 'map': os.path.expanduser(m) if m else '', 'since': d.get('since'), 'pose': pose}
 
 
-def write_mode(path, mode, map_file='', clock=time.time):
+def write_mode(path, mode, map_file='', clock=time.time, pose=None):
+    """pose: where the robot stood on the map when it was frozen ({'x','y','yaw'}): after the restart the
+    dashboard starts localization there, instead of at the spot where mapping began (18 Nov: the robot showed
+    up at the map's start and needed Set position by hand)."""
     if mode not in MODES:
         raise ValueError(f'mode must be one of {MODES}')
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    d = {'mode': mode, 'map': map_file or '', 'since': int(clock())}
+    if pose:
+        d['pose'] = {k: round(float(pose[k]), 4) for k in ('x', 'y', 'yaw')}
     tmp = path + '.tmp'
     with open(tmp, 'w') as f:
-        json.dump({'mode': mode, 'map': map_file or '', 'since': int(clock())}, f)
+        json.dump(d, f)
     os.replace(tmp, path)
+
+
+def startup_pose(saved, slam_mode, map_file, now, max_age_s=900.0):
+    """The frozen-at pose to start localization from, or None: only right after a Freeze of this very map."""
+    if not saved or slam_mode != 'localization' or not saved.get('pose'):
+        return None
+    if os.path.expanduser(saved.get('map') or '') != os.path.expanduser(map_file or ''):
+        return None
+    since = saved.get('since')
+    if not isinstance(since, (int, float)) or not 0 <= now - since <= max_age_s:
+        return None
+    return saved['pose']
 
 
 def resolve(cli_mode, cli_map, path):
@@ -200,13 +223,25 @@ class PeriodicMapSaver:
             self._busy = False
 
     def prune(self):
-        """Delete autosaves older than the newest `keep` (all their files: .pbstream .pgm .yaml)."""
+        """Delete autosaves older than the newest `keep` (all their files: .pbstream .pgm .yaml).
+
+        The biggest autosave is always kept: a few quick restarts each start a new, nearly empty autosave,
+        and they must never push out the one long drive (18 Nov: three restarts within 20 minutes)."""
         try:
             names = sorted({n.split('.')[0] for n in os.listdir(self.map_dir) if n.startswith('autosave_')},
                            reverse=True)
         except OSError:
             return
+
+        def size(n):
+            try:
+                return os.path.getsize(os.path.join(self.map_dir, n + '.pbstream'))
+            except OSError:
+                return -1
+        biggest = max(names, key=size) if names else None
         for old in names[self.keep:]:
+            if old == biggest:
+                continue
             for ext in ('.pbstream', '.pgm', '.yaml'):
                 try:
                     os.remove(os.path.join(self.map_dir, old + ext))

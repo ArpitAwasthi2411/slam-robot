@@ -153,6 +153,11 @@ class DashboardNode(Node):
         self.map_mode_file = str(self.get_parameter('map_mode_file').value)
         self.switching = None              # {'mode', 'map', 'say'} once a map-mode switch started
         self.slam_error = None             # {'t', 'msg'} when the last Freeze could not save
+        saved = map_mode.read_mode(self.map_mode_file) if self.map_mode_file else None
+        self._start_pose = map_mode.startup_pose(saved, self.slam_mode, self.map_file, time.time())
+        self._start_pose_t0 = time.monotonic()
+        if self._start_pose:
+            self.create_timer(3.0, self._apply_start_pose)
         self.map_saver = map_mode.PeriodicMapSaver(self.save_map, float(self.get_parameter('map_autosave_s').value),
                                                    self.map_dir)
         self.create_timer(5.0, self._autosave_tick)
@@ -239,6 +244,28 @@ class DashboardNode(Node):
                 self.get_logger().info(f'autosaving the live map as {self.map_saver.name}' + (' (Pi is hot)' if hot else ''))
         except Exception as e:
             self.get_logger().warning(f'map autosave check failed: {e}', throttle_duration_sec=60.0)
+
+    def _apply_start_pose(self):
+        """Right after a Freeze, put the robot where it stood when the map was frozen (Cartographer otherwise
+        starts it at the spot where mapping began). Retries while Cartographer loads the map, 90 s at most."""
+        if not self._start_pose:
+            return
+        if time.monotonic() - self._start_pose_t0 > 90.0:
+            self.get_logger().warn('could not set the start position after Freeze: use Set position in the app')
+            self._start_pose = None
+            return
+        try:
+            self.relocalize(dict(self._start_pose))
+        except (ValueError, KeyError) as e:
+            self.get_logger().info(f'start position after Freeze: waiting for Cartographer ({e})',
+                                   throttle_duration_sec=15.0)
+            return
+        self.get_logger().info('robot placed where the map was frozen')
+        self._start_pose = None
+        try:                                # used once: a later restart must not jump back to this spot
+            map_mode.write_mode(self.map_mode_file, self.slam_mode, self.map_file)
+        except OSError:
+            pass
 
     def _on_robot_status(self, msg):
         try:
@@ -644,6 +671,8 @@ class DashboardNode(Node):
 
     def _save_then_switch(self, plan):
         try:
+            pose = self._pose()                          # where the robot stands on the map, for after the restart
+            plan['pose'] = pose if pose and pose.get('frame') == self.global_frame else None
             self._finish_active_trajectories()           # final optimisation: the saved map is the best one
             saved = self.save_map(plan['save_as'])
             if 'WARNING' in saved or not os.path.isfile(plan['map']):
@@ -656,7 +685,7 @@ class DashboardNode(Node):
             self.get_logger().error(f'freeze failed: {e}')
 
     def _switch_now(self, plan):
-        map_mode.write_mode(self.map_mode_file, plan['mode'], plan['map'])
+        map_mode.write_mode(self.map_mode_file, plan['mode'], plan['map'], pose=plan.get('pose'))
         auto = bool(os.environ.get('INVOCATION_ID'))
         say = plan['say'] + ('' if auto else ' (Started by hand, not by robot.service: start it again yourself.)')
         self.switching = {'mode': plan['mode'], 'map': os.path.basename(plan['map']), 'say': say}
@@ -709,7 +738,10 @@ class DashboardNode(Node):
         req = self._WriteState.Request()
         laptop = self.slam_host == 'laptop' and self.slam_mode == 'mapping'
         # on the laptop, Cartographer writes into its own folder; laptop_slam.py copies the file here
-        req.filename = os.path.join(self.slam_save_dir, os.path.basename(path)) if laptop else path
+        # on the Pi: write to <name>.pbstream.part and rename when complete, so a crash, a restart or a flat battery
+        # in the middle of a save never leaves a half-written map under the real name (or over the last good one)
+        part = path + '.part'
+        req.filename = os.path.join(self.slam_save_dir, os.path.basename(path)) if laptop else part
         t_req = time.time()
         req.include_unfinished_submaps = True
         with self.lock:
@@ -727,6 +759,11 @@ class DashboardNode(Node):
                     self.get_logger().warn(f'the laptop saved {os.path.basename(path)} but its copy did not reach '
                                            f'{self.map_dir} in {wait:.0f} s (is laptop_slam.py running? SSH key?)')
                     return None
+            elif os.path.isfile(part):
+                os.replace(part, path)
+            else:
+                self.get_logger().warn(f'Cartographer said saved, but {part} is not there')
+                return None
             self.get_logger().info(f'Cartographer state saved: {path}')
             return path
         self.get_logger().warn('Could not save .pbstream (Cartographer busy or not running)')

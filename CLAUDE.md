@@ -135,6 +135,11 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-18 (review of mapping/saving): .pbstream saves (Freeze, autosave) now go to <name>.pbstream.part and are
+  renamed when complete (a crash/restart mid-save never leaves a broken map or overwrites the last good autosave);
+  autosave pruning always keeps the biggest autosave (three quick restarts on 18 Nov could have pushed out the long
+  drive); Freeze stores the robot's map pose in map_mode.json and the dashboard starts localization there after the
+  restart (map_mode.startup_pose, once, <= 15 min old; _apply_start_pose retries 90 s). Tests in test_map_mode.py.
 - 2026-11-18 (lab): partial CSE map frozen (Cse_department_aids, 15 MB) but localization crashed at once: Cartographer
   "Check failed: last_dispatched_time_ <= next_data->GetTime() ... Non-sorted data added to queue (scan)" (exit -6):
   10 subdivisions per A1 scan overlap the next scan by ~0.5 ms -> num_subdivisions_per_laser_scan = 1 and

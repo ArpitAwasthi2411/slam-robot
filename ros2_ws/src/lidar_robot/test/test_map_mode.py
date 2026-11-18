@@ -25,7 +25,7 @@ def test_read_write_and_garbage(tmp_path):
     f = str(tmp_path / 'map_mode.json')
     assert map_mode.read_mode(f) is None
     map_mode.write_mode(f, 'localization', '/x/a.pbstream', clock=lambda: 5)
-    assert map_mode.read_mode(f) == {'mode': 'localization', 'map': '/x/a.pbstream', 'since': 5}
+    assert map_mode.read_mode(f) == {'mode': 'localization', 'map': '/x/a.pbstream', 'since': 5, 'pose': None}
     with pytest.raises(ValueError):
         map_mode.write_mode(f, 'frozen')
     with open(f, 'w') as fh:
@@ -195,3 +195,40 @@ def test_pi_is_hot_accepts_every_throttled_format():
     assert not hot({'temp_c': None, 'throttled': None}) and not hot({})
     assert hot({'temp_c': 50, 'throttled': '0x50005'}) and hot({'temp_c': 50, 'throttled': 'throttled=0x4'})
     assert hot({'temp_c': 79, 'throttled': '0x0'}) and hot({'temp_c': 50, 'throttled': 2})
+
+
+def test_freeze_pose_is_kept_once_and_only_for_that_map(tmp_path):
+    f = str(tmp_path / 'map_mode.json')
+    m = str(tmp_path / 'cse.pbstream')
+    map_mode.write_mode(f, 'localization', m, clock=lambda: 1000, pose={'x': 3.2, 'y': -1.0, 'yaw': 1.57})
+    saved = map_mode.read_mode(f)
+    assert saved['pose'] == {'x': 3.2, 'y': -1.0, 'yaw': 1.57}
+    assert map_mode.startup_pose(saved, 'localization', m, 1100) == saved['pose']
+    assert map_mode.startup_pose(saved, 'localization', m, 1000 + 2000) is None        # old: robot may have moved
+    assert map_mode.startup_pose(saved, 'localization', str(tmp_path / 'other.pbstream'), 1100) is None
+    assert map_mode.startup_pose(saved, 'mapping', m, 1100) is None
+    map_mode.write_mode(f, 'localization', m)                                          # used once, cleared
+    assert map_mode.read_mode(f)['pose'] is None
+
+
+def test_prune_never_drops_the_long_drive(tmp_path):
+    def mk(name, size):
+        for ext in ('.pbstream', '.pgm', '.yaml'):
+            (tmp_path / (name + ext)).write_bytes(b'x' * (size if ext == '.pbstream' else 1))
+    mk('autosave_2026-11-18_1513', 15000)          # the long drive
+    for n in ('autosave_2026-11-18_1601', 'autosave_2026-11-18_1605', 'autosave_2026-11-18_1610'):
+        mk(n, 100)                                 # three quick restarts, nearly empty maps
+    s = map_mode.PeriodicMapSaver(lambda n: 'ok', map_dir=str(tmp_path), keep=3, threaded=False)
+    s.prune()
+    left = sorted(p.name for p in tmp_path.glob('*.pbstream'))
+    assert 'autosave_2026-11-18_1513.pbstream' in left and len(left) == 4
+    mk('autosave_2026-11-18_1620', 100)
+    s.prune()
+    left = sorted(p.name for p in tmp_path.glob('*.pbstream'))
+    assert 'autosave_2026-11-18_1513.pbstream' in left and 'autosave_2026-11-18_1601.pbstream' not in left
+
+
+def test_half_written_saves_are_not_listed_as_maps(tmp_path):
+    (tmp_path / 'cse.pbstream.part').write_bytes(b'x')
+    (tmp_path / 'good.pbstream').write_bytes(b'x')
+    assert [m['name'] for m in map_mode.list_maps(str(tmp_path))] == ['good']
