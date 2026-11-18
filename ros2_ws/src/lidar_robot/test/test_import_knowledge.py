@@ -8,6 +8,9 @@ TOOL = os.path.join(HERE, '..', '..', '..', '..', 'tools', 'import_knowledge.py'
 
 
 def _tool():
+    if not os.path.isfile(TOOL):                 # the robot image holds the package only, not tools/
+        import pytest
+        pytest.skip('tools/ not in this checkout')
     spec = importlib.util.spec_from_file_location('import_knowledge', TOOL)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

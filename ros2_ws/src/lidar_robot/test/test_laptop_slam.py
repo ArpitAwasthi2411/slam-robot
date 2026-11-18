@@ -97,6 +97,9 @@ def test_laptop_lua_extends_the_pi_settings():
 
 
 def test_laptop_script_uses_the_shared_logic():
+    if not os.path.isfile(os.path.join(REPO, 'scripts', 'laptop_slam.py')):   # robot image: package only
+        import pytest
+        pytest.skip('scripts/ not in this checkout')
     src = open(os.path.join(REPO, 'scripts', 'laptop_slam.py')).read()
     for name in ('decide', 'wanted', 'ready_files', 'parse_status', "'slam_host'", 'rsync', 'cartographer_laptop.lua'):
         assert name in src
