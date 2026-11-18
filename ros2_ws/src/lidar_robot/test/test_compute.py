@@ -293,3 +293,11 @@ def test_map_offline_script():
     text = open(script).read()
     assert 'cartographer_mapping_hq.lua' in text and '-save_state_filename' in text
     assert 'cartographer_pbstream_to_ros_map' in text and '/tf_static' in text and ' /tf ' not in text
+
+
+def test_tf_listeners_have_their_own_node():
+    """tf2_ros (Humble) spins the node it is given in a second executor: never give it the robot's own node."""
+    import glob
+    for f in glob.glob(os.path.join(os.path.dirname(__file__), '..', 'lidar_robot', '*.py')):
+        src = open(f).read()
+        assert 'TransformListener(self.tf_buffer, self' not in src, f

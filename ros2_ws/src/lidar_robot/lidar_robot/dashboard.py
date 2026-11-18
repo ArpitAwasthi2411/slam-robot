@@ -103,7 +103,10 @@ class DashboardNode(Node):
         self.req_ids = itertools.count(1)
 
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
+        # node=None: the listener gets its own small node + thread. Passing `self` made tf2_ros spin this WHOLE node
+        # in a second executor too, so every timer, scan and /tf message woke two executors (idle CPU), and a slow
+        # callback run on the TF thread froze the TF buffer ("position lost" stalls).
+        self.tf_listener = TransformListener(self.tf_buffer, None, spin_thread=True)
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              reliability=ReliabilityPolicy.RELIABLE)

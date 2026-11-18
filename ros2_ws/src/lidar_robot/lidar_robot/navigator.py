@@ -236,7 +236,10 @@ class NavigatorNode(Node):
         threading.Thread(target=self._map_worker, daemon=True).start()
 
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
+        # node=None: the listener gets its own small node + thread. Passing `self` made tf2_ros spin this WHOLE node
+        # in a second executor too, so every timer, scan and /tf message woke two executors (idle CPU), and a slow
+        # callback run on the TF thread froze the TF buffer ("position lost" stalls).
+        self.tf_listener = TransformListener(self.tf_buffer, None, spin_thread=True)
         self.us = UltrasonicListener(self, self.tf_buffer, self.base_frame)   # low obstacles (v2.2)
         self.front = float('inf')
         self.scan_stamp = None

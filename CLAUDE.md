@@ -135,6 +135,11 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-18 (CPU review): tf2_ros (Humble) TransformListener(buffer, node, spin_thread=True) adds the GIVEN node to a
+  second executor: navigator, dashboard and goal_controller were each spun by two executors (every timer/scan//tf woke
+  both: idle CPU; a slow callback on the TF thread froze the TF buffer -> 'position lost' stalls). Now
+  TransformListener(buffer, None, spin_thread=True) (own small node). test_compute.py guards it. Profiled the rest:
+  NavigatorCore.step idle 0.002 ms, costmap rebuild 0.08 s (x86) on an 800x600 grid: not the CPU users.
 - 2026-11-18 (review of mapping/saving): .pbstream saves (Freeze, autosave) now go to <name>.pbstream.part and are
   renamed when complete (a crash/restart mid-save never leaves a broken map or overwrites the last good autosave);
   autosave pruning always keeps the biggest autosave (three quick restarts on 18 Nov could have pushed out the long
