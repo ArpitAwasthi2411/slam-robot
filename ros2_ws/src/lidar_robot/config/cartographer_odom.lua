@@ -27,7 +27,8 @@ options = {
   -- and the map drifts sideways in turns. Cut each scan into 10 slices: each slice is placed with the
   -- odometry pose of its own moment, then the 10 are matched together (num_accumulated_range_data below).
   -- If Cartographer ever logs "Ignored subdivision", set both numbers back to 1.
-  num_subdivisions_per_laser_scan = 10,
+  num_subdivisions_per_laser_scan = 1,   -- 10 crashed Cartographer on 18 Nov: "Non-sorted data added to queue (scan)"
+                                         -- (the A1 slices of one scan overlap the next by ~0.5 ms). Keep 1.
   num_point_clouds = 0,
 
   lookup_transform_timeout_sec = 0.2,
@@ -50,7 +51,7 @@ TRAJECTORY_BUILDER_2D.min_range = 0.15            -- ignore hits on the robot bo
 TRAJECTORY_BUILDER_2D.max_range = 10.0            -- A1 reaches ~12 m: the far end of a corridor is often the only
                                                   -- thing that pins down where along the corridor the robot is
 TRAJECTORY_BUILDER_2D.missing_data_ray_length = 5.0   -- big open halls: don't carve a 10 m white disc
-TRAJECTORY_BUILDER_2D.num_accumulated_range_data = 10   -- = num_subdivisions_per_laser_scan (one full turn per match)
+TRAJECTORY_BUILDER_2D.num_accumulated_range_data = 1    -- = num_subdivisions_per_laser_scan
 TRAJECTORY_BUILDER_2D.submaps.num_range_data = 90     -- bigger submaps = more wall per submap = steadier in corridors
 
 -- LONG CORRIDORS (docs/mapping.md). Two parallel walls tell the scan matcher the robot's sideways position and

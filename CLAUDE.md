@@ -135,6 +135,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-18 (lab): partial CSE map frozen (Cse_department_aids, 15 MB) but localization crashed at once: Cartographer
+  "Check failed: last_dispatched_time_ <= next_data->GetTime() ... Non-sorted data added to queue (scan)" (exit -6):
+  10 subdivisions per A1 scan overlap the next scan by ~0.5 ms -> num_subdivisions_per_laser_scan = 1 and
+  num_accumulated_range_data = 1 in cartographer_odom.lua + cartographer_localization.lua (no scan unwarping).
+  Same day: INA226 wiring took the I2C bus down (IMU 'not fitted', battery 'no sensor') -> INA unplugged for now;
+  jerky/too fast driving after rewiring (suspect a loose encoder wire, as on 30 Oct); marker_size_m 0.0725 on the Pi.
 - 2026-11-18 (dock): no charger on the dock yet, geometry-box plates, no springs. Firmware S3 **v2.9**: GPIO 1 = dock
   contact sense (dock 12 V adapter on the plates -> 1 k / 200 R divider, DCK,<0|1>,<mV>, hysteresis 6/4 V, 0.3 s),
   `#error` if USE_BAT_ADC too (INA226 now measures the battery). protocol DockPacket, bridge status `dock`, navigator
