@@ -83,7 +83,6 @@ POSE_GRAPH.optimization_problem.ceres_solver_options.num_threads = 2   -- leave 
 -- leaves a little drift, so be strict.
 POSE_GRAPH.constraint_builder.min_score = 0.72   -- labs with identical bench rows: 0.65 snapped one lab onto another
 POSE_GRAPH.constraint_builder.sampling_ratio = 0.15           -- fewer loop-closure tries per node (default 0.3): half the CPU
-POSE_GRAPH.constraint_builder.global_sampling_ratio = 0.001
 POSE_GRAPH.global_sampling_ratio = 0.001
 POSE_GRAPH.constraint_builder.global_localization_min_score = 0.75
 POSE_GRAPH.constraint_builder.max_constraint_distance = 10.   -- only look for loop closures nearby

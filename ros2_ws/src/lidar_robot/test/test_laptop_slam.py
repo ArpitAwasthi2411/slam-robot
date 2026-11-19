@@ -123,3 +123,15 @@ def test_rviz_env_x11_and_gpu_choice():
     assert '__NV_PRIME_RENDER_OFFLOAD' not in e and 'LIBGL_ALWAYS_SOFTWARE' not in e
     assert rviz_env(base, 'software')['LIBGL_ALWAYS_SOFTWARE'] == '1'
     assert base['QT_QPA_PLATFORM'] == 'wayland'   # caller's env untouched
+
+
+def test_lua_constraint_builder_keys_exist_in_cartographer():
+    """Cartographer aborts at start on a key it does not know (19 Nov: constraint_builder.global_sampling_ratio)."""
+    import re
+    known = {'sampling_ratio', 'max_constraint_distance', 'min_score', 'global_localization_min_score',
+             'loop_closure_translation_weight', 'loop_closure_rotation_weight', 'log_matches'}
+    cfg = os.path.join(os.path.dirname(__file__), '..', 'config')
+    for f in os.listdir(cfg):
+        if f.endswith('.lua'):
+            for key in re.findall(r'^POSE_GRAPH\.constraint_builder\.(\w+)\s*=', open(os.path.join(cfg, f)).read(), re.M):
+                assert key in known, f'{f}: POSE_GRAPH.constraint_builder.{key} is not a Cartographer option'

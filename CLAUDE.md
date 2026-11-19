@@ -138,6 +138,8 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 - 2026-11-19 (lab): the robot ran OLD code: robot.service sourced ~/ros2_ws/install while the Pi builds in
   ~/slam-robot/ros2_ws (so slam_host:=laptop was ignored, the Pi ran its own Cartographer). robot.service now
   sources ~/slam-robot/ros2_ws first, then ~/ros2_ws, and logs which. Copy it to /etc/systemd/system once.
+  Cartographer aborted at start on every machine: cartographer_odom.lua (17 Nov) had the unknown key
+  POSE_GRAPH.constraint_builder.global_sampling_ratio: removed, test guards constraint_builder keys.
   Motor board dropped while RViz on the laptop subscribed (bridge publishes from its serial reader thread): mapping without RViz.
 - 2026-11-19 (lab, RViz): on the Dell G15 RViz froze ('not responding', Map display GLSL link error, Wayland) and
   two RViz were open (laptop_slam starts one). laptop_slam.py now opens RViz under X11 (xcb) on the NVIDIA card
