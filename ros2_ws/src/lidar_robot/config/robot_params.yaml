@@ -11,7 +11,7 @@ esp32_bridge:
     max_wheel_speed: 0.45        # m/s clamp sent to the ESP32
     cmd_rate: 20.0
     use_imu_yaw: true            # firmware v2.2 + MPU-6050: heading from the gyro, distance from wheels
-    gyro_scale: 1.023              # app Spin test with the gyro working: set what it suggests (docs/mapping.md)
+    gyro_scale: 1.043              # app Spin test with the gyro working: set what it suggests (docs/mapping.md)
 
 goal_controller:
   ros__parameters:
