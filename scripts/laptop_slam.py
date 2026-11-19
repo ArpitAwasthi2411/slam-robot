@@ -139,11 +139,24 @@ class Supervisor:
         self.offset, self.odom_t = time.time() - st, time.monotonic()
 
     # ------------------------------------------------------------ processes
-    def _spawn(self, cmd, name):
+    def _spawn(self, cmd, name, log=None):
         say(f'start {name}')
-        return subprocess.Popen(cmd, start_new_session=True,
-                                stdout=None if self.args.verbose else subprocess.DEVNULL,
-                                stderr=None if self.args.verbose else subprocess.STDOUT)
+        out = None if self.args.verbose else subprocess.DEVNULL
+        if log and not self.args.verbose:
+            out = open(log, 'w')
+        p = subprocess.Popen(cmd, start_new_session=True, stdout=out,
+                             stderr=None if self.args.verbose else subprocess.STDOUT)
+        p.log, p.name = log, name
+        return p
+
+    @staticmethod
+    def _tail(path, n=8):
+        try:
+            with open(path, errors='replace') as f:
+                lines = [ln.rstrip() for ln in f if ln.strip()]
+        except OSError:
+            return []
+        return lines[-n:]
 
     def start_rviz(self):
         rv = os.path.join(PKG, 'rviz', 'robot.rviz')
@@ -191,9 +204,11 @@ class Supervisor:
         self.procs = [
             self._spawn(['ros2', 'run', 'cartographer_ros', 'cartographer_node',
                          '-configuration_directory', CONFIG, '-configuration_basename', lua] + extra +
-                        ['--ros-args', '-r', 'scan:=/scan', '-r', 'odom:=/odom'], f'Cartographer ({lua})'),
+                        ['--ros-args', '-r', 'scan:=/scan', '-r', 'odom:=/odom'], f'Cartographer ({lua})',
+                        os.path.expanduser('~/cartographer_log.txt')),
             self._spawn(['ros2', 'run', 'cartographer_ros', 'cartographer_occupancy_grid_node',
-                         '-resolution', '0.05', '-publish_period_sec', '2.0'], 'map picture (/map every 2 s)'),
+                         '-resolution', '0.05', '-publish_period_sec', '2.0'], 'map picture (/map every 2 s)',
+                        os.path.expanduser('~/map_picture_log.txt')),
         ]
         if not self.args.no_record:
             os.makedirs(BAGS, exist_ok=True)
@@ -272,7 +287,9 @@ class Supervisor:
                 say('the Pi builds the map itself (slam_host is "pi"): add slam_host:=laptop to ROBOT_ARGS in '
                     '~/robot.env on the Pi and sudo systemctl restart robot')
                 warned_pi = True
-            if act == 'start':
+            if getattr(self, 'gave_up', False) and act in ('start', 'restart'):
+                pass
+            elif act == 'start':
                 self.start(wanted(self.status))
             elif act == 'restart':
                 self.stop('the robot restarted or a different map was chosen')
@@ -281,8 +298,15 @@ class Supervisor:
                 self.stop('robot not mapping any more' if age is not None and age <= 15 else 'robot silent for 15 s')
             for p in list(self.procs):
                 if p.poll() is not None:
-                    say('Cartographer stopped by itself: starting it again (run with --verbose to see why)')
+                    say(f'{p.name} stopped by itself (exit {p.returncode}). Its last lines:')
+                    for ln in self._tail(p.log) if p.log else []:
+                        print('    | ' + ln, flush=True)
+                    self.crashes = [t for t in getattr(self, 'crashes', []) if now - t < 60] + [now]
                     self.stop('crashed')
+                    if len(self.crashes) >= 3:
+                        say('crashed 3 times in a minute: NOT restarting. Send the lines above. To try the Pi\'s '
+                            'settings instead: Ctrl+C, then run again with --quality pi')
+                        self.gave_up = True
                     break
             if self.bag and self.bag.poll() is None:
                 self._write_urdf()
@@ -335,7 +359,7 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         sup.loop()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, RuntimeError):     # Ctrl+C inside rclpy's spin shows up as a RuntimeError
         pass
     finally:
         sup.shutdown()
