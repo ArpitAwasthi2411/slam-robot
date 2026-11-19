@@ -22,10 +22,12 @@ need_name() { [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || die "give a map name (letters
 ros_env() {
     # shellcheck disable=SC1091
     source /opt/ros/humble/setup.bash
-    if [ -f "$HOME/ros2_ws/install/setup.bash" ]; then
-        # shellcheck disable=SC1091
-        source "$HOME/ros2_ws/install/setup.bash"
-    fi
+    for ws in "$HOME/slam-robot/ros2_ws" "$HOME/ros2_ws"; do     # the one robot.service runs first
+        if [ -f "$ws/install/setup.bash" ]; then
+            # shellcheck disable=SC1091
+            source "$ws/install/setup.bash"; break
+        fi
+    done
 }
 
 config_dir() {
