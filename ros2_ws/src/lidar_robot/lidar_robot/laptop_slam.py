@@ -108,3 +108,20 @@ def file_arrived(path, since, min_size=1):
     except OSError:
         return False
     return st.st_size >= min_size and st.st_mtime >= since - 1.0
+
+
+def rviz_env(env, gpu='auto', has_nvidia=False):
+    """Environment for RViz on the laptop. RViz froze on 19 Nov ('rviz2 is not responding', Map display
+    GLSL link error on the Intel/Mesa driver under Wayland). Always X11 (xcb); on a laptop with an NVIDIA
+    card RViz is sent to it (PRIME offload); 'software' draws on the CPU (slow but never hits a driver bug)."""
+    e = dict(env)
+    e['QT_QPA_PLATFORM'] = 'xcb'
+    e.pop('__NV_PRIME_RENDER_OFFLOAD', None)
+    e.pop('__GLX_VENDOR_LIBRARY_NAME', None)
+    e.pop('LIBGL_ALWAYS_SOFTWARE', None)
+    if gpu == 'nvidia' or (gpu == 'auto' and has_nvidia):
+        e['__NV_PRIME_RENDER_OFFLOAD'] = '1'
+        e['__GLX_VENDOR_LIBRARY_NAME'] = 'nvidia'
+    elif gpu == 'software':
+        e['LIBGL_ALWAYS_SOFTWARE'] = '1'
+    return e

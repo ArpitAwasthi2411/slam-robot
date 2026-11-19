@@ -4,7 +4,9 @@
     source /opt/ros/humble/setup.bash
     python3 ~/slam-robot/scripts/laptop_slam.py            # map + record + RViz, follows the app
     python3 ~/slam-robot/scripts/laptop_slam.py --check    # only check the link, clocks, tools, then exit
+    python3 ~/slam-robot/scripts/laptop_slam.py --rviz-only   # only RViz (if you closed it), same settings
     options: --pi arpit@169.254.1.2  --no-rviz  --no-record  --quality pi   (Pi's own settings, for a comparison)
+             --gpu auto|nvidia|intel|software   which graphics RViz uses (auto: the NVIDIA card if there is one)
 
 Needs on the laptop: Ubuntu 22.04 + ROS 2 Humble, `sudo apt install ros-humble-cartographer-ros rsync`,
 this repo (git clone), the Ethernet cable to the Pi (scripts/setup_laptop_link.sh), an SSH key on the Pi
@@ -31,7 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 PKG = os.path.join(REPO, 'ros2_ws', 'src', 'lidar_robot')
 sys.path.insert(0, PKG)
-from lidar_robot.laptop_slam import clock_note, decide, parse_status, ready_files, wanted  # noqa: E402
+from lidar_robot.laptop_slam import clock_note, decide, parse_status, ready_files, rviz_env, wanted  # noqa: E402
 
 CONFIG = os.path.join(PKG, 'config')
 KEEP = os.path.expanduser('~/pathik_maps')
@@ -48,6 +50,24 @@ def run(cmd, timeout=20):
         return r.returncode, (r.stdout + r.stderr).strip()
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, str(e)
+
+
+def has_nvidia():
+    return bool(shutil.which('nvidia-smi')) and run(['nvidia-smi', '-L'], timeout=5)[0] == 0
+
+
+def start_rviz(gpu, config):
+    """RViz in its own process group with the graphics fix (lidar_robot.laptop_slam.rviz_env); its output
+    goes to ~/rviz_log.txt so a freeze or crash can be read afterwards."""
+    nv = gpu in ('auto', 'nvidia') and has_nvidia()
+    if gpu == 'nvidia' and not nv:
+        say('no working NVIDIA driver (nvidia-smi failed): RViz uses the built-in graphics')
+    env = rviz_env(os.environ, gpu if gpu != 'intel' else 'none', nv)
+    say('start RViz on ' + ('the NVIDIA card' if '__NV_PRIME_RENDER_OFFLOAD' in env else
+                           'software drawing' if 'LIBGL_ALWAYS_SOFTWARE' in env else 'the built-in graphics'))
+    log = open(os.path.expanduser('~/rviz_log.txt'), 'a')
+    cmd = ['rviz2'] + (['-d', config] if os.path.isfile(config) else [])
+    return subprocess.Popen(cmd, env=env, start_new_session=True, stdout=log, stderr=subprocess.STDOUT)
 
 
 def checks(pi):
@@ -107,6 +127,7 @@ class Supervisor:
         self.sent = {}
         self.save_dir = None
         self.rviz = None
+        self.rviz_starts = 0
 
     def _on_status(self, msg):
         s = parse_status(msg.data)
@@ -123,6 +144,11 @@ class Supervisor:
         return subprocess.Popen(cmd, start_new_session=True,
                                 stdout=None if self.args.verbose else subprocess.DEVNULL,
                                 stderr=None if self.args.verbose else subprocess.STDOUT)
+
+    def start_rviz(self):
+        rv = os.path.join(PKG, 'rviz', 'robot.rviz')
+        self.rviz = start_rviz(self.args.gpu, rv)
+        self.rviz_starts += 1
 
     @staticmethod
     def _kill(p, wait=8.0):
@@ -223,9 +249,23 @@ class Supervisor:
     def loop(self):
         say('waiting for the robot (/slam_host from the Pi dashboard)…')
         last_note, warned_pi = 0.0, False
+        t0, hinted = time.monotonic(), False
         while self.rclpy.ok():
             self.rclpy.spin_once(self.node, timeout_sec=0.5)
             now = time.monotonic()
+            if self.status is None and not hinted and now - t0 > 30:
+                hinted = True
+                say('still nothing from the Pi after 30 s: the robot service may be (re)starting or stuck. On the Pi: '
+                    'systemctl is-active robot; journalctl -u robot -n 40 --no-pager | grep -i -E "dashboard|error"')
+            if self.rviz is not None and self.rviz.poll() is not None:
+                code = self.rviz.returncode
+                if code != 0 and self.rviz_starts < 4:
+                    say(f'RViz closed with an error ({code}): opening it again (log in ~/rviz_log.txt). '
+                        'Mapping is not affected.')
+                    self.start_rviz()
+                else:
+                    say('RViz closed (mapping goes on; reopen it: laptop_slam.py --rviz-only)')
+                    self.rviz = None
             age = None if self.status_t is None else now - self.status_t
             act = decide(self.status, self.key, age)
             if self.status and self.status.get('host') != 'laptop' and not warned_pi:
@@ -264,11 +304,22 @@ def main():
     ap.add_argument('--pi', default=os.environ.get('PATHIK_PI', 'arpit@169.254.1.2'))
     ap.add_argument('--check', action='store_true', help='check everything and exit')
     ap.add_argument('--no-rviz', action='store_true')
+    ap.add_argument('--rviz-only', action='store_true', help='only open RViz (same graphics settings), then exit')
+    ap.add_argument('--gpu', choices=('auto', 'nvidia', 'intel', 'software'), default='auto',
+                    help='graphics for RViz: auto = NVIDIA card if present; software if RViz still freezes')
     ap.add_argument('--no-record', action='store_true')
     ap.add_argument('--quality', choices=('laptop', 'pi'), default='laptop',
                     help='laptop = finer nodes + more loop closure tries (default); pi = the Pi\'s own settings')
     ap.add_argument('--verbose', action='store_true', help='show Cartographer\'s own output')
     args = ap.parse_args()
+
+    if args.rviz_only:
+        p = start_rviz(args.gpu, os.path.join(PKG, 'rviz', 'robot.rviz'))
+        try:
+            p.wait()
+        except KeyboardInterrupt:
+            pass
+        sys.exit(0)
 
     bad = checks(args.pi)
     for b in bad:
@@ -280,8 +331,7 @@ def main():
 
     sup = Supervisor(args)
     if not args.no_rviz and shutil.which('rviz2'):
-        rv = os.path.join(PKG, 'rviz', 'robot.rviz')
-        sup.rviz = sup._spawn(['rviz2'] + (['-d', rv] if os.path.isfile(rv) else []), 'RViz')
+        sup.start_rviz()
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         sup.loop()

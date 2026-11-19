@@ -135,6 +135,10 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-19 (lab, RViz): on the Dell G15 RViz froze ('not responding', Map display GLSL link error, Wayland) and
+  two RViz were open (laptop_slam starts one). laptop_slam.py now opens RViz under X11 (xcb) on the NVIDIA card
+  (PRIME offload) when nvidia-smi works, `--gpu auto|nvidia|intel|software`, log ~/rviz_log.txt, reopens it after a
+  crash/Force Quit (3x), `--rviz-only`; hint after 30 s with no /slam_host. robot.rviz: /map Transient Local, 10 fps.
 - 2026-11-19 (review): pyflakes clean; read navigator/dashboard/bridge/launch/laptop_slam. Fixed: dashboard
   `_apply_start_pose` ran in a timer and waited for Cartographer's service -> deadlock (default mutually-exclusive
   callback group), so "placed where frozen" always timed out: now a thread. Launch: respawn (3 s) for bridge, LiDAR,

@@ -89,11 +89,9 @@ made with bad odometry tears.
    ```bash
    python3 ~/slam-robot/scripts/laptop_slam.py
    ```
-   Terminal 2 (RViz, with a log in case it closes):
-   ```bash
-   source /opt/ros/humble/setup.bash && export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
-   rviz2 -d ~/slam-robot/ros2_ws/src/lidar_robot/rviz/robot.rviz 2>&1 | tee ~/rviz_log.txt
-   ```
+   It opens RViz itself (on the NVIDIA card if the laptop has one, log in `~/rviz_log.txt`) and reopens it if it
+   crashes. **Don't start a second RViz.** Closed it? `python3 ~/slam-robot/scripts/laptop_slam.py --rviz-only`.
+   Still freezing? Start with `--gpu software`. RViz is only for watching: mapping runs without it.
 4. Strap the laptop over / just in front of the wheel axle, **lower than the LiDAR**, nothing in its view.
 
 Terminal 1 will just wait at first: the Pi still remembers "drive on `Cse_department_aids`" from 18 Nov. It starts

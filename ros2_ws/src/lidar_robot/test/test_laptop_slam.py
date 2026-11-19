@@ -111,3 +111,15 @@ def test_dashboard_saves_through_the_laptop():
     assert 'os.path.join(self.slam_save_dir, os.path.basename(path)) if laptop else part' in src
     assert 'laptop_slam.file_arrived(path, t_req)' in src
     assert "'slam_warning': self._slam_warning()" in src
+
+
+def test_rviz_env_x11_and_gpu_choice():
+    from lidar_robot.laptop_slam import rviz_env
+    base = {'QT_QPA_PLATFORM': 'wayland', 'LIBGL_ALWAYS_SOFTWARE': '1', 'HOME': '/h'}
+    e = rviz_env(base, 'auto', has_nvidia=True)
+    assert e['QT_QPA_PLATFORM'] == 'xcb' and e['__NV_PRIME_RENDER_OFFLOAD'] == '1'
+    assert e['__GLX_VENDOR_LIBRARY_NAME'] == 'nvidia' and 'LIBGL_ALWAYS_SOFTWARE' not in e and e['HOME'] == '/h'
+    e = rviz_env(base, 'auto', has_nvidia=False)
+    assert '__NV_PRIME_RENDER_OFFLOAD' not in e and 'LIBGL_ALWAYS_SOFTWARE' not in e
+    assert rviz_env(base, 'software')['LIBGL_ALWAYS_SOFTWARE'] == '1'
+    assert base['QT_QPA_PLATFORM'] == 'wayland'   # caller's env untouched
