@@ -89,7 +89,7 @@ class NavigatorNode(Node):
         d('slow_distance', 0.80)
         d('blocked_after', 2.5)            # s stopped by an obstacle before planning around it
         d('us_memory_s', 60.0)             # s an ultrasonic-only blocker stays on the plan
-        d('robot_half_width', 0.27)
+        d('robot_half_width', 0.25)
         # the body: a rectangle around the drive axle (base_link). MEASURE YOUR ROBOT:
         d('footprint_front', 0.07)         # axle -> front bumper (m)
         d('footprint_rear', 0.39)          # axle -> back edge (m)
@@ -428,7 +428,19 @@ class NavigatorNode(Node):
             with self.core_lock:
                 self.core.update_scan_world(pts)
                 self.core.update_us_world(us_arc)
+                self.core.update_us_rays(self._us_rays(pose))     # what each sensor sees empty now
                 self.core.update_scan_base(near + list(us))
+
+    def _us_rays(self, pose):
+        """(x, y, yaw, range|None) of each ultrasonic beam in the map frame, for clearing the obstacle memory."""
+        x, y, yaw = pose
+        c, s = math.cos(yaw), math.sin(yaw)
+        out = []
+        for r, m in self.us.readings():
+            if m is None:
+                continue
+            out.append((x + m[0] * c - m[1] * s, y + m[0] * s + m[1] * c, yaw + m[2], r))
+        return out
 
     def _on_goal(self, msg: PoseStamped):
         o = msg.pose.orientation
@@ -706,7 +718,7 @@ class NavigatorNode(Node):
             def ignore(px, py):
                 wx, wy = to_world([(px, py)], pose)[0]
                 return planner.near_wall(wx, wy, tol=self.us_wall_tol)
-        return self.us.front_clearance(fp.half_width, ignore=ignore, margin=0.03)
+        return self.us.front_clearance(fp.half_width, ignore=ignore, margin=0.02)
 
     def _on_vision(self, msg: String):
         try:

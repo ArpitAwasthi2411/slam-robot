@@ -43,6 +43,9 @@ class FollowerParams:
     stall_move: float = 0.02         # m: less than this in stall_s = stuck
     kick_speed: float = 0.20         # m/s for kick_s
     kick_s: float = 0.5
+    # a wall or door frame straight ahead while the route bends away from it (beyond the front cone): turn on the
+    # spot towards the route instead of standing there "blocked" (20 Nov: waits at walls)
+    bend_turn_alpha: float = 0.45
 
 
 def _clamp(v, lo, hi):
@@ -247,6 +250,9 @@ class PathFollower:
                     self.rotating = True
                 elif abs(alpha) < p.rotate_exit_below:
                     self.rotating = False
+                if front_clearance < p.stop_distance and abs(alpha) > p.bend_turn_alpha:
+                    self.rotating = True        # the route bends away from the thing ahead: turn to it, don't wait
+                    self._v = min(self._v, 0.0)
                 if self.rotating:
                     v_t, w_t, self.blocked = self._turn(alpha, guard, front_clearance, dt, pose, (lx, ly))
                 else:

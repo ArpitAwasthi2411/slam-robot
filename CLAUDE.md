@@ -136,6 +136,14 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-20 (lab, doors): a door handle stopped the robot in a door, it then took a long way round (also on the
+  way back, from the 60 s memory) and stood still at walls. Now: blocked ahead by a thing (not a person) and the way
+  round is > 1.5x + 2 m longer or there is none -> wait up to `clear_wait_s` 20 s on the spot and drive on the moment
+  it clears (no replan counted, once per stop; then go round as before); fresh plans try the short way when only a
+  REMEMBERED obstacle makes them long; update_us_rays: a remembered ultrasonic cell inside a beam (+-15 deg) that sees
+  farther / no echo is forgotten at once; follower: obstacle ahead but the route bends > 26 deg away -> turn on the
+  spot towards it instead of waiting; LiDAR stop zone half width 0.25 (body + 2 cm), ultrasonic margin 2 cm.
+  test_wait_or_go_round.py (4).
 - 2026-11-20 (lab, pots 2): trip speed did not go up: a Tuning Lab Save stores EVERY follower value, so the old cruise
   speed in ~/maps/tuning.json beat the YAML. tuning.saved_overrides: a speed the YAML raised wins over an old file;
   new saves record the YAML (`yaml`), and any value the YAML changed since then wins. ~30 s stopped before getting

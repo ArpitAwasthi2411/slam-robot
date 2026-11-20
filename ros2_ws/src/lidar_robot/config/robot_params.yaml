@@ -26,7 +26,7 @@ goal_controller:
     yaw_tolerance: 0.08
     stop_distance: 0.38          # measured from robot centre (440 mm chassis)
     slow_distance: 0.75
-    robot_half_width: 0.27         # 460 mm square body (0.23) + 4 cm
+    robot_half_width: 0.25         # 460 mm square body (0.23) + 2 cm
     front_cone_deg: 25.0
     goal_timeout: 120.0
 
@@ -69,7 +69,7 @@ navigator:
     backup_m: 0.25               # after an object stops the robot: back up this far (only if the LiDAR sees the
                                  # rear clear) so it has room to turn and go round the side; 0 = off
     us_wall_tol: 0.12            # m: ultrasonic echoes this close to a mapped wall (door frames) never stop or block the robot
-    robot_half_width: 0.27
+    robot_half_width: 0.25         # LiDAR stop zone: body + 2 cm (door handles beside the path)
     front_cone_deg: 25.0
     # The body shape (v2.4). base_link = centre of the drive axle. MEASURE these on your robot:
     #   front = axle -> front bumper, rear = axle -> back edge, half_width = centre line -> side

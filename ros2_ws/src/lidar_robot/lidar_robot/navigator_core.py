@@ -135,6 +135,14 @@ class NavigatorCore:
         self.us_depth_m = 0.3              # assumed depth of an ultrasonic-only blocker
         self.us_margin_m = 0.15            # extra berth around it (on top of the robot radius)
         self.person_memory_s = 10.0        # a person who did not step aside: routed round for this long only
+        self.us_clear_m = 1.5              # a remembered obstacle cell inside a beam that sees farther is forgotten
+        self.us_clear_tol = 0.25           #   (cells this close in front of the echo stay: the berth around it)
+        # wait or go round? When the way round is much longer than the blocked way (or there is none: a door), wait
+        # for the way to clear and drive on the moment it does (20 Nov: long detours and failed trips at doors).
+        self.detour_ratio = 1.5            # way round longer than ratio x the direct way + detour_extra_m: wait first
+        self.detour_extra_m = 2.0
+        self.clear_wait_s = 20.0           # how long to wait for the way to clear before taking the long way round
+        self._clear_wait = None
         # back-up recovery (20 Nov: flower pots and plants seen only by the ultrasonics). Stopped nose-to-pot the
         # robot has no room to turn and its start sits inside the pot's keep-out, so it backs up a little (only
         # when the LiDAR sees the space behind it empty) and then plans round the side.
@@ -271,6 +279,36 @@ class NavigatorCore:
             where = 'ahead' if abs(side) < 12 else ('on the left' if side > 0 else 'on the right')
             self._log(f'ultrasonic blocker {where} remembered ({len(new_echoes)} echoes): planning round it')
         return len(new_echoes)
+
+    def update_us_rays(self, rays, now=None):
+        """Live beams [(x, y, yaw, range|None)] in the map frame. Remembered ultrasonic obstacle cells that a beam
+        now looks through (nearer than its echo, or no echo at all) are forgotten at once: the way is clear again."""
+        if not self._us_cells or not rays:
+            return 0
+        now = self.clock() if now is None else now
+        q = 0.05
+        half = math.radians(15.0)                         # the HC-SR04 cone the memory was drawn with
+        drop = []
+        for c, t in self._us_cells.items():
+            if 0.0 <= now - t < 1.0:
+                continue                                   # just put there by this very echo
+            cx, cy = c[0] * q, c[1] * q
+            for ox, oy, yaw, r in rays:
+                d = math.hypot(cx - ox, cy - oy)
+                if d < 0.05 or d > self.us_clear_m:
+                    continue
+                a = math.atan2(cy - oy, cx - ox) - yaw
+                if abs(math.atan2(math.sin(a), math.cos(a))) > half:
+                    continue
+                if r is None or d < r - self.us_clear_tol:
+                    drop.append(c)
+                    break
+        for c in drop:
+            del self._us_cells[c]
+        if len(drop) >= 3 and now >= getattr(self, '_us_cleared_said', -1e9) + 5.0:
+            self._us_cleared_said = now
+            self._log('remembered obstacle gone: the sensors see the way clear')
+        return len(drop)
 
     def us_memory(self, now=None):
         now = self.clock() if now is None else now
@@ -1105,6 +1143,10 @@ class NavigatorCore:
         b = ({'limit': None, 'say': [], 'ended': None} if event == 'BLOCKED'      # counted below, as a replan
              else self.blockers.update(front_block, now))
         self.follower.blocked_limit = b['limit'] if front_block else None
+        cw = self._clear_wait
+        waiting = bool(cw and cw['key'] == (m.id, m.next_stop) and now < cw['until'])
+        if waiting and front_block and b.get('kind') != 'person':
+            self.follower.blocked_limit = max(0.5, cw['until'] - now)
         self.say_queue.extend(b['say'])
         if b['ended'] and b['ended']['kind'] == 'person':
             self.mlog.bump(m, 'blocked_person')
@@ -1167,6 +1209,11 @@ class NavigatorCore:
                     # a person who did not step aside: go round them, but forget them after person_memory_s, not
                     # 60 s (20 Nov: the robot kept going round a person who had already left)
                     self.remember_us(now, ttl=self.person_memory_s)
+            if event == 'BLOCKED' and blocker != 'person' and getattr(self.follower, 'why_blocked', '') == 'front' \
+                    and self._wait_instead(m, pose, now):
+                self.follower.blocked_limit = self.clear_wait_s
+                self._set(DRIVING, f'waiting for the way to clear ({m.current.label})')
+                return 0.0, 0.0
             self.mlog.bump(m, 'replans')
             self._replans += 1
             if self._replans > self.max_replans:
@@ -1200,7 +1247,9 @@ class NavigatorCore:
         else:
             self._blocked_since = None
         kind = self.blockers.kind
-        self.message = (f'a person is in my way, asked to pass… ({m.current.label})' if kind == 'person'
+        self.message = (f'waiting for the way to clear: the way round is much longer ({m.current.label})'
+                        if waiting and self.follower.blocked and kind != 'person'
+                        else f'a person is in my way, asked to pass… ({m.current.label})' if kind == 'person'
                         else f'an object is in my way, finding another way… ({m.current.label})' if kind == 'object'
                         else f'blocked, waiting… ({m.current.label})' if self.follower.blocked
                         else f'driving to {m.current.label}')
@@ -1222,6 +1271,14 @@ class NavigatorCore:
                                          radius=self.planner.p.robot_radius + stop.margin)
             if path is None:
                 path = self.planner.plan(pose[:2], (stop.x, stop.y), extra)
+            if extra and not self._replans and not stop.margin:
+                # remembered (not seen now) obstacles: try the short way if going round them is much longer; the
+                # sensors stop the robot if the thing is really still there (20 Nov: a long way back after a door)
+                direct = self.planner.plan(pose[:2], (stop.x, stop.y))
+                if direct is not None and (path is None or path_length(path) > self.detour_ratio * path_length(direct)
+                                           + self.detour_extra_m):
+                    self._log('an obstacle I remember is on the short way: trying it, I will see if it is still there')
+                    path = direct
             if path is None and not stop.margin:
                 # a door the usual berth calls too narrow: plan with the body's real half width (+3 cm), check the
                 # whole rectangle along it and drive slowly ("tight"). 18 Nov: "space on the map but no path".
@@ -1265,6 +1322,28 @@ class NavigatorCore:
         self._log(f'route to {stop.label}: {path_length(path):.1f} m' +
                   (f' ({self.planner.last_note})' if self.planner.last_note else ''))
         return 0.0, 0.0
+
+    def _wait_instead(self, m, pose, now):
+        """Blocked ahead by a thing (not a person): wait for it to clear when the way round is much longer or
+        there is none. Once per stop; when the wait runs out, the robot goes round (or gives up) as before."""
+        stop = m.current
+        if stop.path or stop.margin:
+            return False
+        key = (m.id, m.next_stop)
+        if self._clear_wait and self._clear_wait['key'] == key:
+            return False                                   # already waited here: now go round
+        direct = self.planner.plan(pose[:2], (stop.x, stop.y))
+        if direct is None:
+            return False
+        detour = self.planner.plan(pose[:2], (stop.x, stop.y), self._dynamic_obstacles())
+        if detour is not None and path_length(detour) <= self.detour_ratio * path_length(direct) + self.detour_extra_m:
+            return False                                   # a fair way round: take it
+        self._clear_wait = {'key': key, 'until': now + self.clear_wait_s}
+        how = 'there is no other way' if detour is None else \
+            f'the way round is {path_length(detour) - path_length(direct):.0f} m longer'
+        self._log(f'blocked ahead and {how}: waiting up to {self.clear_wait_s:.0f} s for the way to clear', 'warn')
+        self.say_queue.append(('make_way', 'Excuse me, please make way.'))
+        return True
 
     def rear_clear(self, depth=0.30):
         """True when the scan sees nothing in a box `depth` deep behind the body. No scan at all = not clear."""
