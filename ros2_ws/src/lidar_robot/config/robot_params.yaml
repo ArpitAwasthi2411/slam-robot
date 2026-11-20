@@ -64,7 +64,7 @@ navigator:
     rotate_exit_below: 0.30      # rad (~17 deg): ...until it's below this, then drive
     stop_distance: 0.38
     slow_distance: 0.80
-    blocked_after: 5.0           # s stopped by an obstacle before planning a route around it (people usually move by then)
+    blocked_after: 2.5           # s stopped by an obstacle before planning a route around it (5.0 until 20 Nov: too slow)
     us_memory_s: 60.0            # s an obstacle seen only by the ultrasonics stays on the plan (LiDAR can't see low boxes)
     backup_m: 0.25               # after an object stops the robot: back up this far (only if the LiDAR sees the
                                  # rear clear) so it has room to turn and go round the side; 0 = off
@@ -111,7 +111,7 @@ navigator:
     llm_model: openai/gpt-oss-20b     # used only if GROQ_API_KEY is set and there is internet (Groq retired llama-3.x on 16 Aug 2026)
     llm_policy: smart                 # smart: offline rules first, LLM only when they are unsure | always | off
     polite_pass: true                 # blocked by a person: "may I pass?" and wait; by an object: new route at once
-    person_wait_s: 8.0                # how long a person gets to step aside
+    person_wait_s: 5.0                # how long a person gets to step aside (8 until 20 Nov), then a route round them
     object_wait_s: 1.2                # no person in the camera for this long = an object
     pass_text: "Excuse me, may I pass?"   # e.g. "Kripya raasta dijiye"
     nav_backend: pathik               # set by the launch: nav_mode:=nav2 makes Nav2 plan and drive (docs/nav2.md)

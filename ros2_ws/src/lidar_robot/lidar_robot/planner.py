@@ -66,6 +66,7 @@ class Planner:
             return
         fine_occ = despeckle(grid.occ)                    # LiDAR specks (legs walking past) no longer block corridors
         fine_unk = fill_unknown_holes(grid.unknown, fine_occ)   # 1-cell unseen streaks in doorways
+        fine_unk = fill_enclosed_holes(fine_unk, fine_occ, grid.resolution)   # spots missed while mapping
         occ = fine_occ[:h * f, :w * f].reshape(h, f, w, f).any(axis=(1, 3))
         unk = fine_unk[:h * f, :w * f].reshape(h, f, w, f).all(axis=(1, 3))
         self._occ_only = occ                              # mapped walls only (not unknown): near_wall()
@@ -329,6 +330,92 @@ def fill_unknown_holes(unknown, occ, passes=2):
             break
         unk &= ~fill
     return unk
+
+
+HOLE_MAX_M2 = 2.0          # unseen patches up to this size inside the map ...
+HOLE_FREE_FRAC = 0.6       # ... with at least this share of their edge on seen free floor are floor too
+
+
+def _label(mask):
+    """Connected components (4-neighbour) of a bool array -> (labels, count). scipy when there, else a BFS."""
+    try:
+        from scipy.ndimage import label
+        return label(mask)
+    except ImportError:
+        pass
+    try:
+        import cv2
+        n, lab = cv2.connectedComponents(mask.astype(np.uint8), connectivity=4)
+        return lab.astype(np.int32), n - 1
+    except ImportError:
+        pass
+    h, w = mask.shape
+    lab = np.zeros((h, w), dtype=np.int32)
+    n = 0
+    flat = mask.ravel()
+    lf = lab.ravel()
+    for start in np.flatnonzero(flat):
+        if lf[start]:
+            continue
+        n += 1
+        lf[start] = n
+        stack = [start]
+        while stack:
+            i = stack.pop()
+            y, x = divmod(i, w)
+            for j, ok in ((i - 1, x > 0), (i + 1, x < w - 1), (i - w, y > 0), (i + w, y < h - 1)):
+                if ok and flat[j] and not lf[j]:
+                    lf[j] = n
+                    stack.append(j)
+    return lab, n
+
+
+def fill_enclosed_holes(unknown, occ, res, max_m2=HOLE_MAX_M2, free_frac=HOLE_FREE_FRAC):
+    """Unseen patches INSIDE the map (a spot in a corridor the LiDAR missed while mapping: someone stood there)
+    become free when they are small and mostly ringed by seen free floor. 20 Nov: the robot drove round such a
+    spot in a clean corridor. Unexplored rooms, the outside of the map and anything ringed by walls (a pillar)
+    stay blocked: those are big, touch the map edge, or have walls on their edge."""
+    if not unknown.any():
+        return unknown
+    key = (unknown.shape, hash(unknown.tobytes()), hash(occ.tobytes()), res, max_m2, free_frac)
+    if _HOLE_CACHE.get('key') == key:                    # localization: the same map comes again and again
+        return _HOLE_CACHE['out']
+    out = _fill_enclosed(unknown, occ, res, max_m2, free_frac)
+    _HOLE_CACHE.update(key=key, out=out)
+    return out
+
+
+_HOLE_CACHE = {}
+
+
+def _fill_enclosed(unknown, occ, res, max_m2, free_frac):
+    lab, n = _label(unknown)
+    if n == 0:
+        return unknown
+    max_cells = max_m2 / (res * res)
+    sizes = np.bincount(lab.ravel(), minlength=n + 1)
+    edge = np.zeros(n + 1, dtype=bool)                   # touches the grid border: the outside, never filled
+    for side in (lab[0, :], lab[-1, :], lab[:, 0], lab[:, -1]):
+        edge[np.unique(side)] = True
+    cand = (sizes <= max_cells) & ~edge
+    cand[0] = False
+    if not cand.any():
+        return unknown
+    # ring of each candidate: the known cells next to it, free or wall
+    free = ~unknown & ~occ
+    ring_free = np.zeros(n + 1)
+    ring_all = np.zeros(n + 1)
+    for dy, dx in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+        src = lab[max(0, -dy):lab.shape[0] - max(0, dy), max(0, -dx):lab.shape[1] - max(0, dx)]
+        nb_free = free[max(0, dy):free.shape[0] - max(0, -dy) or None, max(0, dx):free.shape[1] - max(0, -dx) or None]
+        nb_occ = occ[max(0, dy):occ.shape[0] - max(0, -dy) or None, max(0, dx):occ.shape[1] - max(0, -dx) or None]
+        sel = cand[src] & (nb_free | nb_occ)
+        np.add.at(ring_all, src[sel], 1)
+        np.add.at(ring_free, src[sel & nb_free], 1)
+    good = cand & (ring_all > 0) & (ring_free >= free_frac * np.maximum(ring_all, 1))
+    if not good.any():
+        return unknown
+    return unknown & ~good[lab]
 
 
 def _chamfer(d):

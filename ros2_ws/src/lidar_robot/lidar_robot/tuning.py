@@ -66,11 +66,15 @@ class TuningStore:
                 with open(self.path) as f:
                     d = json.load(f)
                 self.data['follower'] = clamp_values(d.get('follower', {}), FOLLOWER_RANGES)
+                if isinstance(d.get('yaml'), dict):
+                    self.data['yaml'] = d['yaml']
             except (OSError, ValueError, TypeError):
                 pass
 
-    def save_follower(self, values):
+    def save_follower(self, values, yaml_values=None):
         self.data['follower'].update(clamp_values(values, FOLLOWER_RANGES))
+        if yaml_values:
+            self.data['yaml'] = dict(yaml_values)          # what the YAML said when this was saved
         if not self.path:
             return
         os.makedirs(os.path.dirname(self.path) or '.', exist_ok=True)
@@ -78,6 +82,23 @@ class TuningStore:
         with open(tmp, 'w') as f:
             json.dump(self.data, f, indent=2)
         os.replace(tmp, self.path)
+
+
+def saved_overrides(saved, yaml_values, yaml_at_save=None):
+    """Which saved Tuning Lab values to apply over the YAML.
+
+    A value the YAML has changed since the save (the repo raised the speed, 20 Nov) is the newer decision, so
+    the YAML wins for it. Files saved before this rule have no record of the YAML: there a speed the YAML now
+    sets HIGHER wins (the old Save stored every value, so cruise speed got pinned without anyone meaning to)."""
+    out = {}
+    for k, v in saved.items():
+        y = yaml_values.get(k)
+        if y is not None and yaml_at_save is not None and k in yaml_at_save and abs(float(yaml_at_save[k]) - y) > 1e-9:
+            continue
+        if y is not None and yaml_at_save is None and k == 'max_linear' and y > v:
+            continue
+        out[k] = v
+    return out
 
 
 def apply_follower(params, values):

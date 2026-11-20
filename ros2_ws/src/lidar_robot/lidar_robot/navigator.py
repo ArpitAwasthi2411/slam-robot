@@ -87,7 +87,7 @@ class NavigatorNode(Node):
         d('rotate_exit_below', 0.30)
         d('stop_distance', 0.38)
         d('slow_distance', 0.80)
-        d('blocked_after', 5.0)            # s stopped by an obstacle before planning around it
+        d('blocked_after', 2.5)            # s stopped by an obstacle before planning around it
         d('us_memory_s', 60.0)             # s an ultrasonic-only blocker stays on the plan
         d('robot_half_width', 0.27)
         # the body: a rectangle around the drive axle (base_link). MEASURE YOUR ROBOT:
@@ -143,7 +143,7 @@ class NavigatorNode(Node):
         d('recovery_mode', 'llm')       # llm (LLM first, rules if no key/network) | rules | off (old behaviour)
         d('recovery_llm_model', 'openai/gpt-oss-120b')
         d('polite_pass', True)          # blocked by a person: ask and wait; by an object: reroute at once (blockers.py)
-        d('person_wait_s', 8.0)         # how long a person gets to step aside before a new route
+        d('person_wait_s', 5.0)         # how long a person gets to step aside before a new route
         d('object_wait_s', 1.2)         # nobody in view this long = an object
         d('pass_text', 'Excuse me, may I pass?')
         d('nav_backend', 'pathik')      # pathik = own A* + follower | nav2 = Nav2 plans and drives (nav2_follower.py)

@@ -37,6 +37,12 @@ class FollowerParams:
     off_path_dist: float = 0.6       # m cross-track error before reporting OFF_PATH
     side_slow_gap: float = 0.15      # m: body this close to anything (doors) -> slow down
     tight_speed: float = 0.6         # x max_linear on routes marked tight (body barely fits)
+    # door sills / floor joints: going slowly through a door the caster can catch on the strip and the robot sits
+    # still with the wheels asking to move (20 Nov). No progress for stall_s while driving forward -> a short push.
+    stall_s: float = 0.8
+    stall_move: float = 0.02         # m: less than this in stall_s = stuck
+    kick_speed: float = 0.20         # m/s for kick_s
+    kick_s: float = 0.5
 
 
 def _clamp(v, lo, hi):
@@ -62,6 +68,9 @@ class PathFollower:
         self._man_tries = 0
         self.manoeuvres = 0          # 3-point turns done (for the log)
         self.tight = False
+        self._stall = None
+        self._kick = 0.0
+        self.kicks = 0               # door-sill pushes (for the log)
         self.why_blocked = ''        # 'front' | 'turn' | 'body' (for "why did you stop?")
 
     def set_path(self, pts, final_yaw=None, tight=False):
@@ -77,6 +86,8 @@ class PathFollower:
         self._man = None
         self._man_tries = 0
         self.tight = tight
+        self._stall = None
+        self._kick = 0.0
 
     def _turn(self, err, guard, front_clearance, dt, pose=None, target=None):
         """Angular speed to turn on the spot by err, respecting the body sweep. -> (v, w, blocked)"""
@@ -141,6 +152,31 @@ class PathFollower:
         self._man = None
         self._rot_dir = 0
         return 0.0, 0.0, False
+
+    def _sill_push(self, x, y, v_t, front_clearance, dt):
+        """Stuck on a door sill: wheels asked to roll forward, robot not moving -> a short faster push."""
+        p = self.p
+        if self._kick > 0:
+            self._kick -= dt
+            self._stall = None
+            if front_clearance > p.slow_distance * 0.75:
+                self._v = max(self._v, p.kick_speed)        # straight away, no ramp: the point is to get over it
+                return max(v_t, p.kick_speed)
+            return v_t
+        if self._v < p.min_linear * 0.8 or v_t < p.min_linear * 0.8:
+            self._stall = None
+            return v_t
+        if self._stall is None:
+            self._stall = [x, y, 0.0]
+            return v_t
+        self._stall[2] += dt
+        if math.hypot(x - self._stall[0], y - self._stall[1]) > p.stall_move:
+            self._stall = None
+        elif self._stall[2] > p.stall_s and front_clearance > p.slow_distance * 0.75:
+            self._kick = p.kick_s
+            self.kicks += 1
+            self._stall = None
+        return v_t
 
     def clear(self):
         self.path = []
@@ -220,7 +256,7 @@ class PathFollower:
                     if self.tight:
                         v_t = min(v_t, max(p.min_linear, p.max_linear * p.tight_speed))
                     if guard is not None and guard.min_gap < p.side_slow_gap:     # doors, narrow gaps
-                        v_t = min(v_t, max(p.min_linear, p.max_linear * max(0.35, guard.min_gap / p.side_slow_gap)))
+                        v_t = min(v_t, max(p.min_linear, p.max_linear * max(0.5, guard.min_gap / p.side_slow_gap)))
                     if front_clearance < p.stop_distance:
                         v_t = 0.0
                         self.blocked = True
@@ -242,6 +278,8 @@ class PathFollower:
                             self.why_blocked = 'body'
                     if self.blocked:
                         v_t = w_t = 0.0
+                    else:
+                        v_t = self._sill_push(x, y, v_t, front_clearance, dt)
 
         if self.blocked:
             self._blocked_for += dt

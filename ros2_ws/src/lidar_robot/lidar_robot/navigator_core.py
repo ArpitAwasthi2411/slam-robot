@@ -62,7 +62,7 @@ from lidar_robot.planner import Planner, PlannerParams, path_length
 from lidar_robot.blockers import BlockerWatch
 from lidar_robot.map_edits import MapEdits
 from lidar_robot.recovery import RECOVERABLE, Recovery, describe, rule_decide, validate
-from lidar_robot.tuning import (TuningStore, apply_follower, follower_values, ranges_for_app,
+from lidar_robot.tuning import (TuningStore, apply_follower, saved_overrides, follower_values, ranges_for_app,
                                 FOLLOWER_RANGES)
 
 IDLE, PLANNING, DRIVING, DWELL, WAITING = 'IDLE', 'PLANNING', 'DRIVING', 'DWELL', 'WAITING'
@@ -108,7 +108,9 @@ class NavigatorCore:
         self.planner = Planner(planner_params or PlannerParams())
         self.follower = PathFollower(follower_params or FollowerParams())
         self.tuning = TuningStore(tuning_path)           # saved Tuning Lab values override the YAML
-        apply_follower(self.follower.p, self.tuning.data['follower'])
+        self._yaml_follower = follower_values(self.follower.p)
+        apply_follower(self.follower.p, saved_overrides(self.tuning.data['follower'], self._yaml_follower,
+                                                        self.tuning.data.get('yaml')))
         self.parser = parser or CommandParser(places)
         self.queue = MissionQueue()
         self.dwell_s = dwell_s
@@ -132,6 +134,7 @@ class NavigatorCore:
         self.us_memory_s = 60.0
         self.us_depth_m = 0.3              # assumed depth of an ultrasonic-only blocker
         self.us_margin_m = 0.15            # extra berth around it (on top of the robot radius)
+        self.person_memory_s = 10.0        # a person who did not step aside: routed round for this long only
         # back-up recovery (20 Nov: flower pots and plants seen only by the ultrasonics). Stopped nose-to-pot the
         # robot has no room to turn and its start sits inside the pot's keep-out, so it backs up a little (only
         # when the LiDAR sees the space behind it empty) and then plans round the side.
@@ -223,7 +226,7 @@ class NavigatorCore:
         else:
             self.us_world = [[p] for p in pts]
 
-    def remember_us(self, now=None, log=True):
+    def remember_us(self, now=None, log=True, ttl=None):
         """Keep what the ultrasonics see right now as a temporary obstacle for the plans.
 
         Each sensor's echo is placed along that sensor's own beam, so the left / centre / right sensors
@@ -234,6 +237,7 @@ class NavigatorCore:
             return 0
         rx, ry, ryaw = self._pose
         q = 0.05
+        stamp = now if ttl is None else now - max(0.0, self.us_memory_s - ttl)   # forgotten after ttl s
         new_echoes = []
         mapped = self.planner.has_map()
         for arc in self.us_world:
@@ -257,7 +261,8 @@ class NavigatorCore:
                                        cy + self.us_margin_m * math.sin(j * math.pi / 4)) for j in range(8)]
                                      if self.us_margin_m > 0 else [])
                 for px, py in ring:
-                    self._us_cells[(round(px / q), round(py / q))] = now
+                    c = (round(px / q), round(py / q))
+                    self._us_cells[c] = max(stamp, self._us_cells.get(c, stamp))
         if new_echoes and log:
             mx = sum(p[0] for p in new_echoes) / len(new_echoes) - rx
             my = sum(p[1] for p in new_echoes) / len(new_echoes) - ry
@@ -488,7 +493,7 @@ class NavigatorCore:
             if t == 'tune':
                 applied = apply_follower(self.follower.p, req.get('follower', {}))
                 if req.get('save'):
-                    self.tuning.save_follower(follower_values(self.follower.p))
+                    self.tuning.save_follower(follower_values(self.follower.p), self._yaml_follower)
                 self._log(f'follower tuning {"saved" if req.get("save") else "changed"}: '
                           + ', '.join(f'{k}={v:g}' for k, v in applied.items()))
                 return {'ok': True, 'follower': follower_values(self.follower.p), 'saved': bool(req.get('save'))}
@@ -1092,6 +1097,9 @@ class NavigatorCore:
             return self._plan_current(m, pose, now)
 
         v, w, event = self.follower.step(pose, front_clearance, dt, guard=guard)
+        if getattr(self.follower, 'kicks', 0) != getattr(self, '_kicks_seen', 0):
+            self._kicks_seen = self.follower.kicks
+            self._log('not moving although the wheels drive (door sill?): a short push')
         # what is in the way? a person gets asked and some time; an object is routed around at once
         front_block = self.follower.blocked and self.follower.why_blocked == 'front'
         b = ({'limit': None, 'say': [], 'ended': None} if event == 'BLOCKED'      # counted below, as a replan
@@ -1153,10 +1161,12 @@ class NavigatorCore:
                     blocker = ended['kind']
                     self.mlog.bump(m, 'blocked_' + blocker)
                 if blocker != 'person':
-                    # a person walks away: their ultrasonic echo is not a wall to remember for 60 s (20 Nov: the
-                    # robot kept going round a person who had already stepped aside). The live scan still has them.
                     self.remember_us(now)
                     self._us_watch_until = now + self.us_watch_s
+                else:
+                    # a person who did not step aside: go round them, but forget them after person_memory_s, not
+                    # 60 s (20 Nov: the robot kept going round a person who had already left)
+                    self.remember_us(now, ttl=self.person_memory_s)
             self.mlog.bump(m, 'replans')
             self._replans += 1
             if self._replans > self.max_replans:

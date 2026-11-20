@@ -19,7 +19,7 @@ PERSON, OBJECT, UNKNOWN = 'person', 'object', 'unknown'
 
 
 class BlockerWatch:
-    def __init__(self, enabled=True, person_wait_s=8.0, object_wait_s=1.2, person_range_m=2.5, fresh_s=1.5,
+    def __init__(self, enabled=True, person_wait_s=5.0, object_wait_s=1.2, person_range_m=2.5, fresh_s=1.5,
                  ask_text='Excuse me, may I pass?', thanks_text='Thank you.'):
         self.enabled = enabled
         self.person_wait_s = person_wait_s      # how long a person gets to step aside before a new route
