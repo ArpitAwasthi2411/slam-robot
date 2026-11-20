@@ -152,7 +152,7 @@ def test_autosave_while_mapping_only_when_the_map_changed(tmp_path):
     saved = []
     s = PeriodicMapSaver(lambda n: saved.append(n) or 'ok', period_s=180, map_dir=str(tmp_path), threaded=False)
     assert not s.tick(0, True, 1)                        # just started
-    assert s.tick(91, True, 2) and saved == [s.name]      # first save after half a period
+    assert s.tick(91, True, 2) and saved[0].startswith(s.name + '_s')   # first save after half a period
     assert not s.tick(200, True, 2)                       # standing still: same map, no save
     assert not s.tick(200, True, 3)                       # changed, but not due yet
     assert s.tick(272, True, 3) and len(saved) == 2
@@ -232,3 +232,31 @@ def test_half_written_saves_are_not_listed_as_maps(tmp_path):
     (tmp_path / 'cse.pbstream.part').write_bytes(b'x')
     (tmp_path / 'good.pbstream').write_bytes(b'x')
     assert [m['name'] for m in map_mode.list_maps(str(tmp_path))] == ['good']
+
+
+def test_autosave_keeps_snapshots_so_a_map_that_goes_bad_late_is_not_lost(tmp_path):
+    """20 Nov: the department map distorted at the end of the drive and the one autosave of the run was
+    overwritten with it. Every save is now its own snapshot; the last 5 of the running drive are kept."""
+    import time as _t
+    from lidar_robot import map_mode
+    clock = {'t': _t.struct_time((2026, 11, 20, 9, 3, 0, 4, 324, -1))}
+    saved = []
+
+    def save(n):
+        (tmp_path / (n + '.pbstream')).write_text('x' * (len(saved) + 1))
+        saved.append(n)
+        return 'ok'
+    s = map_mode.PeriodicMapSaver(save, period_s=180, map_dir=str(tmp_path), threaded=False,
+                                  clock=lambda: clock['t'], snapshots=5)
+    (tmp_path / 'autosave_2026-11-19_1758_s1801.pbstream').write_text('older drive')
+    s.tick(0, True, None)
+    for k in range(8):
+        clock['t'] = _t.struct_time((2026, 11, 20, 9, 10 + 3 * k, 0, 4, 324, -1))
+        assert s.tick(100 + 200 * k, True, k)
+    assert saved[0] == 'autosave_2026-11-20_0903_s0910' and len(set(saved)) == 8
+    left = sorted(p.name for p in tmp_path.iterdir())
+    run = [n for n in left if n.startswith('autosave_2026-11-20_0903')]
+    assert len(run) == 5 and 'autosave_2026-11-20_0903_s0931.pbstream' in run      # newest five
+    assert 'autosave_2026-11-19_1758_s1801.pbstream' in left                        # the drive before survives
+    assert s.info['name'] == saved[-1]
+    assert s.snapshot_name() == 'autosave_2026-11-20_0903_s0931_2'                  # same minute: never overwrite

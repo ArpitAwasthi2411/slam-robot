@@ -135,6 +135,10 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-20 (later): department map finished but the end of the drive went bad (walls missing in the upper labs) and
+  the one autosave of the run had been overwritten with it; no bag recorded. PeriodicMapSaver now writes every save as
+  its own snapshot (<run>_s<HHMM>), keeps the newest 5 of the running drive + newest snapshot of the last 3 drives +
+  the biggest (test_map_mode). Plan: Continue mapping on Cse_department from 0,0,0 with map_offline.sh record running.
 - 2026-11-20: lab 19 Nov ended well: right encoder fixed, Spin tests -> gyro_scale 1.043 (repo), department map built
   cleanly on the Pi until the battery died (no warning: INA226 unplugged). Speeds +10 %: navigator 0.20, joystick and
   goal_controller 0.22 m/s; turn rates unchanged (map quality). Next: full charge, map in one go, Freeze.

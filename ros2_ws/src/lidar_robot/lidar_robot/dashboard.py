@@ -247,7 +247,7 @@ class DashboardNode(Node):
                 version = self.map_version if self.map_msg is not None else None
             hot = pi_is_hot(self.pihealth.sample())
             if self.map_saver.tick(time.monotonic(), self.slam_mode == 'mapping' and not self.switching, version, hot):
-                self.get_logger().info(f'autosaving the live map as {self.map_saver.name}' + (' (Pi is hot)' if hot else ''))
+                self.get_logger().info(f'autosaving the live map (drive {self.map_saver.name}, new snapshot)' + (' (Pi is hot)' if hot else ''))
         except Exception as e:
             self.get_logger().warning(f'map autosave check failed: {e}', throttle_duration_sec=60.0)
 

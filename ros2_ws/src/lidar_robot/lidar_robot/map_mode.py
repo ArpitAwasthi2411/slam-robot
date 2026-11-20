@@ -167,16 +167,23 @@ class PeriodicMapSaver:
 
     * Every period_s while mapping, but only when the map changed since the last save (standing still = no save).
     * At once when the Pi gets hot (hot=True), at most once a minute: heat is what killed the 16 Nov drive.
-    * One name per robot start (autosave_<date>_<time>), so a restart never overwrites the drive before it;
-      the app lists it with the other maps and "Continue mapping" picks up from there. Only the newest
-      `keep` autosaves are kept.
+    * One run name per robot start (autosave_<date>_<time>), and every save is its own snapshot
+      (<run>_s<HHMM>), so neither a restart nor a map that goes bad late in a drive overwrites the good map
+      before it (20 Nov: the department map distorted at the end and the only autosave was overwritten).
+      Kept: the newest `snapshots` of the running drive, the newest snapshot of the newest `keep` drives,
+      and the biggest file. The app lists them with the other maps; "Continue mapping" picks up from there.
     * The save runs in a thread (Cartographer takes a few seconds to write); never two at once.
     """
 
-    def __init__(self, save_fn, period_s=180.0, map_dir='~/maps', keep=3, clock=time.localtime, threaded=True):
+    RUN_LEN = len('autosave_2026-11-20_0903')
+
+    def __init__(self, save_fn, period_s=180.0, map_dir='~/maps', keep=3, clock=time.localtime, threaded=True,
+                 snapshots=5):
         self.save_fn, self.period_s, self.keep = save_fn, float(period_s), int(keep)
+        self.snapshots = max(1, int(snapshots))
+        self.clock = clock
         self.map_dir = os.path.expanduser(map_dir)
-        self.name = time.strftime('autosave_%Y-%m-%d_%H%M', clock())
+        self.name = time.strftime('autosave_%Y-%m-%d_%H%M', clock())     # the run; each save adds _s<HHMM>
         self.threaded = threaded
         self._last_t = None            # monotonic time of the last save start
         self._last_hot_t = -1e9
@@ -210,11 +217,19 @@ class PeriodicMapSaver:
             self._save()
         return True
 
+    def snapshot_name(self):
+        base = self.name + time.strftime('_s%H%M', self.clock())
+        n, i = base, 2
+        while os.path.exists(os.path.join(self.map_dir, n + '.pbstream')):   # two saves in one minute
+            n, i = '%s_%d' % (base, i), i + 1
+        return n
+
     def _save(self):
         try:
-            text = self.save_fn(self.name)
+            name = self.snapshot_name()
+            text = self.save_fn(name)
             ok = 'WARNING' not in str(text)
-            self.info.update(state='saved' if ok else 'partial', saved_at=int(time.time()),
+            self.info.update(name=name, state='saved' if ok else 'partial', saved_at=int(time.time()),
                              error=None if ok else 'picture saved, Cartographer state not (is SLAM running?)')
             self.prune()
         except Exception as e:                          # never take the dashboard down for an autosave
@@ -239,8 +254,20 @@ class PeriodicMapSaver:
             except OSError:
                 return -1
         biggest = max(names, key=size) if names else None
-        for old in names[self.keep:]:
-            if old == biggest:
+        keep, runs = {biggest}, []
+        for n in names:                                   # newest first
+            run = n[:self.RUN_LEN]
+            if run == self.name:
+                if sum(1 for k in keep if k and k[:self.RUN_LEN] == run) < self.snapshots:
+                    keep.add(n)
+                if run not in runs:
+                    runs.append(run)
+            elif run not in runs:
+                runs.append(run)
+                if len(runs) <= self.keep:
+                    keep.add(n)                           # newest snapshot of a recent drive
+        for old in names:
+            if old in keep:
                 continue
             for ext in ('.pbstream', '.pgm', '.yaml'):
                 try:
