@@ -57,7 +57,7 @@ navigator:
     max_angular: 0.30            # rad/s: slow turns keep the map and localization steady (LiDAR scans at ~7 Hz)
     # path following feel (smooth vs. tight):
     lookahead: 0.50              # m: bigger = smoother/straighter, smaller = follows curves tighter
-    k_angular: 1.0               # turning gain: lower if it weaves, higher if it's lazy
+    k_angular: 0.6               # turning gain: lower if it weaves, higher if it is lazy (1.0 until 20 Nov: steering never needs to be fast)
     linear_accel: 0.2            # m/s^2: smooth starts and stops
     angular_accel: 0.4           # rad/s^2: lower = gentler turn starts
     rotate_in_place_above: 1.2   # rad (~70 deg): turn on the spot above this heading error

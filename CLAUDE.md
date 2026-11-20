@@ -144,6 +144,7 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
   planner.fill_enclosed_holes (unseen patches <= 2 m², not touching the map edge, >= 60 % of their edge seen floor ->
   floor; scipy / cv2 / BFS labelling, cached). Door sills: follower pushes at 0.20 m/s for 0.5 s when driving
   forward but < 2 cm moved in 0.8 s (log 'door sill?'); door slow-down floor 50 % (35 %). test_quick_recovery.py (7).
+  Steering gain k_angular 0.6 (1.0): steering never needs to be fast; old ~/maps/tuning.json (max_linear 0.09) moved aside on the Pi.
 - 2026-11-20 (pots): flower pots/plants seen only by the ultrasonics: the robot stopped nose-to-pot and did not go
   round. Footprint = the 46 cm square (rear 0.39, half 0.23; robot_radius 0.30, robot_half_width 0.27, Nav2 footprint);
   back-up recovery: after an object (not a person) blocks the front, reverse `backup_m` 0.25 m at 0.08 m/s if the scan
