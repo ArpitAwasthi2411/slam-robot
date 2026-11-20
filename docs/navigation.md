@@ -236,3 +236,19 @@ ask; put a chair there: it must reroute without speaking).
   floor, `relative.py`) and stops at the first open spot outside it, facing the room. Best when the room is drawn on
   the map; without a room it stops ≥ 0.8 m from the place in open space. The LLM gets the same choice (`sides`).
   Not run on the robot yet.
+
+
+## Painting the map by hand (app Map tab → Paint)
+
+Route planning treats unexplored (grey) map cells as blocked. A map that saw a cabin only from its door therefore
+gives "no route" into it. On a **saved map** (Map → Use a saved map) an operator can paint:
+
+- **Drivable**: tap the corners of an unexplored room → Save. Unknown cells inside become drivable; scanned walls
+  and furniture inside stay walls. At most 150 m² per area.
+- **Wall**: tap points along something the LiDAR cannot see (a glass door, the stairs edge) → Save. Routes avoid it.
+- **Remove last** / **Clear all** undo the painting.
+
+The edits live in `~/maps/map_edits/<map>.json`, one file per saved map, and only change the grid the planner gets.
+The `.pbstream` (what the robot localizes with) is never touched, and the LiDAR/ultrasonic stops still work inside
+painted areas. While mapping there is nothing to paint on (the map is still changing). Code: `map_edits.py`,
+navigator `_map_worker`, tests `test_map_edits.py`.

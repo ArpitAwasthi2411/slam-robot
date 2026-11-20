@@ -60,6 +60,7 @@ from lidar_robot.follower import FollowerParams, PathFollower
 from lidar_robot.missions import Mission, MissionQueue, Stop
 from lidar_robot.planner import Planner, PlannerParams, path_length
 from lidar_robot.blockers import BlockerWatch
+from lidar_robot.map_edits import MapEdits
 from lidar_robot.recovery import RECOVERABLE, Recovery, describe, rule_decide, validate
 from lidar_robot.tuning import (TuningStore, apply_follower, follower_values, ranges_for_app,
                                 FOLLOWER_RANGES)
@@ -102,6 +103,8 @@ class NavigatorCore:
                  button_enabled=True, button_home_radius=0.6, button_gap_s=30.0, offline_home_s=120.0,
                  knowledge=None, chat=None, blockers=None):
         self.places = places
+        self.map_edits = MapEdits('')          # hand edits of the saved map (navigator sets the real one)
+        self.on_edits_changed = None           # navigator: rebuild the costmap at once
         self.planner = Planner(planner_params or PlannerParams())
         self.follower = PathFollower(follower_params or FollowerParams())
         self.tuning = TuningStore(tuning_path)           # saved Tuning Lab values override the YAML
@@ -504,6 +507,21 @@ class NavigatorCore:
                 return {'ok': True, **r}
             if t == 'find':
                 return self._find(req.get('q', ''))
+            if t in ('add_map_edit', 'delete_map_edit', 'clear_map_edits'):
+                if t == 'add_map_edit':
+                    rec = self.map_edits.add(str(req.get('kind', '')), req.get('pts'))
+                    self._log(f'map edit {rec["id"]}: {"drivable area" if rec["kind"] == "free" else "wall"} painted')
+                    out = {'ok': True, 'edit': rec}
+                elif t == 'delete_map_edit':
+                    self.map_edits.remove(req.get('id'))
+                    out = {'ok': True}
+                else:
+                    self.map_edits.clear()
+                    self._log('map edits cleared')
+                    out = {'ok': True}
+                if self.on_edits_changed:
+                    self.on_edits_changed()
+                return out
             if t == 'add_room':
                 rec = self.places.add_room(req['name'], req['polygon'], req.get('contents', []), req.get('aliases', []))
                 self._log(f'room saved: {rec["name"]} ({len(rec["contents"])} things)')
@@ -1779,6 +1797,7 @@ class NavigatorCore:
             'blocked': self.follower.blocked, 'preview': self.preview,
             'missions': self.queue.summary(), 'events': self.events[:15],
             'has_map': self.planner.has_map(),
+            'map_edits': self.map_edits.summary(),
             'explore': self._explore_status(),
             'footprint': self.footprint.as_list(), 'tight': self.tight_spots,
             'battery': self.battery.info(), 'docked': self.docked,

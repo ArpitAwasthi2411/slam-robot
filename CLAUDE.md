@@ -135,6 +135,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-20 (Paint): the 18 Nov map (Cse_department_aids) covers the department but saw the cabins only from their
+  doors, so no route into them. New app Map tool **Paint** (operator, saved map only): tap corners -> drivable area
+  (unknown cells inside become free, scanned walls stay), or points -> wall (10 cm). map_edits.py stores them in
+  ~/maps/map_edits/<map>.json (atomic writes, 100 edits / 40 points / 150 m² limits); navigator gets `map_file`
+  from bringup (localization only) and lays the edits over the grid before planning; the .pbstream is never
+  touched. Demo mode, APP_FEATURES T9, browser check, test_map_edits.py (7). Not run on the robot.
 - 2026-11-20 (later): department map finished but the end of the drive went bad (walls missing in the upper labs) and
   the one autosave of the run had been overwritten with it; no bag recorded. PeriodicMapSaver now writes every save as
   its own snapshot (<run>_s<HHMM>), keeps the newest 5 of the running drive + newest snapshot of the last 3 drives +

@@ -52,6 +52,7 @@ from lidar_robot.follower import FollowerParams
 from lidar_robot.footprint import Footprint
 from lidar_robot.speech import Speaker
 from lidar_robot.kinematics import compose_2d, yaw_from_quaternion
+from lidar_robot.map_edits import MapEdits, edits_path
 from lidar_robot.navigator_core import IDLE, NavigatorCore
 from lidar_robot.netcheck import network_ok
 from lidar_robot.places import PlaceStore
@@ -69,6 +70,7 @@ class NavigatorNode(Node):
         d('global_frame', 'map')
         d('base_frame', 'base_link')
         d('places_file', os.path.expanduser('~/maps/places.json'))
+        d('map_file', '')                 # the saved map in use (localization); its hand edits apply to planning
         d('rate', 20.0)
         d('robot_radius', 0.27)
         d('soft_radius', 0.60)
@@ -235,6 +237,13 @@ class NavigatorNode(Node):
         self.map_job = None                      # latest map waiting for the worker
         self.map_rebuild_idle_s = float(self.get_parameter('map_rebuild_idle_s').value)
         self.map_event = threading.Event()
+        self.map_force = False
+        # hand edits of the saved map (app Map tab -> Paint): planning only, the .pbstream is never touched
+        mf = str(self.get_parameter('map_file').value)
+        self.core.map_edits = MapEdits(edits_path(mf, os.path.dirname(self.get_parameter('places_file').value)))
+        self.core.on_edits_changed = self._edits_changed
+        if self.core.map_edits.enabled:
+            self.get_logger().info(f'map edits: {len(self.core.map_edits.edits)} from {self.core.map_edits.path}')
         threading.Thread(target=self._map_worker, daemon=True).start()
 
         self.tf_buffer = Buffer()
@@ -320,6 +329,10 @@ class NavigatorNode(Node):
         self.map_job = (i.width, i.height, i.resolution, o.x, o.y, msg.data)
         self.map_event.set()
 
+    def _edits_changed(self):
+        self.map_force = True                     # rebuild with the new edits at once, even when idle
+        self.map_event.set()
+
     def _map_worker(self):
         """Builds the costmap off the executor thread, then swaps it in (keeps the 20 Hz loop smooth)."""
         last_build = 0.0
@@ -329,11 +342,12 @@ class NavigatorNode(Node):
             # While mapping, the whole grid changes every few seconds. Rebuilding the costmap each time kept a core
             # busy at idle (17 Nov, with the Pi at 100 %). Idle: at most every map_rebuild_idle_s; driving: at once.
             idle = getattr(self.core, 'state', IDLE) == IDLE
-            wait = (self.map_rebuild_idle_s if idle else 0.0) - (time.monotonic() - last_build)
+            wait = (self.map_rebuild_idle_s if idle and not self.map_force else 0.0) - (time.monotonic() - last_build)
             if wait > 0:
                 time.sleep(min(wait, 1.0))
                 continue                          # the event stays set: look again
             self.map_event.clear()
+            self.map_force = False
             last_build = time.monotonic()
             job = self.map_job
             if job is None:
@@ -341,6 +355,8 @@ class NavigatorNode(Node):
             try:
                 planner = Planner(self.planner_params)
                 grid = GridMap.from_occupancy(*job)
+                with self.core_lock:                  # hand-painted free areas / walls (a copy; /map unchanged)
+                    grid = self.core.map_edits.apply(grid)
                 planner.set_map(grid)
                 with self.core_lock:
                     self.core.swap_planner(planner)

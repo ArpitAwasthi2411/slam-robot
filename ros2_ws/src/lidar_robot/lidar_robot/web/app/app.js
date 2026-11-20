@@ -736,6 +736,20 @@ function drawMap() {
       cx.textAlign = 'center';
     }
   }
+  // hand edits of the saved map (Paint tool): drivable areas in green, painted walls in magenta
+  const medits = (navs.map_edits && navs.map_edits.edits) || [], strong = T.tool === 'paint';
+  for (const e of medits) {
+    const P = e.pts || []; if (P.length < 2) continue;
+    cx.beginPath(); P.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
+    cx.save();
+    if (e.kind === 'free') {
+      cx.closePath(); cx.fillStyle = A(PAL.good, strong ? 0.22 : 0.10); cx.fill();
+      cx.setLineDash([3 * DPR, 3 * DPR]); cx.lineWidth = 1.4 * DPR; cx.strokeStyle = A(PAL.good, strong ? 0.85 : 0.45); cx.stroke();
+    } else {
+      cx.lineCap = cx.lineJoin = 'round'; cx.lineWidth = Math.max(3 * DPR, 0.10 * k); cx.strokeStyle = A(PAL.magenta, strong ? 0.9 : 0.6); cx.stroke();
+    }
+    cx.restore();
+  }
   // charging dock: a bracket in front of the docked robot (front docking), or behind it (old reverse docking)
   const dock = st.places && st.places.dock;
   if (dock) {
@@ -869,7 +883,7 @@ cv.addEventListener('wheel', e => { e.preventDefault(); view.scale = clamp(view.
 cv.addEventListener('contextmenu', e => e.preventDefault());
 
 // ------------------------------------------------------------------ map tools: goal (like RViz 2D Goal Pose), route, measure
-const T = { tool: null, drag: null, route: [], loop: false, sent: null, draw: null, corners: [] };
+const T = { tool: null, drag: null, route: [], loop: false, sent: null, draw: null, corners: [], paint: [], paintKind: 'free' };
 const DRAG_PX = 14;                                   // shorter drags = tap (no heading)
 const headingOf = d => d.px > DRAG_PX ? Math.atan2(d.b[1] - d.a[1], d.b[0] - d.a[0]) : null;
 const deg = r => `${Math.round(((r * 57.2958) % 360 + 360) % 360)}°`;
@@ -879,6 +893,7 @@ function setTool(tool) {
   T.drag = null;
   if (T.tool !== 'route') { T.route = []; }
   if (T.tool !== 'room') { T.corners = []; }
+  if (T.tool !== 'paint') { T.paint = []; }
   if (T.tool !== 'draw') closePath();
   if (T.tool && S.tab !== 'drive' && S.tab !== 'map') setTab('map');
   $$('.tool[data-tool]').forEach(b => { const on = b.dataset.tool === T.tool; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
@@ -906,6 +921,21 @@ function renderMode() {
         <button class="btn ghost" data-m="undo">Undo</button><button class="btn grad" data-m="room" ${n >= 3 ? '' : 'disabled'}>Save room</button>
         <button class="btn ghost" data-m="close" aria-label="Close">✕</button>`
       : `<span class="grow"><b>Room.</b> Tap its corners one by one (any shape), or drag a box for a square room.</span><button class="btn ghost" data-m="close">Done</button>`;
+  } else if (T.tool === 'paint') {
+    const me = (S.st && S.st.nav && S.st.nav.map_edits) || {}, edits = me.edits || [];
+    const n = T.paint.length, free = T.paintKind === 'free', need = free ? 3 : 2;
+    const kinds = `<button class="btn ${free ? 'grad' : 'ghost'}" data-m="pfree">Drivable</button><button class="btn ${free ? 'ghost' : 'grad'}" data-m="pwall">Wall</button>`;
+    if (!me.enabled) {
+      html = `<span class="grow"><b>Paint.</b> Works on a saved map: Map → Use a saved map first.</span><button class="btn ghost" data-m="close">Done</button>`;
+    } else if (n) {
+      html = `<span class="grow"><b>${n} point${n > 1 ? 's' : ''}.</b> ${free ? 'Tap the next corner' : 'Tap the next point along the wall'}${n >= need ? ', or save' : ''}.</span>
+        <button class="btn ghost" data-m="undo">Undo</button><button class="btn grad" data-m="psave" ${n >= need ? '' : 'disabled'}>Save</button>
+        <button class="btn ghost" data-m="close" aria-label="Close">✕</button>`;
+    } else {
+      html = `<span class="grow"><b>Paint ${free ? 'a drivable area' : 'a wall'}.</b> ${free ? 'Tap the corners of a room the robot has not explored.' : 'Tap points along a wall it cannot see (glass, stairs).'} ${edits.length} on ${esc(me.map || 'this map')}.</span>
+        ${kinds}${edits.length ? '<button class="btn ghost" data-m="plast">Remove last</button><button class="btn ghost" data-m="pclear">Clear all</button>' : ''}
+        <button class="btn ghost" data-m="close">Done</button>`;
+    }
   } else if (T.tool === 'locate') {
     html = `<span class="grow"><b>Set position.</b> Press where the robot really is, drag the way it faces.</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'measure') {
@@ -922,7 +952,29 @@ function renderMode() {
 async function modeAction(a) {
   haptic(10);
   if (a === 'close') { T.sent = null; setTool(T.tool); return; }
-  if (a === 'undo') { (T.tool === 'room' ? T.corners : T.route).pop(); renderMode(); mapDirty = true; return; }
+  if (a === 'undo') { (T.tool === 'room' ? T.corners : T.tool === 'paint' ? T.paint : T.route).pop(); renderMode(); mapDirty = true; return; }
+  if (a === 'pfree' || a === 'pwall') { T.paintKind = a === 'pfree' ? 'free' : 'wall'; T.paint = []; renderMode(); mapDirty = true; return; }
+  if (a === 'psave') {
+    try {
+      await nav({ type: 'add_map_edit', kind: T.paintKind, pts: T.paint.map(p => [+p[0].toFixed(2), +p[1].toFixed(2)]) });
+      toast(T.paintKind === 'free' ? 'Drivable area saved: routes can go there now' : 'Wall saved: routes avoid it'); haptic(20);
+      T.paint = []; renderMode(); mapDirty = true;
+    } catch (e) { toast(e.message, true); }
+    return;
+  }
+  if (a === 'plast' || a === 'pclear') {
+    const edits = ((S.st && S.st.nav && S.st.nav.map_edits) || {}).edits || [];
+    if (!edits.length) return;
+    const last = edits.reduce((m, e) => (e.id > m.id ? e : m), edits[0]);
+    const ok = await confirmBox(a === 'plast' ? 'Remove the last painted area?' : `Remove all ${edits.length} painted areas?`,
+      'Only the hand edits go. The scanned map stays as it is.', 'Remove');
+    if (!ok) return;
+    try {
+      await nav(a === 'plast' ? { type: 'delete_map_edit', id: last.id } : { type: 'clear_map_edits' });
+      toast(a === 'plast' ? 'Last painted area removed' : 'All painted areas removed'); mapDirty = true; renderMode();
+    } catch (e) { toast(e.message, true); }
+    return;
+  }
   if (a === 'room') { await saveRoom(T.corners.map(p => [+p[0].toFixed(2), +p[1].toFixed(2)])); return; }
   if (a === 'cancel') {
     try { await nav({ type: 'cancel' }); toast('Goal canceled'); } catch (e) { toast(e.message, true); }
@@ -986,6 +1038,12 @@ async function saveRoom(polygon) {
 }
 async function toolRelease(d) {
   if (T.tool === 'draw') { await finishDrawing(d.pts || []); return; }
+  if (T.tool === 'paint') {
+    const me = (S.st && S.st.nav && S.st.nav.map_edits) || {};
+    if (!me.enabled) { toast('Paint works on a saved map: Map → Use a saved map first', true); return; }
+    if (T.paint.length >= 40) { toast('40 points at most', true); return; }
+    T.paint.push([d.a[0], d.a[1]]); haptic(12); renderMode(); mapDirty = true; return;
+  }
   if (T.tool === 'room') {
     if (d.px <= DRAG_PX || T.corners.length) {      // a tap = one corner of a room of any shape
       if (T.corners.length >= 40) { toast('40 corners at most', true); return; }
@@ -1053,6 +1111,15 @@ function drawTools() {
     if (T.corners.length > 2) { cx.closePath(); cx.fill(); }
     cx.stroke(); cx.restore();
     T.corners.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); cx.fillStyle = i ? PAL.orange : PAL.teal; cx.beginPath(); cx.arc(x, y, 6 * DPR, 0, 7); cx.fill(); });
+  }
+  // paint points tapped so far: an area closes back to the first point, a wall stays a line
+  if (T.paint.length) {
+    const free = T.paintKind === 'free', col = free ? PAL.good : PAL.magenta;
+    cx.save(); cx.strokeStyle = col; cx.fillStyle = A(col, 0.15); cx.lineWidth = (free ? 2 : 4) * DPR; if (free) cx.setLineDash([6 * DPR, 4 * DPR]);
+    cx.beginPath(); T.paint.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
+    if (free && T.paint.length > 2) { cx.closePath(); cx.fill(); }
+    cx.stroke(); cx.restore();
+    T.paint.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); cx.fillStyle = i ? col : PAL.teal; cx.beginPath(); cx.arc(x, y, 6 * DPR, 0, 7); cx.fill(); });
   }
   // drawn path: live stroke, then the checked path with blocked stretches in red
   const glowLine = (pts, color, w, dash) => {

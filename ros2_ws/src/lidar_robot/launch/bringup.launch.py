@@ -206,7 +206,9 @@ def _setup(context):
             package='lidar_robot', executable='navigator', name='navigator', output='screen', **again,
             parameters=[params, {'global_frame': goal_frame, 'places_file': places,
                                  'require_localization_confirm': slam and slam_mode == 'localization',
-                                 'use_vision': vision, 'nav_backend': 'nav2' if nav2 else 'pathik'}]))
+                                 'use_vision': vision, 'nav_backend': 'nav2' if nav2 else 'pathik',
+                                 # hand edits (app Paint tool) belong to one saved map: none while mapping
+                                 'map_file': map_file if (slam and slam_mode == 'localization') else ''}]))
     if nav2:
         # Nav2's speed commands go to cmd_vel_nav2; the navigator checks them and publishes /cmd_vel itself
         n2 = os.path.join(share, 'config', 'nav2_params.yaml')

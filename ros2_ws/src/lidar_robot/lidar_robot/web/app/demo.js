@@ -126,7 +126,7 @@ const places = {
   ].map(([name, polygon, contents]) => ({ name, polygon, contents, aliases: [] })),
 };
 let nextId = 1;
-const N = { state: 'IDLE', message: 'ready (demo robot)', active: null, queue: [], history: [], events: [], path: [], preview: null,
+const N = { edits: [], editsVersion: 0, state: 'IDLE', message: 'ready (demo robot)', active: null, queue: [], history: [], events: [], path: [], preview: null,
   last_failure: null, dwellUntil: 0, confirmUntil: 0, docked: false, dockRev: false, schedules: [], log: [], bat: 74, blockedSince: 0 };
 function log(text, level = 'info') { N.events.unshift({ t: Date.now() / 1000, text, level }); N.events.length = Math.min(N.events.length, 40); }
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -503,6 +503,14 @@ function navReq(q) {
     case 'add_room': { const list = c => (typeof c === 'string' ? c.split(',') : (c || [])).map(s => s.trim()).filter(Boolean); places.rooms = places.rooms.filter(r => norm(r.name) !== norm(q.name)); const rec = { name: q.name.trim(), polygon: q.polygon, contents: list(q.contents), aliases: list(q.aliases) }; places.rooms.push(rec); places.version++; log(`room saved: ${rec.name}`); return { ok: true, room: rec }; }
     case 'update_room': { const r = places.rooms.find(x => norm(x.name) === norm(q.name)); if (!r) throw new Error(`no room called "${q.name}"`); const list = c => (typeof c === 'string' ? c.split(',') : (c || [])).map(s => s.trim()).filter(Boolean); if (q.contents != null) r.contents = list(q.contents); if (q.aliases != null) r.aliases = list(q.aliases); if (q.new_name) r.name = q.new_name; places.version++; return { ok: true, room: r }; }
     case 'delete_room': places.rooms = places.rooms.filter(r => norm(r.name) !== norm(q.name)); places.version++; return { ok: true };
+    case 'add_map_edit': {
+      const need = q.kind === 'free' ? 3 : q.kind === 'wall' ? 2 : 99;
+      if (!Array.isArray(q.pts) || q.pts.length < need) return { ok: false, error: q.kind === 'free' ? 'an area needs 3 corners' : 'a wall needs 2 points' };
+      const rec = { id: N.edits.reduce((m, e) => Math.max(m, e.id), 0) + 1, kind: q.kind, pts: q.pts, at: Math.round(now()) };
+      N.edits.push(rec); N.editsVersion++; log(`map edit ${rec.id}: ${rec.kind === 'free' ? 'drivable area' : 'wall'} painted`); return { ok: true, edit: rec };
+    }
+    case 'delete_map_edit': N.edits = N.edits.filter(e => e.id !== +q.id); N.editsVersion++; return { ok: true };
+    case 'clear_map_edits': N.edits = []; N.editsVersion++; log('map edits cleared'); return { ok: true };
     case 'schedule_add': { if (!/^\d{1,2}:\d{2}$/.test(q.at || '')) throw new Error('time must look like 09:30'); const days = (q.days || []).slice().sort(); const rec = { id: q.id || (Math.max(0, ...N.schedules.map(s => s.id)) + 1), name: q.name || q.action.name || q.action.text || q.action.type, at: q.at, days, action: q.action, enabled: q.enabled !== false, last: null }; N.schedules = N.schedules.filter(s => s.id !== rec.id).concat(rec).sort((a, b) => a.at.localeCompare(b.at)); return { ok: true, schedule: rec, schedules: schedSummary() }; }
     case 'schedule_delete': N.schedules = N.schedules.filter(s => s.id !== +q.id); return { ok: true, schedules: schedSummary() };
     case 'schedule_enable': N.schedules.forEach(s => { if (s.id === +q.id) s.enabled = !!q.on; }); return { ok: true, schedules: schedSummary() };
@@ -566,7 +574,7 @@ function navStatus() {
     path: decim(rem), distance: d == null ? null : +d.toFixed(2), eta_s: d == null ? null : Math.round(d / 0.16),
     blocked: false, preview: N.state === 'DRIVING' ? null : N.preview,
     missions: { active: summary(m), queue: N.queue.map(summary), history: N.history.slice(0, 8).map(summary) },
-    events: N.events.slice(0, 15), has_map: true, explore: { active: false, state: 'off' },
+    events: N.events.slice(0, 15), has_map: true, map_edits: { enabled: true, map: 'demo_floor', edits: N.edits, version: N.editsVersion, error: null }, explore: { active: false, state: 'off' },
     footprint: FP, tight: [], docked: N.docked, room: room ? room.name : null,
     battery: { v: +(9.9 + 2.7 * pct / 100).toFixed(2), pct, a: N.docked ? -1.5 : (Math.abs(R.v) > 0.01 ? 1.6 : 0.45), charging: N.docked, level: N.docked ? 'charging' : pct < 12 ? 'critical' : pct < 25 ? 'low' : 'ok', src: 'demo' },
     confirm: N.state === 'CONFIRM' && st ? { label: st.label, left_s: Math.max(0, Math.round(N.confirmUntil - now())) } : null,

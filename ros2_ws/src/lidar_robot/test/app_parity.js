@@ -74,7 +74,7 @@ async function run(browser, role, theme) {
   await tab(p, 'map');
   if (await visible(p, '#m-why-x')) await p.click('#m-why-x');
   for (const s of ['#map', '#sm-where', '#m-home', '#m-follow', '.tool[data-tool=measure]', '#sheet-grip']) check(await visible(p, s), `${tag}: map ${s}`);
-  for (const t of ['goal', 'draw', 'route', 'room', 'locate']) check((await visible(p, `.tool[data-tool=${t}]`)) === op, `${tag}: map tool ${t} role gating`);
+  for (const t of ['goal', 'draw', 'route', 'room', 'paint', 'locate']) check((await visible(p, `.tool[data-tool=${t}]`)) === op, `${tag}: map tool ${t} role gating`);
   for (const s of ['#x-go', '#d-savemap']) check((await visible(p, s)) === op, `${tag}: map ${s} role gating`);
   await p.click('.tool[data-tool=measure]');
   check(await visible(p, '#m-mode'), `${tag}: measure mode bar (T4)`);
@@ -88,6 +88,14 @@ async function run(browser, role, theme) {
     await p.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.42);
     await p.waitForTimeout(200);
     check((await p.textContent('#m-mode')).includes('1 point'), `${tag}: route tool adds a point (T3)`);
+    await p.click('#m-mode [data-m=close]');
+    // Paint (T9): three taps -> a drivable area saved on the demo map, then removed again
+    await p.click('.tool[data-tool=paint]');
+    check((await p.textContent('#m-mode')).includes('drivable area'), `${tag}: paint mode bar (T9)`);
+    for (const [fx, fy] of [[0.45, 0.35], [0.65, 0.35], [0.6, 0.5]]) { await p.mouse.click(box.x + box.width * fx, box.y + box.height * fy); await p.waitForTimeout(150); }
+    check((await p.textContent('#m-mode')).includes('3 points'), `${tag}: paint adds corners (T9)`);
+    await p.click('#m-mode [data-m=psave]'); await p.waitForTimeout(900);
+    check(await p.evaluate(() => /Drivable area saved/.test(document.querySelector('#toast').textContent)), `${tag}: paint saved (T9)`);
     await p.click('#m-mode [data-m=close]');
   }
 

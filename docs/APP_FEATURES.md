@@ -87,6 +87,7 @@ shrink to a strip, Android back button (dialog → sub-page → Home), phone fon
 | T6 | Locate / set position: press + drag heading → confirm → relocalize | O | `POST /api/relocalize` || Map / Drive tab: tool rail → Locate (operator) |
 | T7 | Home button: go home | all | `nav go_home` || Map / Drive tab: tool rail → Home; also Home → Come back |
 | T8 | Follow button | all | – || Map / Drive tab: tool rail → Follow |
+| T9 | Paint (saved map only): tap corners → drivable area, or points → wall; Undo, Save, Remove last, Clear all; planning only, the .pbstream is never changed | O | `nav add_map_edit`, `delete_map_edit`, `clear_map_edits` || Map / Drive tab: tool rail → Paint (operator) |
 
 ## 5. Drive tab (operator)
 
