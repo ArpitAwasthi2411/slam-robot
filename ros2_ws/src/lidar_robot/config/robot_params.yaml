@@ -18,7 +18,7 @@ goal_controller:
     global_frame: map
     base_frame: base_link
     rate: 20.0
-    max_linear: 0.20
+    max_linear: 0.22
     max_angular: 0.9
     min_linear: 0.04
     min_angular: 0.25
@@ -35,7 +35,7 @@ dashboard:
     port: 8080
     global_frame: map
     fallback_frame: odom
-    max_linear: 0.20             # joystick top speed (m/s)
+    max_linear: 0.22             # joystick top speed (m/s); 0.20 until 20 Nov
     max_angular: 0.40            # joystick top turn rate (rad/s): turn slower than you drive, faster turns smear the SLAM map
     scan_decimation: 3
     require_login: true          # never false when Tailscale Funnel is on (the API refuses public requests then)
@@ -51,7 +51,7 @@ navigator:
     robot_radius: 0.27           # keep-out radius used by the planner (m)
     soft_radius: 0.60            # prefer this much clearance where possible (corridor centre)
     allow_unknown: false         # plan only through mapped free space
-    max_linear: 0.18
+    max_linear: 0.20             # m/s on trips; 0.18 until 20 Nov (+10 %)
     max_angular: 0.30            # rad/s: slow turns keep the map and localization steady (LiDAR scans at ~7 Hz)
     # path following feel (smooth vs. tight):
     lookahead: 0.50              # m: bigger = smoother/straighter, smaller = follows curves tighter

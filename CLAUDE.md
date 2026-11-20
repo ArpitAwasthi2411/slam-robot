@@ -135,6 +135,9 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-20: lab 19 Nov ended well: right encoder fixed, Spin tests -> gyro_scale 1.043 (repo), department map built
+  cleanly on the Pi until the battery died (no warning: INA226 unplugged). Speeds +10 %: navigator 0.20, joystick and
+  goal_controller 0.22 m/s; turn rates unchanged (map quality). Next: full charge, map in one go, Freeze.
 - 2026-11-19 (lab): the robot ran OLD code: robot.service sourced ~/ros2_ws/install while the Pi builds in
   ~/slam-robot/ros2_ws (so slam_host:=laptop was ignored, the Pi ran its own Cartographer). robot.service now
   sources ~/slam-robot/ros2_ws first, then ~/ros2_ws, and logs which. Copy it to /etc/systemd/system once.
