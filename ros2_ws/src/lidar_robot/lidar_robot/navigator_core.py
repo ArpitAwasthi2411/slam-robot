@@ -1138,12 +1138,15 @@ class NavigatorCore:
         if event in ('BLOCKED', 'OFF_PATH'):
             blocker = None
             if event == 'BLOCKED':
-                self.remember_us(now)
-                self._us_watch_until = now + self.us_watch_s
                 ended = self.blockers.replanned(now) if self.follower.why_blocked == 'front' else None
                 if ended and ended['kind'] in ('person', 'object'):
                     blocker = ended['kind']
                     self.mlog.bump(m, 'blocked_' + blocker)
+                if blocker != 'person':
+                    # a person walks away: their ultrasonic echo is not a wall to remember for 60 s (20 Nov: the
+                    # robot kept going round a person who had already stepped aside). The live scan still has them.
+                    self.remember_us(now)
+                    self._us_watch_until = now + self.us_watch_s
             self.mlog.bump(m, 'replans')
             self._replans += 1
             if self._replans > self.max_replans:
@@ -1160,7 +1163,8 @@ class NavigatorCore:
             self.follower.clear()
             self._set(PLANNING, f'{why}, replanning')
             return 0.0, 0.0
-        if (self.follower.blocked or now < self._us_watch_until) and now >= self._us_next and self.us_world:
+        if ((self.follower.blocked or now < self._us_watch_until) and now >= self._us_next and self.us_world
+                and self.blockers.kind != 'person'):
             # while stopped, and while going round after a block, every sensor that sees the thing adds to
             # its outline (e.g. the right sensor sees the corner after a small turn left -> stay left)
             self._us_next = now + 0.5

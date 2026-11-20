@@ -158,3 +158,26 @@ def test_core_without_camera_keeps_the_old_timing(tmp_path):
     assert nav._replans == 0 and said == ['Excuse me, may I pass?']
     bot.drive(1.6, 0.2)
     assert nav._replans == 1
+
+
+def test_core_does_not_remember_a_person_as_an_obstacle(tmp_path):
+    """20 Nov: after "may I pass?" the robot was slow to go on and went round a person who had already left:
+    their ultrasonic echo was kept as an obstacle for 60 s. With the camera saying "person", it is not kept."""
+    nav, bot = start_trip(tmp_path)
+    x, y, yaw = bot.pose
+    echo = [[[x + 0.4 * math.cos(yaw), y + 0.4 * math.sin(yaw)]]]
+    nav.update_us_world(echo)
+    bot.drive(3.0, 0.2, PERSON)
+    assert nav.blockers.kind == 'person' and nav.us_memory() == []
+    nav.update_us_world([])
+    said = bot.drive(1.0, 5.0, NOBODY)                     # they stepped aside
+    assert said == ['Thank you.'] and nav._replans == 0 and nav.us_memory() == []
+    assert nav.follower._v > 0.05 or nav.state == 'DRIVING'
+
+
+def test_core_still_remembers_an_object_seen_only_by_the_ultrasonics(tmp_path):
+    nav, bot = start_trip(tmp_path)
+    x, y, yaw = bot.pose
+    nav.update_us_world([[[x + 0.4 * math.cos(yaw), y + 0.4 * math.sin(yaw)]]])
+    bot.drive(2.0, 0.2, NOBODY)                            # an object: rerouted, and its echo is kept
+    assert nav._replans == 1 and nav.us_memory()

@@ -135,6 +135,10 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-20 (camera on): after "may I pass?" the robot was slow to go on and went round people who had left: their
+  ultrasonic echo was remembered as an obstacle for 60 s. navigator_core: no ultrasonic memory while the camera says
+  the blocker is a person (live scan still sees them); objects are still remembered. test_blockers.py (+2).
+  Camera node switched on again (ROBOT_ARGS vision:=true) for person-vs-object blocking.
 - 2026-11-20 (Paint): the 18 Nov map (Cse_department_aids) covers the department but saw the cabins only from their
   doors, so no route into them. New app Map tool **Paint** (operator, saved map only): tap corners -> drivable area
   (unknown cells inside become free, scanned walls stay), or points -> wall (10 cm). map_edits.py stores them in
