@@ -21,9 +21,9 @@ SQRT2 = math.sqrt(2.0)
 @dataclass
 class PlannerParams:
     plan_resolution: float = 0.10     # m per planning cell
-    robot_radius: float = 0.27        # m: hard keep-out (half of the 440 mm chassis + margin)
-    soft_radius: float = 0.60         # m: prefer staying this far from walls
-    soft_weight: float = 6.0          # how strongly to prefer the middle of corridors
+    robot_radius: float = 0.30        # m: hard keep-out (half of the 46 cm square body + margin)
+    soft_radius: float = 1.00         # m: prefer staying this far from walls (middle of corridors)
+    soft_weight: float = 10.0         # how strongly to prefer the middle of corridors
     occupied_thresh: int = 65
     allow_unknown: bool = False
     snap_radius: float = 0.6          # m: move start/goal out of keep-out zones by up to this
@@ -264,20 +264,27 @@ class Planner:
         """Line-of-sight smoothing that refuses to cut through high-cost (near-wall) cells."""
         if len(cells) < 3:
             return cells
+        # cost of the A* route up to each cell: a shortcut may not cost more than the stretch it replaces, so it
+        # never pulls the route out of the middle of a corridor towards the wall (20 Nov: pots along the walls)
+        acc = [0.0]
+        for (xa, ya), (xb, yb) in zip(cells, cells[1:]):
+            acc.append(acc[-1] + math.hypot(xb - xa, yb - ya) * cost[yb, xb])
         out = [cells[0]]
         i = 0
         while i < len(cells) - 1:
             j = len(cells) - 1
-            while j > i + 1 and not self._line_ok(cost, cells[i], cells[j]):
+            while j > i + 1 and not self._line_ok(cost, cells[i], cells[j], budget=(acc[j] - acc[i]) * 1.02 + 0.5):
                 j -= 1
             out.append(cells[j])
             i = j
         return out
 
-    def _line_ok(self, cost, a, b, max_cost=None):
+    def _line_ok(self, cost, a, b, max_cost=None, budget=None):
         max_cost = max_cost or (1.0 + 0.5 * self.p.soft_weight)
         (x0, y0), (x1, y1) = a, b
         n = max(abs(x1 - x0), abs(y1 - y0))
+        step = math.hypot(x1 - x0, y1 - y0) / n if n else 0.0
+        total = 0.0
         for k in range(n + 1):
             t = k / n if n else 0
             x = int(round(x0 + (x1 - x0) * t))
@@ -285,6 +292,10 @@ class Planner:
             c = cost[y, x]
             if not math.isfinite(c) or c > max_cost:
                 return False
+            if budget is not None and k:
+                total += step * c
+                if total > budget:
+                    return False
         return True
 
 

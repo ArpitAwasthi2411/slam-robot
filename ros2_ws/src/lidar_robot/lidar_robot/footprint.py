@@ -22,8 +22,8 @@ from dataclasses import dataclass
 @dataclass
 class Footprint:
     front: float = 0.07          # m from the axle to the front bumper
-    rear: float = 0.37           # m from the axle to the back edge
-    half_width: float = 0.21     # m from the centre line to the side
+    rear: float = 0.39           # m from the axle to the back edge
+    half_width: float = 0.23     # m from the centre line to the side
     margin: float = 0.04         # m extra keep-out used by the checks
 
     @property

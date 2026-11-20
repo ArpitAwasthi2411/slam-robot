@@ -54,9 +54,9 @@ def _add_bench(b, t0):
 
 
 SCENARIOS = [
-    dict(name='person_in_corridor', what='a person stands in the corridor for 25 s',
+    dict(name='person_in_corridor', what='a person stands in the corridor for 40 s',
          req={'type': 'goto_place', 'name': 'Store'},
-         trouble=lambda b, t0: b.blocks.append((5.0, 4.25, 0.55, t0 + 25.0)),
+         trouble=lambda b, t0: b.blocks.append((5.0, 4.25, 0.55, t0 + 40.0)),
          answer='retry', good=lambda b, ms: ms[0].state == 'DONE' and _near(b, *place('Store')[1:3])),
     dict(name='trolley_in_door', what='a trolley parked for good in the Lab 2 door; trip Lab 2 then HOD office',
          req={'type': 'command', 'text': 'go to lab 2 then hod office'},

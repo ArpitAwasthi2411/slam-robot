@@ -21,8 +21,8 @@
   <xacro:arg name="camera_y" default="0.0"/>
   <xacro:arg name="camera_z" default="0.20"/>
   <xacro:arg name="footprint_front" default="0.07"/>
-  <xacro:arg name="footprint_rear" default="0.37"/>
-  <xacro:arg name="footprint_half_width" default="0.21"/>
+  <xacro:arg name="footprint_rear" default="0.39"/>
+  <xacro:arg name="footprint_half_width" default="0.23"/>
   <xacro:arg name="wheel_radius" default="0.0625"/>
   <xacro:arg name="wheel_separation" default="0.294"/>
 

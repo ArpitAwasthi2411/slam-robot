@@ -72,8 +72,10 @@ class NavigatorNode(Node):
         d('places_file', os.path.expanduser('~/maps/places.json'))
         d('map_file', '')                 # the saved map in use (localization); its hand edits apply to planning
         d('rate', 20.0)
-        d('robot_radius', 0.27)
-        d('soft_radius', 0.60)
+        d('robot_radius', 0.30)
+        d('soft_radius', 1.00)
+        d('soft_weight', 10.0)
+        d('backup_m', 0.25)
         d('allow_unknown', False)
         d('max_linear', 0.22)
         d('max_angular', 0.6)
@@ -87,11 +89,11 @@ class NavigatorNode(Node):
         d('slow_distance', 0.80)
         d('blocked_after', 5.0)            # s stopped by an obstacle before planning around it
         d('us_memory_s', 60.0)             # s an ultrasonic-only blocker stays on the plan
-        d('robot_half_width', 0.25)
+        d('robot_half_width', 0.27)
         # the body: a rectangle around the drive axle (base_link). MEASURE YOUR ROBOT:
         d('footprint_front', 0.07)         # axle -> front bumper (m)
-        d('footprint_rear', 0.37)          # axle -> back edge (m)
-        d('footprint_half_width', 0.21)    # centre line -> side (m)
+        d('footprint_rear', 0.39)          # axle -> back edge (m)
+        d('footprint_half_width', 0.23)    # centre line -> side (m)
         d('footprint_margin', 0.04)        # extra keep-out (m)
         d('battery_cells', 3)
         d('battery_low_pct', 25)
@@ -181,6 +183,7 @@ class NavigatorNode(Node):
         self.chat.voice_gender = 'male' if 'pratham' in str(g('speech_voice_hi')) else 'female'
         self.planner_params = PlannerParams(robot_radius=float(g('robot_radius')),
                                             soft_radius=float(g('soft_radius')),
+                                            soft_weight=float(g('soft_weight')),
                                             allow_unknown=bool(g('allow_unknown')))
         self.speaker = Speaker(enabled=bool(g('speech')), voice=str(g('speech_voice')), engine=str(g('speech_engine')),
                                volume=float(g('speech_volume')), voice_en=str(g('speech_voice_en')),
@@ -227,6 +230,7 @@ class NavigatorNode(Node):
             button_gap_s=float(g('button_gap_s')), offline_home_s=float(g('offline_home_s')))
         self.core.localized = not bool(g('require_localization_confirm'))
         self.core.us_memory_s = float(g('us_memory_s'))
+        self.core.backup_m = float(g('backup_m'))
         self.vision = VisionGate(enabled=bool(g('use_vision')), timeout_s=float(g('vision_timeout')))
         self.create_subscription(String, 'vision/decision', self._on_vision, 10)
         self.create_subscription(String, 'vision/dock_marker', self._on_marker, 10)

@@ -18,7 +18,7 @@ goal_controller:
     global_frame: map
     base_frame: base_link
     rate: 20.0
-    max_linear: 0.22
+    max_linear: 0.30             # m/s; 0.22 until 20 Nov
     max_angular: 0.9
     min_linear: 0.04
     min_angular: 0.25
@@ -26,7 +26,7 @@ goal_controller:
     yaw_tolerance: 0.08
     stop_distance: 0.38          # measured from robot centre (440 mm chassis)
     slow_distance: 0.75
-    robot_half_width: 0.25         # 440 mm chassis + wheels
+    robot_half_width: 0.27         # 460 mm square body (0.23) + 4 cm
     front_cone_deg: 25.0
     goal_timeout: 120.0
 
@@ -35,7 +35,7 @@ dashboard:
     port: 8080
     global_frame: map
     fallback_frame: odom
-    max_linear: 0.22             # joystick top speed (m/s); 0.20 until 20 Nov
+    max_linear: 0.30             # joystick top speed (m/s): Drive slider 60 % = 0.18 m/s; 0.22 until 20 Nov
     max_angular: 0.40            # joystick top turn rate (rad/s): turn slower than you drive, faster turns smear the SLAM map
     scan_decimation: 3
     require_login: true          # never false when Tailscale Funnel is on (the API refuses public requests then)
@@ -48,10 +48,12 @@ navigator:
     global_frame: map
     base_frame: base_link
     rate: 20.0
-    robot_radius: 0.27           # keep-out radius used by the planner (m)
-    soft_radius: 0.60            # prefer this much clearance where possible (corridor centre)
+    robot_radius: 0.30           # keep-out radius used by the planner (m): half the 46 cm body + 7 cm
+    soft_radius: 1.00            # prefer this much clearance where possible: routes run down the middle of
+                                 # corridors up to 2 m wide, away from flower pots along the walls (0.60 until 20 Nov)
+    soft_weight: 10.0            # how strongly (6 until 20 Nov)
     allow_unknown: false         # plan only through mapped free space
-    max_linear: 0.20             # m/s on trips; 0.18 until 20 Nov (+10 %)
+    max_linear: 0.25             # m/s on trips; 0.20 until 20 Nov (App Tuning -> Cruise speed to change)
     max_angular: 0.30            # rad/s: slow turns keep the map and localization steady (LiDAR scans at ~7 Hz)
     # path following feel (smooth vs. tight):
     lookahead: 0.50              # m: bigger = smoother/straighter, smaller = follows curves tighter
@@ -64,16 +66,18 @@ navigator:
     slow_distance: 0.80
     blocked_after: 5.0           # s stopped by an obstacle before planning a route around it (people usually move by then)
     us_memory_s: 60.0            # s an obstacle seen only by the ultrasonics stays on the plan (LiDAR can't see low boxes)
+    backup_m: 0.25               # after an object stops the robot: back up this far (only if the LiDAR sees the
+                                 # rear clear) so it has room to turn and go round the side; 0 = off
     us_wall_tol: 0.12            # m: ultrasonic echoes this close to a mapped wall (door frames) never stop or block the robot
-    robot_half_width: 0.25
+    robot_half_width: 0.27
     front_cone_deg: 25.0
     # The body shape (v2.4). base_link = centre of the drive axle. MEASURE these on your robot:
     #   front = axle -> front bumper, rear = axle -> back edge, half_width = centre line -> side
     # The planner checks the whole rectangle along every route, and the follower refuses a turn on
     # the spot that would swing the back into something (it does a short 3-point turn instead).
     footprint_front: 0.07
-    footprint_rear: 0.37
-    footprint_half_width: 0.21
+    footprint_rear: 0.39         # 46 x 46 cm square body; axle 7 cm from the front assumed: MEASURE
+    footprint_half_width: 0.23
     footprint_margin: 0.04       # extra keep-out (m)
     battery_cells: 3             # 3S Li-ion: 12.6 V full, ~10 V empty
     battery_low_pct: 25          # go and charge after the current task

@@ -43,7 +43,8 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 - New (Oct 26): Camera Module 3 Wide (CSI), USB sound card + lapel mic + USB-powered speaker.
   Push-to-talk button: Pi pin 11 (GPIO17) ↔ pin 9 (GND).
 - Every wire: `hardware/CONNECTIONS_esp32s3.md`. Classic pins: `hardware/wiring_classic_esp32.md`.
-- Footprint (base_link = axle): front 0.07, rear 0.37, half-width 0.21, margin 0.04 m: **not measured yet**.
+- Footprint (base_link = axle): 46 x 46 cm square body (20 Nov): front 0.07, rear 0.39, half-width 0.23, margin 0.04 m;
+  the axle position (7 cm from the front) is **assumed: measure it**.
 
 ## Software map
 
@@ -86,7 +87,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Next lab day: **`docs/STEPS_lab_19nov.md`** (laptop mapping of the department, encoder check, CPU report); INA226/dock in `docs/STEPS_lab_18nov.md`; before that `docs/STEPS_lab_16nov.md` (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-11-17**
+**Last updated: 2026-11-20**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -135,6 +136,13 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-20 (pots): flower pots/plants seen only by the ultrasonics: the robot stopped nose-to-pot and did not go
+  round. Footprint = the 46 cm square (rear 0.39, half 0.23; robot_radius 0.30, robot_half_width 0.27, Nav2 footprint);
+  back-up recovery: after an object (not a person) blocks the front, reverse `backup_m` 0.25 m at 0.08 m/s if the scan
+  sees 30 cm behind the body empty (no scan = no reversing), remember the echoes again, then replan round the side;
+  corridor centre: soft_radius 1.0 m, soft_weight 10, and path shortcuts may not cost more than the A* stretch they
+  replace (they used to pull routes back towards the wall). Speeds: joystick + goal_controller 0.30 m/s (Drive 60 %
+  = 0.18), trips 0.25. eval_recovery person stands 40 s (backing up gave the 25 s person time to leave). test_backup.py (5).
 - 2026-11-20 (camera on): after "may I pass?" the robot was slow to go on and went round people who had left: their
   ultrasonic echo was remembered as an obstacle for 60 s. navigator_core: no ultrasonic memory while the camera says
   the blocker is a person (live scan still sees them); objects are still remembered. test_blockers.py (+2).

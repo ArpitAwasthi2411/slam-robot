@@ -132,6 +132,12 @@ class NavigatorCore:
         self.us_memory_s = 60.0
         self.us_depth_m = 0.3              # assumed depth of an ultrasonic-only blocker
         self.us_margin_m = 0.15            # extra berth around it (on top of the robot radius)
+        # back-up recovery (20 Nov: flower pots and plants seen only by the ultrasonics). Stopped nose-to-pot the
+        # robot has no room to turn and its start sits inside the pot's keep-out, so it backs up a little (only
+        # when the LiDAR sees the space behind it empty) and then plans round the side.
+        self.backup_m = 0.25
+        self.backup_speed = 0.08
+        self._backup = None
         self.preview = None
         self.events = []
         self.estopped = False
@@ -1076,6 +1082,10 @@ class NavigatorCore:
                 return 0.0, 0.0
             self._set(PLANNING, f'next stop: {m.current.label}')
 
+        if self._backup is not None:
+            r = self._backing_up(m, pose, now)
+            if r is not None:
+                return r
         if self.state in (IDLE, PLANNING, WAITING) or not self.follower.path:
             if now < self._retry_at:
                 return 0.0, 0.0
@@ -1152,6 +1162,9 @@ class NavigatorCore:
             if self._replans > self.max_replans:
                 self._fail('BLOCKED', f'path to {m.current.label} stays blocked after {self.max_replans} new routes')
                 return 0.0, 0.0
+            if event == 'BLOCKED' and blocker != 'person' and self.backup_m > 0 \
+                    and getattr(self.follower, 'why_blocked', '') == 'front':
+                self._backup = {'mid': m.id, 'x': pose[0], 'y': pose[1], 't0': now, 'said': False}
             why = 'obstacle in the way' if event == 'BLOCKED' else 'drifted off the path'
             if event == 'BLOCKED' and getattr(self.follower, 'why_blocked', '') == 'nav2':
                 why = getattr(self.follower, 'nav2_note', '') or 'Nav2 could not continue'
@@ -1242,6 +1255,42 @@ class NavigatorCore:
         self._log(f'route to {stop.label}: {path_length(path):.1f} m' +
                   (f' ({self.planner.last_note})' if self.planner.last_note else ''))
         return 0.0, 0.0
+
+    def rear_clear(self, depth=0.30):
+        """True when the scan sees nothing in a box `depth` deep behind the body. No scan at all = not clear."""
+        if not self.scan_base:
+            return False
+        rear = -self.footprint.rear
+        hw = self.footprint.half_width + 0.03
+        return not any(rear - depth < x < rear + 0.02 and abs(y) < hw for x, y in self.scan_base)
+
+    def _backing_up(self, m, pose, now):
+        """Back straight up after an object stopped the robot, then let the normal replan go round it.
+        Returns (v, w) while backing, None when done (or not possible)."""
+        b = self._backup
+        if b['mid'] != m.id:
+            self._backup = None
+            return None
+        moved = math.hypot(pose[0] - b['x'], pose[1] - b['y'])
+        done = moved >= self.backup_m - 0.01
+        timeout = now - b['t0'] > self.backup_m / max(0.03, self.backup_speed) + 3.0
+        clear = self.rear_clear(0.30)
+        if done or timeout or not clear:
+            self._backup = None
+            if b['said']:
+                self._log(f'backed up {moved * 100:.0f} cm' + ('' if done or timeout else ': something behind me') +
+                          ', going round the side')
+            elif not clear:
+                self._log('no room to back up (something behind me): planning round it from here', 'warn')
+            # what the sensors see from a little further back goes into the outline too
+            self.remember_us(now, log=False)
+            self._us_watch_until = now + self.us_watch_s
+            return None
+        if not b['said']:
+            b['said'] = True
+            self._log(f'backing up {self.backup_m * 100:.0f} cm to get room to go round', 'warn')
+        self._set(PLANNING, f'backing up to go round the obstacle ({m.current.label})')
+        return -self.backup_speed, 0.0
 
     def _fit_body(self, path, pose, stop, extra):
         """Check the route with the real body shape; if it clips, try a wider berth (one more A*)."""
