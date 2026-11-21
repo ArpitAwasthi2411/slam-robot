@@ -21,7 +21,7 @@ Arguments
   nav_mode      planner     planner (navigator: A* routes, places, missions) | nav2 (the same navigator, but Nav2
                             plans and drives: config/nav2_params.yaml, docs/nav2.md) | direct (goal_controller) | none
   dashboard     true        web dashboard on http://<pi>:8080
-  places        ~/maps/places.json
+  places        ~/maps/places.json   the set of the map in use; other maps' sets in ~/maps/annotations/
   lidar_port    auto           the USB-serial port that is NOT the ESP32 (or give a path, e.g. /dev/ttyUSB0)
   esp32_port    auto           the port that streams ODM lines (found at every start, any USB socket,
                                or the GPIO UART /dev/ttyAMA0 when /dev/esp32 points at it)
@@ -70,6 +70,14 @@ def _setup(context):
         slam_mode, map_file, mode_note = resolve(slam_mode, map_file, mode_file)
     nav_mode = cfg('nav_mode')
     places = os.path.expanduser(cfg('places'))
+    # places/rooms/home/dock belong to one map: bring this map's set into places.json (annotations.py)
+    places_note = ''
+    if slam:
+        from lidar_robot.annotations import map_key, switch_places
+        try:
+            places_note = switch_places(places, map_key(map_file, slam_mode))
+        except Exception as e:                       # never stop the robot from starting over this
+            places_note = f'places: could not switch the set ({e}); using {places} as it is'
     vision = _truthy(cfg('vision'))
     voice = _truthy(cfg('voice'))
     plan = _truthy(cfg('cpu_plan'))
@@ -104,7 +112,8 @@ def _setup(context):
                          'launch/serial_probe is holding the port. The bridge keeps searching.')
     actions_ports = [LogInfo(msg=f'[bringup] ports: ESP32={esp_port}  LiDAR={lidar_port}{port_msg}')]
 
-    actions = actions_ports + ([LogInfo(msg=f'[bringup] {mode_note}')] if mode_note else []) + [
+    actions = actions_ports + ([LogInfo(msg=f'[bringup] {mode_note}')] if mode_note else []) + \
+        ([LogInfo(msg=f'[bringup] {places_note}')] if places_note else []) + [
         LogInfo(msg=f'[bringup] odom={use_odom} slam={slam} slam_mode={slam_mode} '
                            f'map={map_file or "-"} nav_mode={nav_mode} dashboard={cfg("dashboard")} '
                            f'vision={vision} camera={cfg("camera")} voice={voice} cpu_plan={plan}')]

@@ -87,7 +87,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Next lab day: **`docs/STEPS_lab_19nov.md`** (laptop mapping of the department, encoder check, CPU report); INA226/dock in `docs/STEPS_lab_18nov.md`; before that `docs/STEPS_lab_16nov.md` (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-11-20**
+**Last updated: 2026-11-21**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -136,6 +136,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-21 (expo): places/rooms/home/dock belong to ONE map: a new map (exhibition hall) used to show the department's
+  places floating over it. annotations.switch_places (called by bringup before any node starts): ~/maps/places.json =
+  the set of the map in use, other maps' sets in ~/maps/annotations/<map>.json; New map starts empty, places marked
+  while mapping go with the map when it is frozen, going back restores the old set; a places.json without an owner
+  belongs to the map in use at the first start. Nothing deleted. `python3 -m lidar_robot.annotations list | copy <map>`
+  (e.g. an autosave snapshot borrowing its map's set). test_annotations.py (4).
 - 2026-11-21 (kiosk): big **Speak** button on the head-mode face screen (stacked under Ask in landscape, clear of STOP;
   4 in a row in portrait): one tap -> listening (tap again to stop) -> the words go to Ask. Phone recogniser in the APK
   (PathikNative.listen), Web Speech in Chrome, else the robot's own mic (/api/voice listen/stop). Settings: I listen in
