@@ -27,6 +27,10 @@
                  min-height: 0; width: 100%; height: 100%; cursor: pointer; }
   #ic-go { grid-area: go; align-self: end; } #ic-send { grid-area: send; align-self: start; }
   #ic-ask { grid-area: ask; align-self: end; }
+  /* with Speak: Ask and Speak stacked at the top right, clear of the STOP button in the bottom corner */
+  .h-rcol { display: contents; }
+  body.can-talk .h-rcol { grid-area: ask / ask / spare / spare; align-self: start; display: flex; flex-direction: column; gap: 12px; }
+  body.can-talk #ic-ask { align-self: auto; }
   .h-ic { width: 112px; height: 112px; border-radius: 32px; border: 1px solid var(--line-2); background: var(--surface-2);
           color: var(--text); font: 800 17px var(--ui); cursor: pointer; display: flex; flex-direction: column;
           align-items: center; justify-content: center; gap: 6px; box-shadow: 0 10px 28px #0008;
@@ -36,6 +40,10 @@
   .h-ic.go { background: var(--grad); color: var(--on-grad); border-color: transparent; }
   .h-ic.ask { background: color-mix(in srgb, var(--teal) 22%, var(--surface-2)); border-color: color-mix(in srgb, var(--teal) 55%, transparent); }
   .h-ic[disabled] { opacity: .35; }
+  .h-ic.talk { background: color-mix(in srgb, var(--orange, #F28C28) 24%, var(--surface-2));
+               border-color: color-mix(in srgb, var(--orange, #F28C28) 60%, transparent); }
+  .h-ic.talk.on { background: var(--orange, #F28C28); color: #fff; animation: talk-on 1.1s ease-in-out infinite; }
+  @keyframes talk-on { 50% { box-shadow: 0 0 0 14px color-mix(in srgb, var(--orange, #F28C28) 30%, transparent); } }
   body.invite .h-ic { animation: ic-hop .55s ease-out 2; }
   body.invite #ic-ask { animation-delay: .12s; } body.invite #ic-send { animation-delay: .24s; }
   @keyframes ic-hop { 40% { transform: translateY(-12px) scale(1.06); } }
@@ -43,7 +51,12 @@
     .h-hd { padding-bottom: calc(var(--safe-b) + 122px); }
     .h-stage { grid-template-columns: repeat(3, 1fr); grid-template-rows: minmax(0, 1fr) auto;
                grid-template-areas: "face face face" "go ask send"; }
-    #ic-go, #ic-send, #ic-ask { align-self: center; }
+    #ic-go, #ic-send, #ic-ask, #ic-talk { align-self: center; }
+    body.can-talk .h-stage { grid-template-columns: repeat(4, 1fr); grid-template-areas: "face face face face" "go ask spare send"; }
+    body.can-talk .h-rcol { display: contents; } body.can-talk #ic-ask { grid-area: ask; } body.can-talk #ic-talk { grid-area: spare; }
+    body.can-talk .h-stage { column-gap: 8px; }
+    body.can-talk .h-ic { width: min(88px, 21vw); height: min(88px, 21vw); border-radius: 24px; font-size: 13px; }
+    body.can-talk .h-ic svg { width: 32px; height: 32px; }
     .h-ic { width: min(104px, 27vw); height: min(104px, 27vw); border-radius: 28px; font-size: 15px; }
     .h-ic svg { width: 38px; height: 38px; }
   }
@@ -151,8 +164,10 @@
       <div class="h-acts" id="acts"></div>
       <div class="h-steps" id="steps" hidden style="width:min(520px,80vw)"></div>
     </div>
-    <button class="h-ic ask" id="ic-ask" aria-label="Ask me a question">
+    <div class="h-rcol"><button class="h-ic ask" id="ic-ask" aria-label="Ask me a question">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.500h16v10.500H10l-4.500 3.500V16H4z"/><path d="M8.500 9.500h7M8.500 12.500h4.500"/></svg>Ask</button>
+    <button class="h-ic talk" id="ic-talk" hidden aria-label="Speak: tap and talk to me">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.500 11a6.500 6.500 0 0 0 13 0M12 17.500V21M8.500 21h7"/></svg><span id="ic-talk-l">Speak</span></button></div>
   </div>
 </div>
 <button class="h-stop" id="stop" aria-label="Stop the robot">STOP</button>
@@ -221,6 +236,8 @@
   again by itself. The LiDAR and ultrasonic stops never depend on the phone.</p>
   <div class="h-h3" style="margin-top:12px">Greeting</div>
   <label class="h-tg"><input type="checkbox" id="s-greet" checked> Speak when someone taps my face (I introduce myself)</label>
+  <label class="h-tg" style="gap:8px">I listen in <select id="s-lang" style="flex:1;min-height:44px;border-radius:12px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--text);font:600 16px var(--ui);padding:0 10px">
+    <option value="en-IN">English (India): also Hinglish</option><option value="hi-IN">हिंदी (Hindi)</option></select></label>
   <label class="h-tg" style="gap:8px">My name <input id="s-name" maxlength="20" style="flex:1;min-height:44px;border-radius:12px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--text);font:600 16px var(--ui);padding:0 12px"></label>
   <div class="h-h3" style="margin-top:12px">Doors (camera)</div>
   <p class="h-muted">Stand where the robot stops in front of the door (or hold the phone there), then show it the door

@@ -136,6 +136,10 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-21 (kiosk): big **Speak** button on the head-mode face screen (stacked under Ask in landscape, clear of STOP;
+  4 in a row in portrait): one tap -> listening (tap again to stop) -> the words go to Ask. Phone recogniser in the APK
+  (PathikNative.listen), Web Speech in Chrome, else the robot's own mic (/api/voice listen/stop). Settings: I listen in
+  en-IN / hi-IN (stored per phone). The small mic in the Ask sheet uses the same path.
 - 2026-11-21: glass doors (LiDAR sees through, so the corridor + room looked like one wide space and routes ran
   along the glass) and pots. Paint gets **Door** / **Glass door** (two sides + optional name: the opening is drivable,
   the sides are solid posts, routes take the middle) and **Pot** (one tap, 0.25 m keep-out). A marked door found

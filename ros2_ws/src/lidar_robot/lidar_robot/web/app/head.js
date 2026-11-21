@@ -334,21 +334,72 @@
   $('k-send').onclick = () => ask($('k-text').value);
   $('k-text').onkeydown = e => { kioskIdle(); if (e.key === 'Enter') $('k-send').click(); };
   $('a-close').onclick = closeSheets;
-  // speak: the phone's speech recognizer (the robot's own speaker stays the robot's voice)
-  if (window.PathikNative && PathikNative.listen) {
-    $('k-mic').hidden = false;
-    $('k-mic').onclick = () => {
-      kioskIdle(); $('a-msg').textContent = 'Listening…';
-      S.ov = { mood: 'listening', line: "I'm listening…", sub: '', always: true, mic: true };
-      PathikNative.listen('en-IN');
-    };
-    window.__pathikVoice = (kind, text) => {
-      if (kind === 'partial' || kind === 'final') $('k-text').value = text;
-      if (kind === 'final' || kind === 'error') { if (S.ov && S.ov.mic) S.ov = null; }
-      if (kind === 'final' && text) $('k-send').click();
-      if (kind === 'error') $('a-msg').textContent = text;
-    };
+  // speak: one tap on the big Speak button (or the mic in Ask). Heard by the phone's speech recognizer in the app,
+  // the browser's in Chrome, else the robot's own mic. The robot's speaker stays the robot's voice.
+  const LISTEN = {
+    on: false,
+    lang() { return store.get('listenLang', 'en-IN'); },
+    native: !!(window.PathikNative && PathikNative.listen),
+    web: window.SpeechRecognition || window.webkitSpeechRecognition || null,
+    rec: null,
+    how() { return this.native ? 'phone' : this.web ? 'browser' : DEMO ? '' : 'robot'; },
+  };
+  function talkUi(on, sub) {
+    LISTEN.on = on;
+    $('ic-talk').classList.toggle('on', on);
+    $('ic-talk-l').textContent = on ? 'Listening' : 'Speak';
+    if (on) S.ov = { mood: 'listening', line: "I'm listening…", sub: sub || 'Speak now · tap again to stop', always: true, mic: true };
+    else if (S.ov && S.ov.mic) S.ov = null;
   }
+  function heard(text) {
+    talkUi(false);
+    text = (text || '').trim();
+    if (!text) return;
+    if ($('ask').hidden) openAsk();
+    $('k-text').value = text;
+    ask(text);
+  }
+  function startListening() {
+    kioskIdle(); haptic(15);
+    if (LISTEN.on) { stopListening(); return; }
+    const how = LISTEN.how();
+    if (how === 'phone') { talkUi(true); PathikNative.listen(LISTEN.lang()); return; }
+    if (how === 'browser') {
+      const r = LISTEN.rec = new LISTEN.web();
+      r.lang = LISTEN.lang(); r.interimResults = true; r.maxAlternatives = 1;
+      let last = '';
+      r.onresult = e => { last = Array.from(e.results).map(x => x[0].transcript).join(' '); if (!$('ask').hidden) $('k-text').value = last; };
+      r.onerror = e => { talkUi(false); S.ov = { mood: 'help', line: e.error === 'not-allowed' ? 'Microphone not allowed' : "Didn't catch that", sub: 'Tap Speak to try again', always: false }; };
+      r.onend = () => { if (LISTEN.on) heard(last); };
+      talkUi(true); r.start(); return;
+    }
+    if (how === 'robot') {                       // no recognizer on this screen: the robot listens with its own mic
+      talkUi(true, 'Speak to the robot · tap again when done');
+      api('POST', '/api/voice', { action: 'listen' }).catch(e => { talkUi(false); $('a-msg').textContent = e.message; });
+    }
+  }
+  function stopListening() {
+    const how = LISTEN.how();
+    if (how === 'phone' && PathikNative.stopListening) PathikNative.stopListening();
+    else if (how === 'browser' && LISTEN.rec) LISTEN.rec.stop();
+    else if (how === 'robot') { api('POST', '/api/voice', { action: 'stop' }).catch(() => {}); talkUi(false);
+      S.ov = { mood: 'thinking', line: 'Let me think…', sub: '', always: false }; }
+  }
+  if (LISTEN.how()) {
+    $('ic-talk').hidden = false; document.body.classList.add('can-talk');
+    $('ic-talk').onclick = e => { e.stopPropagation(); startListening(); };
+    if (LISTEN.how() !== 'robot') {
+      $('k-mic').hidden = false;
+      $('k-mic').onclick = () => { $('a-msg').textContent = 'Listening…'; startListening(); };
+    }
+  }
+  window.__pathikVoice = (kind, text) => {
+    if (kind === 'partial' && !$('ask').hidden) $('k-text').value = text;
+    if (kind === 'final') heard(text);
+    if (kind === 'error') { talkUi(false); $('a-msg').textContent = text;
+      S.ov = { mood: 'help', line: text, sub: 'Tap Speak to try again', always: false };
+      setTimeout(() => { if (S.ov && S.ov.mood === 'help' && !S.ov.always) S.ov = null; }, 5000); }
+  };
 
   // ---- Deliver (errand)
   function openDeliver() {
@@ -382,7 +433,7 @@
       return;
     }
     const text = ABOUT[aboutI++ % ABOUT.length](robotName());
-    S.ov = { mood: 'happy', line: text, sub: 'Tap Go, Ask or Deliver', greet: true };
+    S.ov = { mood: 'happy', line: text, sub: LISTEN.how() ? 'Tap Go, Ask, Deliver or Speak' : 'Tap Go, Ask or Deliver', greet: true };
     setTimeout(() => { if (S.ov && S.ov.greet) S.ov = null; }, 700 + 62 * text.length + 2500);
     document.body.classList.add('invite');                 // the three icons bounce once: "your turn"
     setTimeout(() => document.body.classList.remove('invite'), 2600);
@@ -395,7 +446,7 @@
     $('s-robot').textContent = DEMO ? 'Demo: no robot connected (open head mode from the app while connected).'
       : `Robot: ${R.base}`;
     $('s-detect').checked = S.det.on; $('s-test').checked = S.det.test;
-    $('s-greet').checked = store.get('greet', true); $('s-name').value = robotName();
+    $('s-greet').checked = store.get('greet', true); $('s-name').value = robotName(); $('s-lang').value = store.get('listenLang', 'en-IN');
     const pl = (S.st && S.st.places) || { places: [], rooms: [] };
     const names = [...new Set([].concat((pl.places || []).map(p => p.name), (pl.rooms || []).map(r => r.name),
                                         DOOR.places().map(d => d.name)))];
@@ -411,6 +462,7 @@
   $('s-detect').onchange = e => { S.det.on = e.target.checked; store.set('detect', S.det.on); };
   $('s-test').onchange = e => { S.det.test = e.target.checked; stopDetect(); };
   $('s-greet').onchange = e => store.set('greet', e.target.checked);
+  $('s-lang').onchange = e => store.set('listenLang', e.target.value);
   $('s-name').onchange = e => store.set('name', e.target.value.trim() || 'Pathik');
   $('d-demo').onchange = e => store.set('doorDemo', e.target.value);
   $('d-place').onchange = () => doorShow();

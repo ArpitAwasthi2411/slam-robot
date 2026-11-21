@@ -12,7 +12,7 @@ A phone mounted on the robot runs the Pathik app in **Head mode** (Operate → H
 | **Tap the face** | the robot says its name and asks back ("Hi, I'm Pathik! What can I do for you today?"), and the three icons bounce to invite a tap. While busy it says what it is doing. The eyes glance at where it was touched |
 | **Answers** | the OK button at "wait for OK" stops and the error-recovery questions appear on the face (no PIN, like the app) |
 | **People detection** | YOLO11n on the **phone**, on the **Pi camera's plain picture**; the boxes go back to the robot |
-| Voice | stays on the **robot's speaker** (Piper); the phone's mic can be used to say a command in the kiosk |
+| Voice | stays on the **robot's speaker** (Piper). **Speak** button on the face screen: one tap and talk, the words go to Ask (questions answered at once, trips still need the PIN). Heard by the phone's speech recogniser in the Android app, the browser's in Chrome, else the robot's own mic (`/api/voice`). Settings → *I listen in*: English (India, also Hinglish) or हिंदी |
 | **Errands** | **Deliver** → go to a place, check its door, say a message, wait (or until OK), come back; spoken report |
 | **Doors** | settings → teach each door closed / open with the camera; errands check it on arrival |
 
