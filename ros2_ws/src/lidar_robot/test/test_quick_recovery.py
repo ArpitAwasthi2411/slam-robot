@@ -6,6 +6,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -54,7 +55,7 @@ def test_a_person_who_stays_is_routed_round_and_forgotten_soon(tmp_path):
 
 
 def test_block_timings_are_short():
-    import yaml
+    yaml = pytest.importorskip("yaml")
     cfg = os.path.join(os.path.dirname(__file__), '..', 'config', 'robot_params.yaml')
     rp = yaml.safe_load(open(cfg))['navigator']['ros__parameters']
     assert rp['blocked_after'] <= 3.0 and rp['person_wait_s'] <= 5.0

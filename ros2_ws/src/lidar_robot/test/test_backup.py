@@ -6,6 +6,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -66,7 +67,7 @@ def test_routes_run_down_the_middle_of_a_corridor():
 
 
 def test_footprint_is_the_46_cm_square():
-    import yaml
+    yaml = pytest.importorskip("yaml")
     cfg = os.path.join(os.path.dirname(__file__), '..', 'config', 'robot_params.yaml')
     rp = yaml.safe_load(open(cfg))['navigator']['ros__parameters']
     assert abs(rp['footprint_front'] + rp['footprint_rear'] - 0.46) < 1e-6
