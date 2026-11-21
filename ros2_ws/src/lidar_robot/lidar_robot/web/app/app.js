@@ -739,7 +739,22 @@ function drawMap() {
   // hand edits of the saved map (Paint tool): drivable areas in green, painted walls in magenta
   const medits = (navs.map_edits && navs.map_edits.edits) || [], strong = T.tool === 'paint';
   for (const e of medits) {
-    const P = e.pts || []; if (P.length < 2) continue;
+    const P = e.pts || [];
+    if (e.kind === 'spot' && P.length) {              // a pot or plant: a ring the routes keep clear of
+      const [x, y] = W2S(P[0][0], P[0][1]), r = Math.max(5 * DPR, (e.r || 0.25) * k);
+      cx.save(); cx.fillStyle = A(PAL.magenta, strong ? 0.30 : 0.18); cx.strokeStyle = A(PAL.magenta, 0.9); cx.lineWidth = 1.6 * DPR;
+      cx.beginPath(); cx.arc(x, y, r, 0, 7); cx.fill(); cx.stroke(); cx.restore();
+      continue;
+    }
+    if (P.length < 2) continue;
+    if (e.kind === 'door') {                          // a doorway: the opening, with its two frame posts
+      const col = e.glass ? PAL.teal : PAL.orange, [ax, ay] = W2S(P[0][0], P[0][1]), [bx, by] = W2S(P[1][0], P[1][1]);
+      cx.save(); cx.strokeStyle = A(col, strong ? 0.95 : 0.7); cx.lineWidth = 3 * DPR; cx.setLineDash(e.glass ? [5 * DPR, 4 * DPR] : []);
+      cx.beginPath(); cx.moveTo(ax, ay); cx.lineTo(bx, by); cx.stroke(); cx.setLineDash([]);
+      cx.fillStyle = col; [[ax, ay], [bx, by]].forEach(([x, y]) => { cx.beginPath(); cx.arc(x, y, 4 * DPR, 0, 7); cx.fill(); });
+      if (e.name && strong) { cx.font = `600 ${11 * DPR}px Inter, sans-serif`; cx.fillStyle = col; cx.textAlign = 'center'; cx.fillText(e.name, (ax + bx) / 2, (ay + by) / 2 - 8 * DPR); }
+      cx.restore(); continue;
+    }
     cx.beginPath(); P.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
     cx.save();
     if (e.kind === 'free') {
@@ -884,6 +899,13 @@ cv.addEventListener('contextmenu', e => e.preventDefault());
 
 // ------------------------------------------------------------------ map tools: goal (like RViz 2D Goal Pose), route, measure
 const T = { tool: null, drag: null, route: [], loop: false, sent: null, draw: null, corners: [], paint: [], paintKind: 'free' };
+const PAINT = {   // what each Paint kind is called, how many taps it needs, and what the bar says
+  free: { name: 'a drivable area', need: 3, max: 40, tip: 'Tap the corners of a room the robot has not explored.', next: 'Tap the next corner' },
+  wall: { name: 'a wall', need: 2, max: 40, tip: 'Tap points along a wall it cannot see (glass panels, stairs).', next: 'Tap the next point along the wall' },
+  door: { name: 'a door', need: 2, max: 2, tip: 'Tap one side of the doorway, then the other.', next: 'Tap the other side of the doorway' },
+  glass: { name: 'a glass door', need: 2, max: 2, tip: 'Tap both sides of the glass doorway.', next: 'Tap the other side of the doorway' },
+  spot: { name: 'a pot or plant', need: 1, max: 1, tip: 'Tap each pot or plant on the floor: routes keep clear of it.', next: '' },
+};
 const DRAG_PX = 14;                                   // shorter drags = tap (no heading)
 const headingOf = d => d.px > DRAG_PX ? Math.atan2(d.b[1] - d.a[1], d.b[0] - d.a[0]) : null;
 const deg = r => `${Math.round(((r * 57.2958) % 360 + 360) % 360)}°`;
@@ -923,16 +945,18 @@ function renderMode() {
       : `<span class="grow"><b>Room.</b> Tap its corners one by one (any shape), or drag a box for a square room.</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'paint') {
     const me = (S.st && S.st.nav && S.st.nav.map_edits) || {}, edits = me.edits || [];
-    const n = T.paint.length, free = T.paintKind === 'free', need = free ? 3 : 2;
-    const kinds = `<button class="btn ${free ? 'grad' : 'ghost'}" data-m="pfree">Drivable</button><button class="btn ${free ? 'ghost' : 'grad'}" data-m="pwall">Wall</button>`;
+    const n = T.paint.length, K = PAINT[T.paintKind], need = K.need, door = T.paintKind === 'door' || T.paintKind === 'glass';
+    const kb = (k, label) => `<button class="btn ${T.paintKind === k ? 'grad' : 'ghost'}" data-m="pk-${k}">${label}</button>`;
+    const kinds = kb('free', 'Drivable') + kb('wall', 'Wall') + kb('door', 'Door') + kb('glass', 'Glass door') + kb('spot', 'Pot');
     if (!me.enabled) {
       html = `<span class="grow"><b>Paint.</b> Works on a saved map: Map → Use a saved map first.</span><button class="btn ghost" data-m="close">Done</button>`;
     } else if (n) {
-      html = `<span class="grow"><b>${n} point${n > 1 ? 's' : ''}.</b> ${free ? 'Tap the next corner' : 'Tap the next point along the wall'}${n >= need ? ', or save' : ''}.</span>
+      html = `<span class="grow"><b>${n} point${n > 1 ? 's' : ''}.</b> ${n >= K.max ? 'Save it' : K.next + (n >= need ? ', or save' : '')}.</span>
+        ${door && n >= need ? '<input id="pdname" maxlength="40" placeholder="Door name (optional)" style="max-width:11em"/>' : ''}
         <button class="btn ghost" data-m="undo">Undo</button><button class="btn grad" data-m="psave" ${n >= need ? '' : 'disabled'}>Save</button>
         <button class="btn ghost" data-m="close" aria-label="Close">✕</button>`;
     } else {
-      html = `<span class="grow"><b>Paint ${free ? 'a drivable area' : 'a wall'}.</b> ${free ? 'Tap the corners of a room the robot has not explored.' : 'Tap points along a wall it cannot see (glass, stairs).'} ${edits.length} on ${esc(me.map || 'this map')}.</span>
+      html = `<span class="grow"><b>Paint ${K.name}.</b> ${K.tip} ${edits.length} on ${esc(me.map || 'this map')}.</span>
         ${kinds}${edits.length ? '<button class="btn ghost" data-m="plast">Remove last</button><button class="btn ghost" data-m="pclear">Clear all</button>' : ''}
         <button class="btn ghost" data-m="close">Done</button>`;
     }
@@ -953,15 +977,8 @@ async function modeAction(a) {
   haptic(10);
   if (a === 'close') { T.sent = null; setTool(T.tool); return; }
   if (a === 'undo') { (T.tool === 'room' ? T.corners : T.tool === 'paint' ? T.paint : T.route).pop(); renderMode(); mapDirty = true; return; }
-  if (a === 'pfree' || a === 'pwall') { T.paintKind = a === 'pfree' ? 'free' : 'wall'; T.paint = []; renderMode(); mapDirty = true; return; }
-  if (a === 'psave') {
-    try {
-      await nav({ type: 'add_map_edit', kind: T.paintKind, pts: T.paint.map(p => [+p[0].toFixed(2), +p[1].toFixed(2)]) });
-      toast(T.paintKind === 'free' ? 'Drivable area saved: routes can go there now' : 'Wall saved: routes avoid it'); haptic(20);
-      T.paint = []; renderMode(); mapDirty = true;
-    } catch (e) { toast(e.message, true); }
-    return;
-  }
+  if (a.startsWith('pk-')) { T.paintKind = a.slice(3); T.paint = []; renderMode(); mapDirty = true; return; }
+  if (a === 'psave') { await savePaint(); return; }
   if (a === 'plast' || a === 'pclear') {
     const edits = ((S.st && S.st.nav && S.st.nav.map_edits) || {}).edits || [];
     if (!edits.length) return;
@@ -1036,13 +1053,29 @@ async function saveRoom(polygon) {
     toast(`Room ${f.name} saved`); haptic(20); T.corners = []; renderMode(); mapDirty = true;
   } catch (e) { toast(e.message, true); }
 }
+async function savePaint() {
+  const k = T.paintKind, nameEl = $('#pdname'), name = nameEl ? nameEl.value.trim() : '';
+  const q = { type: 'add_map_edit', kind: k === 'glass' ? 'door' : k, pts: T.paint.map(p => [+p[0].toFixed(2), +p[1].toFixed(2)]) };
+  if (k === 'glass') q.glass = true;
+  if (name) q.name = name;
+  try {
+    await nav(q);
+    toast({ free: 'Drivable area saved: routes can go there now', wall: 'Wall saved: routes avoid it',
+            door: 'Door saved: routes go through its middle', glass: 'Glass door saved: routes go through its middle',
+            spot: 'Pot marked: routes keep clear of it' }[k]); haptic(20);
+    T.paint = []; renderMode(); mapDirty = true;
+  } catch (e) { toast(e.message, true); }
+}
 async function toolRelease(d) {
   if (T.tool === 'draw') { await finishDrawing(d.pts || []); return; }
   if (T.tool === 'paint') {
     const me = (S.st && S.st.nav && S.st.nav.map_edits) || {};
     if (!me.enabled) { toast('Paint works on a saved map: Map → Use a saved map first', true); return; }
-    if (T.paint.length >= 40) { toast('40 points at most', true); return; }
-    T.paint.push([d.a[0], d.a[1]]); haptic(12); renderMode(); mapDirty = true; return;
+    const K = PAINT[T.paintKind];
+    if (T.paint.length >= K.max) { toast(K.max === 2 ? 'A door has two sides: save it, or Undo' : `${K.max} points at most`, true); return; }
+    T.paint.push([d.a[0], d.a[1]]); haptic(12);
+    if (T.paintKind === 'spot') { await savePaint(); return; }     // one tap = one pot, saved at once
+    renderMode(); mapDirty = true; return;
   }
   if (T.tool === 'room') {
     if (d.px <= DRAG_PX || T.corners.length) {      // a tap = one corner of a room of any shape
@@ -1114,7 +1147,7 @@ function drawTools() {
   }
   // paint points tapped so far: an area closes back to the first point, a wall stays a line
   if (T.paint.length) {
-    const free = T.paintKind === 'free', col = free ? PAL.good : PAL.magenta;
+    const free = T.paintKind === 'free', col = free ? PAL.good : T.paintKind === 'door' ? PAL.orange : T.paintKind === 'glass' ? PAL.teal : PAL.magenta;
     cx.save(); cx.strokeStyle = col; cx.fillStyle = A(col, 0.15); cx.lineWidth = (free ? 2 : 4) * DPR; if (free) cx.setLineDash([6 * DPR, 4 * DPR]);
     cx.beginPath(); T.paint.forEach((p, i) => { const [x, y] = W2S(p[0], p[1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
     if (free && T.paint.length > 2) { cx.closePath(); cx.fill(); }

@@ -7,7 +7,11 @@ edits for one saved map, in their own file next to the maps (~/maps/map_edits/<m
 the grid the planner gets:
 
     free   a polygon (3+ corners): unexplored cells inside become drivable. Scanned walls stay walls.
-    wall   a line (2+ points, 10 cm thick): the planner never routes through it (glass doors, stairs, cables).
+    wall   a line (2+ points, 10 cm thick): the planner never routes through it (glass panels, stairs, cables).
+    door   a line across a doorway, frame to frame (2 points), plain or glass: the opening is drivable even if it
+           was closed (or invisible glass) while mapping, and the frame ends are solid, so routes go through the
+           middle. A door found closed on a trip is a door waiting to be opened, never a new wall (navigator).
+    spot   one point, a pot or plant the LiDAR cannot see (radius `r`, 0.25 m by default): always kept clear.
 
     edits = MapEdits('~/maps/map_edits/cse.json')
     edits.add('free', [[x, y], ...]); edits.remove(id); edits.clear()
@@ -25,11 +29,15 @@ import numpy as np
 
 from .planner import GridMap
 
-KINDS = ('free', 'wall')
+KINDS = ('free', 'wall', 'door', 'spot')
+NEED = {'free': 3, 'wall': 2, 'door': 2, 'spot': 1}
 MAX_EDITS = 100
 MAX_POINTS = 40
 MAX_FREE_AREA_M2 = 150.0      # a cabin or a lab, not "the whole floor" by a slip of the finger
 WALL_HALF_M = 0.05            # painted walls are 10 cm thick
+DOOR_HALF_M = 0.10            # a door clears a 20 cm deep strip through the wall
+POST_R_M = 0.06               # the frame ends of a door are solid posts
+SPOT_R_M = 0.25
 
 
 def edits_path(map_file, map_dir):
@@ -88,9 +96,10 @@ class MapEdits:
                     kind = e['kind']
                     if kind not in KINDS:
                         continue
-                    good.append({'id': int(e['id']), 'kind': kind,
-                                 'pts': _clean_points(e['pts'], 3 if kind == 'free' else 2),
-                                 'at': e.get('at')})
+                    rec = {'id': int(e['id']), 'kind': kind, 'pts': _clean_points(e['pts'], NEED[kind]),
+                           'at': e.get('at')}
+                    rec.update(_extras(kind, e))
+                    good.append(rec)
                 except (KeyError, TypeError, ValueError):
                     continue
             self.edits = good
@@ -108,14 +117,21 @@ class MapEdits:
         os.replace(tmp, self.path)              # never a half-written file
         self.version += 1
 
-    def add(self, kind, pts):
+    def add(self, kind, pts, **extra):
         if not self.enabled:
             raise ValueError('painting works on a saved map: Map → Use a saved map first')
         if kind not in KINDS:
             raise ValueError(f'kind must be one of {KINDS}')
         if len(self.edits) >= MAX_EDITS:
             raise ValueError(f'{MAX_EDITS} edits at most: delete some first')
-        pts = _clean_points(pts, 3 if kind == 'free' else 2)
+        pts = _clean_points(pts, NEED[kind])
+        if kind == 'door':
+            pts = pts[:2]
+            width = math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
+            if not 0.4 <= width <= 3.0:
+                raise ValueError(f'that door is {width:.2f} m wide: tap the two sides of the doorway (0.4 to 3 m)')
+        if kind == 'spot':
+            pts = pts[:1]
         if kind == 'free':
             area = polygon_area(pts)
             if area < 0.05:
@@ -124,6 +140,7 @@ class MapEdits:
                 raise ValueError(f'that area is {area:.0f} m²; paint at most {MAX_FREE_AREA_M2:.0f} m² at a time')
         rec = {'id': max([e['id'] for e in self.edits], default=0) + 1, 'kind': kind, 'pts': pts,
                'at': int(self.clock())}
+        rec.update(_extras(kind, extra))
         self.edits.append(rec)
         self._save()
         return rec
@@ -140,6 +157,18 @@ class MapEdits:
         if self.enabled:
             self._save()
 
+    def doors(self):
+        return [e for e in self.edits if e['kind'] == 'door']
+
+    def near_door(self, x, y, dist=0.35):
+        """The door whose line passes within `dist` of (x, y), or None."""
+        best, bd = None, dist
+        for e in self.doors():
+            d = seg_dist(x, y, e['pts'][0], e['pts'][1])
+            if d <= bd:
+                best, bd = e, d
+        return best
+
     def summary(self):
         return {'enabled': self.enabled, 'map': os.path.basename(self.path)[:-5] if self.path else '',
                 'edits': self.edits, 'version': self.version, 'error': self.error}
@@ -154,11 +183,50 @@ class MapEdits:
             if e['kind'] == 'free':
                 m = _polygon_mask(grid, e['pts'])
                 unk[m] = False                     # unexplored -> free; a scanned wall stays a wall
+            elif e['kind'] == 'door':
+                m = _polyline_mask(grid, e['pts'], DOOR_HALF_M)
+                occ[m] = False                     # closed or glass while mapping: the opening is drivable
+                unk[m] = False
+                for px, py in e['pts']:            # the frame ends are solid, so routes take the middle
+                    m = _polyline_mask(grid, [[px, py], [px, py]], POST_R_M)
+                    occ[m] = True
+                    unk[m] = False
+            elif e['kind'] == 'spot':
+                (px, py), = e['pts']
+                m = _polyline_mask(grid, [[px, py], [px, py]], e.get('r', SPOT_R_M))
+                occ[m] = True
+                unk[m] = False
             else:
                 m = _polyline_mask(grid, e['pts'], WALL_HALF_M)
                 occ[m] = True
                 unk[m] = False
         return GridMap(grid.width, grid.height, grid.resolution, grid.origin_x, grid.origin_y, occ, unk)
+
+
+def _extras(kind, src):
+    """The optional fields of a door (glass, name) or a spot (radius), checked."""
+    out = {}
+    if kind == 'door':
+        out['glass'] = bool(src.get('glass', False))
+        name = str(src.get('name') or '').strip()[:40]
+        if name:
+            out['name'] = name
+    elif kind == 'spot':
+        try:
+            r = float(src.get('r', SPOT_R_M))
+        except (TypeError, ValueError):
+            r = SPOT_R_M
+        out['r'] = round(min(0.6, max(0.1, r if math.isfinite(r) else SPOT_R_M)), 2)
+    return out
+
+
+def seg_dist(x, y, a, b):
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    L2 = dx * dx + dy * dy
+    t = 0.0 if L2 <= 0 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / L2))
+    return math.hypot(x - (ax + t * dx), y - (ay + t * dy))
 
 
 def _cells(grid, xs, ys):

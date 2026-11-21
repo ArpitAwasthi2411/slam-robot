@@ -245,7 +245,14 @@ gives "no route" into it. On a **saved map** (Map → Use a saved map) an operat
 
 - **Drivable**: tap the corners of an unexplored room → Save. Unknown cells inside become drivable; scanned walls
   and furniture inside stay walls. At most 150 m² per area.
-- **Wall**: tap points along something the LiDAR cannot see (a glass door, the stairs edge) → Save. Routes avoid it.
+- **Wall**: tap points along something the LiDAR cannot see (a fixed glass panel, the stairs edge) → Save. Routes avoid it.
+- **Door / Glass door**: tap one side of the doorway, then the other, optionally name it ("Lab 2") → Save. The
+  opening is drivable even if the door was closed (or invisible glass) while mapping, and its two sides are solid
+  posts, so routes go through the middle. A marked door found **closed** on a trip: the robot says "I am at the
+  Lab 2 door and it is closed. Could someone open it, please?", waits up to `door_wait_s` 20 s and drives on the
+  moment it opens. The door is never remembered as an obstacle; if it stays shut, it counts as closed for that trip
+  only (another way, else error recovery), and the next trip goes through it again.
+- **Pot**: one tap on a flower pot or plant the LiDAR cannot see (0.25 m radius): routes always keep clear of it.
 - **Remove last** / **Clear all** undo the painting.
 
 The edits live in `~/maps/map_edits/<map>.json`, one file per saved map, and only change the grid the planner gets.

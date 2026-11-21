@@ -504,10 +504,13 @@ function navReq(q) {
     case 'update_room': { const r = places.rooms.find(x => norm(x.name) === norm(q.name)); if (!r) throw new Error(`no room called "${q.name}"`); const list = c => (typeof c === 'string' ? c.split(',') : (c || [])).map(s => s.trim()).filter(Boolean); if (q.contents != null) r.contents = list(q.contents); if (q.aliases != null) r.aliases = list(q.aliases); if (q.new_name) r.name = q.new_name; places.version++; return { ok: true, room: r }; }
     case 'delete_room': places.rooms = places.rooms.filter(r => norm(r.name) !== norm(q.name)); places.version++; return { ok: true };
     case 'add_map_edit': {
-      const need = q.kind === 'free' ? 3 : q.kind === 'wall' ? 2 : 99;
-      if (!Array.isArray(q.pts) || q.pts.length < need) return { ok: false, error: q.kind === 'free' ? 'an area needs 3 corners' : 'a wall needs 2 points' };
-      const rec = { id: N.edits.reduce((m, e) => Math.max(m, e.id), 0) + 1, kind: q.kind, pts: q.pts, at: Math.round(now()) };
-      N.edits.push(rec); N.editsVersion++; log(`map edit ${rec.id}: ${rec.kind === 'free' ? 'drivable area' : 'wall'} painted`); return { ok: true, edit: rec };
+      const need = { free: 3, wall: 2, door: 2, spot: 1 }[q.kind] || 99;
+      if (!Array.isArray(q.pts) || q.pts.length < need) return { ok: false, error: q.kind === 'free' ? 'an area needs 3 corners' : q.kind === 'spot' ? 'tap the pot' : 'needs 2 points' };
+      const rec = { id: N.edits.reduce((m, e) => Math.max(m, e.id), 0) + 1, kind: q.kind, pts: q.kind === 'spot' ? q.pts.slice(0, 1) : q.kind === 'door' ? q.pts.slice(0, 2) : q.pts, at: Math.round(now()) };
+      if (q.kind === 'door') { rec.glass = !!q.glass; if (q.name) rec.name = String(q.name).slice(0, 40); }
+      if (q.kind === 'spot') rec.r = 0.25;
+      const what = { free: 'drivable area', wall: 'wall', spot: 'pot / plant to keep clear of', door: rec.glass ? 'glass door' : 'door' }[q.kind];
+      N.edits.push(rec); N.editsVersion++; log(`map edit ${rec.id}: ${what} marked`); return { ok: true, edit: rec };
     }
     case 'delete_map_edit': N.edits = N.edits.filter(e => e.id !== +q.id); N.editsVersion++; return { ok: true };
     case 'clear_map_edits': N.edits = []; N.editsVersion++; log('map edits cleared'); return { ok: true };

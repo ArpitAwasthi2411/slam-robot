@@ -96,6 +96,12 @@ async function run(browser, role, theme) {
     check((await p.textContent('#m-mode')).includes('3 points'), `${tag}: paint adds corners (T9)`);
     await p.click('#m-mode [data-m=psave]'); await p.waitForTimeout(900);
     check(await p.evaluate(() => /Drivable area saved/.test(document.querySelector('#toast').textContent)), `${tag}: paint saved (T9)`);
+    await p.click('#m-mode [data-m=pk-spot]');
+    check((await p.textContent('#m-mode')).includes('pot or plant'), `${tag}: paint a pot (T9)`);
+    await p.mouse.click(box.x + box.width * 0.55, box.y + box.height * 0.45); await p.waitForTimeout(900);
+    check(await p.evaluate(() => /Pot marked/.test(document.querySelector('#toast').textContent)), `${tag}: pot saved with one tap (T9)`);
+    await p.click('#m-mode [data-m=pk-glass]');
+    check((await p.textContent('#m-mode')).includes('glass door'), `${tag}: paint a glass door (T9)`);
     await p.click('#m-mode [data-m=close]');
   }
 

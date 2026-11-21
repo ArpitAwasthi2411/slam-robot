@@ -136,6 +136,13 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-21: glass doors (LiDAR sees through, so the corridor + room looked like one wide space and routes ran
+  along the glass) and pots. Paint gets **Door** / **Glass door** (two sides + optional name: the opening is drivable,
+  the sides are solid posts, routes take the middle) and **Pot** (one tap, 0.25 m keep-out). A marked door found
+  closed: the robot asks once ("I am at the Lab 2 door and it is closed. Could someone open it, please?"), waits
+  `door_wait_s` 20 s and goes the moment it opens; echoes near a marked door are never remembered; still closed ->
+  closed for that trip only (`_closed_doors`, another way or recovery), the next trip tries it again. Fixed glass
+  panels: Paint -> Wall. map_edits kinds door/spot, demo, APP_FEATURES T9, browser check, test_doors_marked.py (6).
 - 2026-11-20 (lab, doors): a door handle stopped the robot in a door, it then took a long way round (also on the
   way back, from the 60 s memory) and stood still at walls. Now: blocked ahead by a thing (not a person) and the way
   round is > 1.5x + 2 m longer or there is none -> wait up to `clear_wait_s` 20 s on the spot and drive on the moment

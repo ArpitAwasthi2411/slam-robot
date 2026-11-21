@@ -60,7 +60,7 @@ from lidar_robot.follower import FollowerParams, PathFollower
 from lidar_robot.missions import Mission, MissionQueue, Stop
 from lidar_robot.planner import Planner, PlannerParams, path_length
 from lidar_robot.blockers import BlockerWatch
-from lidar_robot.map_edits import MapEdits
+from lidar_robot.map_edits import MapEdits, seg_dist
 from lidar_robot.recovery import RECOVERABLE, Recovery, describe, rule_decide, validate
 from lidar_robot.tuning import (TuningStore, apply_follower, saved_overrides, follower_values, ranges_for_app,
                                 FOLLOWER_RANGES)
@@ -143,6 +143,10 @@ class NavigatorCore:
         self.detour_extra_m = 2.0
         self.clear_wait_s = 20.0           # how long to wait for the way to clear before taking the long way round
         self._clear_wait = None
+        # doors marked on the map (Paint -> Door): one found closed is a door to be opened, not a new wall
+        self.door_wait_s = 20.0
+        self._door_wait = None
+        self._closed_doors = {}            # door id -> mission id: closed on THIS trip only; the next trip tries it
         # back-up recovery (20 Nov: flower pots and plants seen only by the ultrasonics). Stopped nose-to-pot the
         # robot has no room to turn and its start sits inside the pot's keep-out, so it backs up a little (only
         # when the LiDAR sees the space behind it empty) and then plans round the side.
@@ -257,6 +261,8 @@ class NavigatorCore:
             for x, y in arc:
                 if mapped and self.planner.clearance(x, y) < self.us_wall_skip_m:
                     continue                               # that's a wall already on the map
+                if self.map_edits.near_door(x, y):
+                    continue                               # a closed door is opened, never remembered as a wall
                 new_echoes.append((x, y))
         for x, y in new_echoes:
             d = math.hypot(x - rx, y - ry) or 1.0
@@ -558,8 +564,12 @@ class NavigatorCore:
                 return self._find(req.get('q', ''))
             if t in ('add_map_edit', 'delete_map_edit', 'clear_map_edits'):
                 if t == 'add_map_edit':
-                    rec = self.map_edits.add(str(req.get('kind', '')), req.get('pts'))
-                    self._log(f'map edit {rec["id"]}: {"drivable area" if rec["kind"] == "free" else "wall"} painted')
+                    rec = self.map_edits.add(str(req.get('kind', '')), req.get('pts'),
+                                             glass=req.get('glass', False), name=req.get('name', ''),
+                                             r=req.get('r', 0.25))
+                    what = {'free': 'drivable area', 'wall': 'wall', 'spot': 'pot / plant to keep clear of',
+                            'door': ('glass door' if rec.get('glass') else 'door')}[rec['kind']]
+                    self._log(f'map edit {rec["id"]}: {what} marked')
                     out = {'ok': True, 'edit': rec}
                 elif t == 'delete_map_edit':
                     self.map_edits.remove(req.get('id'))
@@ -1012,7 +1022,37 @@ class NavigatorCore:
         return {'ok': True, **self.preview}
 
     def _dynamic_obstacles(self):
-        return list(self.scan_world) + self.us_memory()
+        return list(self.scan_world) + self.us_memory() + self._closed_door_points()
+
+    def _closed_door_points(self):
+        """Doors found closed on the running trip, as a line of obstacle points (the next trip tries them again)."""
+        m = self.queue.active
+        out = []
+        for e in self.map_edits.doors():
+            if m is None or self._closed_doors.get(e['id']) != m.id:
+                continue
+            (ax, ay), (bx, by) = e['pts']
+            n = max(2, int(math.hypot(bx - ax, by - ay) / 0.05) + 1)
+            out += [(ax + (bx - ax) * i / (n - 1), ay + (by - ay) * i / (n - 1)) for i in range(n)]
+        return out
+
+    def _door_ahead(self, pose, reach=0.9):
+        """The marked door right in front of the robot (its line crosses the next `reach` m ahead), or None."""
+        if pose is None:
+            return None
+        doors = self.map_edits.doors()
+        if not doors:
+            return None
+        x, y, yaw = pose
+        c, s = math.cos(yaw), math.sin(yaw)
+        best, bd = None, 1e9
+        for e in doors:
+            for k in range(2, int(reach / 0.05) + 1):
+                d = seg_dist(x + c * 0.05 * k, y + s * 0.05 * k, e['pts'][0], e['pts'][1])
+                if d < 0.15 and 0.05 * k < bd:
+                    best, bd = e, 0.05 * k
+                    break
+        return best
 
     # ---------------------------------------------------------------- control loop
     def step(self, pose, front_clearance, dt):
@@ -1147,6 +1187,21 @@ class NavigatorCore:
         waiting = bool(cw and cw['key'] == (m.id, m.next_stop) and now < cw['until'])
         if waiting and front_block and b.get('kind') != 'person':
             self.follower.blocked_limit = max(0.5, cw['until'] - now)
+        door = self._door_ahead(pose) if front_block and b.get('kind') != 'person' else None
+        door_waiting = False
+        if door is not None and self._closed_doors.get(door['id']) != m.id:
+            dw = self._door_wait
+            if not dw or dw['key'] != (m.id, m.next_stop) or dw['door'] != door['id']:
+                what = f"the {door['name']} door" if door.get('name') else 'a door'
+                dw = self._door_wait = {'key': (m.id, m.next_stop), 'door': door['id'], 'what': what,
+                                        'until': now + self.door_wait_s}
+                self._log(f'at {what} and it is closed: asking for it to be opened, '
+                          f'waiting up to {self.door_wait_s:.0f} s', 'warn')
+                self.say_queue.append(('door', f'I am at {what} and it is closed. Could someone open it, please?'))
+            if now < dw['until']:
+                door_waiting = True
+                self.follower.blocked_limit = max(0.5, dw['until'] - now)
+                b['say'] = []                              # one request at the door, not "please make way" too
         self.say_queue.extend(b['say'])
         if b['ended'] and b['ended']['kind'] == 'person':
             self.mlog.bump(m, 'blocked_person')
@@ -1197,12 +1252,21 @@ class NavigatorCore:
             return 0.0, 0.0
         if event in ('BLOCKED', 'OFF_PATH'):
             blocker = None
+            at_door = None
             if event == 'BLOCKED':
                 ended = self.blockers.replanned(now) if self.follower.why_blocked == 'front' else None
                 if ended and ended['kind'] in ('person', 'object'):
                     blocker = ended['kind']
                     self.mlog.bump(m, 'blocked_' + blocker)
-                if blocker != 'person':
+                at_door = self._door_ahead(pose) if self.follower.why_blocked == 'front' and blocker != 'person' \
+                    else None
+                if at_door is not None:
+                    # still closed after door_wait_s: closed for THIS trip (another way, else recovery asks for
+                    # help); never remembered, so the next trip goes through it again
+                    self._closed_doors[at_door['id']] = m.id
+                    what = f"the {at_door['name']} door" if at_door.get('name') else 'the door'
+                    self._log(f'{what} is still closed: looking for another way for this trip', 'warn')
+                elif blocker != 'person':
                     self.remember_us(now)
                     self._us_watch_until = now + self.us_watch_s
                 else:
@@ -1210,7 +1274,7 @@ class NavigatorCore:
                     # 60 s (20 Nov: the robot kept going round a person who had already left)
                     self.remember_us(now, ttl=self.person_memory_s)
             if event == 'BLOCKED' and blocker != 'person' and getattr(self.follower, 'why_blocked', '') == 'front' \
-                    and self._wait_instead(m, pose, now):
+                    and at_door is None and self._wait_instead(m, pose, now):
                 self.follower.blocked_limit = self.clear_wait_s
                 self._set(DRIVING, f'waiting for the way to clear ({m.current.label})')
                 return 0.0, 0.0
@@ -1219,7 +1283,7 @@ class NavigatorCore:
             if self._replans > self.max_replans:
                 self._fail('BLOCKED', f'path to {m.current.label} stays blocked after {self.max_replans} new routes')
                 return 0.0, 0.0
-            if event == 'BLOCKED' and blocker != 'person' and self.backup_m > 0 \
+            if event == 'BLOCKED' and blocker != 'person' and self.backup_m > 0 and at_door is None \
                     and getattr(self.follower, 'why_blocked', '') == 'front':
                 self._backup = {'mid': m.id, 'x': pose[0], 'y': pose[1], 't0': now, 'said': False}
             why = 'obstacle in the way' if event == 'BLOCKED' else 'drifted off the path'
@@ -1247,7 +1311,9 @@ class NavigatorCore:
         else:
             self._blocked_since = None
         kind = self.blockers.kind
-        self.message = (f'waiting for the way to clear: the way round is much longer ({m.current.label})'
+        self.message = (f"waiting at {self._door_wait['what']}: it is closed ({m.current.label})"
+                        if door_waiting and self.follower.blocked
+                        else f'waiting for the way to clear: the way round is much longer ({m.current.label})'
                         if waiting and self.follower.blocked and kind != 'person'
                         else f'a person is in my way, asked to pass… ({m.current.label})' if kind == 'person'
                         else f'an object is in my way, finding another way… ({m.current.label})' if kind == 'object'
