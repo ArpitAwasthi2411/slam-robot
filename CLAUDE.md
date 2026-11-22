@@ -136,6 +136,10 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-22 (expo): app Operate -> **Welcome a guest** (operator): guest in Hindi (Devanagari) and/or English, हिन्दी / English /
+  Both, editable message, Say welcome sends each sentence as nav `say` (<= 200 chars each) to the robot's speaker;
+  kept per phone (localStorage). Default: the Technical Education Minister, Shri Rajesh Dharmani ji. demo `say`,
+  APP_FEATURES B13, browser check. Test the exact sentence and the volume on the robot before the visit.
 - 2026-11-21 (expo): places/rooms/home/dock belong to ONE map: a new map (exhibition hall) used to show the department's
   places floating over it. annotations.switch_places (called by bringup before any node starts): ~/maps/places.json =
   the set of the map in use, other maps' sets in ~/maps/annotations/<map>.json; New map starts empty, places marked

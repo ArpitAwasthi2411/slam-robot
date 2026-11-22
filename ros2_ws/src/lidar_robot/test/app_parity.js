@@ -128,6 +128,19 @@ async function run(browser, role, theme) {
     await p.click(`#lab-${sub} [data-back]`); await p.waitForTimeout(200);
     check(await visible(p, '#more-hub'), `${tag}: back to the Operate list`);
   }
+  check((await visible(p, '[data-sub=welcome]')) === op, `${tag}: Welcome a guest role gating (B13)`);
+  if (op) {
+    await p.click('[data-sub=welcome]'); await p.waitForTimeout(400);
+    check(await visible(p, '#lab-welcome'), `${tag}: welcome page opens`);
+    check((await p.inputValue('#wg-text')).includes('राजेश धर्माणी'), `${tag}: welcome text in Hindi with the guest's name`);
+    await p.fill('#wg-name-hi', 'माननीय प्रधानाचार्य जी'); await p.waitForTimeout(100);
+    check((await p.inputValue('#wg-text')).includes('प्रधानाचार्य'), `${tag}: welcome text follows the guest field`);
+    await p.click('[data-wg-lang=both]'); await p.waitForTimeout(100);
+    check((await p.inputValue('#wg-text')).includes('I am Pathik'), `${tag}: Both = Hindi and English`);
+    await p.click('#wg-say'); await p.waitForTimeout(600);
+    check(/Speaking now \(\d sentences\)/.test(await p.textContent('#wg-out')), `${tag}: Say welcome sends the sentences`);
+    await p.click('#lab-welcome [data-back]'); await p.waitForTimeout(200);
+  }
   check((await visible(p, '[data-sub=people]')) === admin, `${tag}: People role gating (E3)`);
   if (admin) {
     await p.click('[data-sub=people]'); await p.waitForTimeout(500);

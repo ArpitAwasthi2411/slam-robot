@@ -371,6 +371,7 @@
         <button class="g-row" data-sub="path"><svg class="ic" aria-hidden="true"><use href="#i-route"/></svg><span class="grow"><b>Path following</b><small>Cruise speed, turns, look‑ahead</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" data-sub="tests"><svg class="ic" aria-hidden="true"><use href="#i-test"/></svg><span class="grow"><b>Drive tests</b><small>Straight line drift, spin / wheel separation</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" id="hub-head"><svg class="ic" aria-hidden="true"><use href="#i-bot"/></svg><span class="grow"><b>Head mode</b><small>This phone becomes the robot's face: kiosk with PIN, people detection for the Pi</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="g-row" data-sub="welcome"><svg class="ic" aria-hidden="true"><use href="#i-bot"/></svg><span class="grow"><b>Welcome a guest</b><small>Pathik greets a visitor out loud, in Hindi or English</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" id="hub-peak"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg><span class="grow"><b>Peak test</b><small>Everything the head phone does at once: speed, heat, battery, pass / fail</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" id="hub-detector"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg><span class="grow"><b>Phone detector</b><small>Lab: people detection running on this phone's camera</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         <button class="g-row" data-sub="ai"><svg class="ic" aria-hidden="true"><use href="#i-why"/></svg><span class="grow"><b>AI commands</b><small id="hub-ai">Language model status, test, every call with its error</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
@@ -474,6 +475,21 @@
       <div class="row gap"><input id="ai-text" class="grow" type="text" placeholder="Test sentence (optional)" aria-label="Test sentence"><button id="ai-test" class="btn primary">Test AI</button></div>
       <div class="card" id="ai-test-out" hidden></div>
       <ol id="ai-list" class="list loglist"><li class="empty">Loading…</li></ol>
+    </div>
+
+    <div class="page-in stack-l sub" id="lab-welcome" hidden>
+      <div class="sub-h"><button class="back" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button><h1 class="title-m">Welcome a guest</h1></div>
+      <p class="muted small">Type who is visiting, then tap <b>Say welcome</b> when they reach the robot. Pathik says it on its own speaker. Write Hindi in हिन्दी letters so the Hindi voice reads it.</p>
+      <div class="seg" role="radiogroup" aria-label="Language" id="wg-lang">
+        <button class="seg-b" data-wg-lang="hi" role="radio">हिन्दी</button>
+        <button class="seg-b" data-wg-lang="en" role="radio">English</button>
+        <button class="seg-b" data-wg-lang="both" role="radio">Both</button>
+      </div>
+      <label class="stack" id="wg-hi-row"><span class="small muted">Guest, in Hindi</span><input id="wg-name-hi" type="text" maxlength="90" aria-label="Guest name in Hindi"></label>
+      <label class="stack" id="wg-en-row"><span class="small muted">Guest, in English</span><input id="wg-name-en" type="text" maxlength="90" aria-label="Guest name in English"></label>
+      <label class="stack"><span class="small muted">What Pathik will say (you can change it)</span><textarea id="wg-text" rows="5" maxlength="600" aria-label="Welcome message"></textarea></label>
+      <div class="row gap"><button id="wg-reset" class="btn ghost">Reset text</button><button id="wg-say" class="btn primary grow">Say welcome</button></div>
+      <p class="muted small" id="wg-out" role="status"></p>
     </div>
 
     <div class="page-in stack-l sub" id="lab-know" hidden>

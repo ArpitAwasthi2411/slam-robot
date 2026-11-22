@@ -468,6 +468,7 @@ function navReq(q) {
     case 'resume': if (R.estop) throw new Error('release the e-stop first'); R.hold = false; N.state = 'IDLE'; N.message = 'resumed'; log('missions resumed'); return { ok: true };
     case 'confirm_localization': return { ok: true };
     case 'button_settings': if ('enabled' in q) { N.buttonOn = !!q.enabled; log(`robot voice button turned ${N.buttonOn ? 'on' : 'off'}`); } return { ok: true, button: navStatus().button };
+    case 'say': { const tx = String(q.text || '').trim(); if (!tx) return { ok: false, error: 'nothing to say' }; log('Robot says: ' + tx.slice(0, 80)); return { ok: true }; }
     case 'confirm': if (N.state !== 'CONFIRM') return { ok: false, error: 'nothing is waiting for OK' }; log('OK received'); advance(now()); return { ok: true };
     case 'explain': return explain();
     case 'find': return find(q.q || '');

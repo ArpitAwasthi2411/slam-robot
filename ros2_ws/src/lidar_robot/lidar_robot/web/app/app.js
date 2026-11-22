@@ -1881,7 +1881,7 @@ const lab = { wheelRanges: null, wheel: {}, wheelEdit: 0, wheelDirty: false, fol
   live: false, seq: 0, samples: [], frozen: null, test: 'straight', testResult: null, telemT: null };
 
 // Operate area: a list (hub) of the robot-team tools; each opens as a sub-page with a back button
-const SUBS = ['health', 'wheels', 'path', 'tests', 'ai', 'know', 'log', 'people'];
+const SUBS = ['health', 'wheels', 'path', 'tests', 'ai', 'know', 'welcome', 'log', 'people'];
 $$('[data-sub]').forEach(b => b.onclick = () => { haptic(8); S.lab = b.dataset.sub; labEnter(); });
 // Phone detector (lab): detect.html runs YOLO on this phone. In the APK it opens on a secure asset origin
 // (camera + WebAssembly); the robot's address and login go along so it can also use the robot's camera.
@@ -1915,6 +1915,7 @@ function lab_set(which) {
   if (which === 'log') loadLog();
   if (which === 'ai') loadAI();
   if (which === 'know') loadKnow();
+  if (which === 'welcome') wgLoad();
   if (which === 'health' && S.st) renderStatus(S.st);
   if (which === 'path') loadFollower();
   if (which === 'people') loadPeople();
@@ -2233,6 +2234,59 @@ function knowEdit(e) {
   if (e) $('#kn-title').focus();
 }
 $('#kn-refresh').onclick = loadKnow;
+
+// ---------- welcome a guest (22 Nov): the robot greets a visitor out loud ----------
+// Hindi goes in Devanagari so the robot's Hindi voice reads it; each sentence is sent on its own (say <= 200 chars).
+const WG_KEY = 'pathik.welcome';
+const WG_DEF = { lang: 'hi', hi: 'माननीय तकनीकी शिक्षा मंत्री श्री राजेश धर्माणी जी', en: 'Honourable Technical Education Minister, Shri Rajesh Dharmani ji', text: '', edited: false };
+const wgTpl = {
+  hi: n => `नमस्ते, ${n}। आपका हार्दिक स्वागत है। मैं पथिक हूँ, राजकीय हाइड्रो अभियांत्रिकी महाविद्यालय बंदला के सीएसई विभाग के विद्यार्थियों का बनाया हुआ रोबोट।`,
+  en: n => `Namaste, ${n}. A very warm welcome to you. I am Pathik, a robot built by the students of the CSE department, Government Hydro Engineering College, Bandla.`,
+};
+let WG = { ...WG_DEF };
+function wgSave() { try { localStorage.setItem(WG_KEY, JSON.stringify(WG)); } catch (e) { /* private mode: keep in memory */ } }
+function wgCompose() {
+  const hi = wgTpl.hi(WG.hi.trim() || WG_DEF.hi), en = wgTpl.en(WG.en.trim() || WG_DEF.en);
+  return WG.lang === 'hi' ? hi : WG.lang === 'en' ? en : hi + '\n' + en;
+}
+function wgShow() {
+  $$('[data-wg-lang]').forEach(b => { const on = b.dataset.wgLang === WG.lang; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
+  $('#wg-hi-row').hidden = WG.lang === 'en';
+  $('#wg-en-row').hidden = WG.lang === 'hi';
+  $('#wg-name-hi').value = WG.hi; $('#wg-name-en').value = WG.en;
+  if (!WG.edited) WG.text = wgCompose();
+  $('#wg-text').value = WG.text;
+}
+function wgLoad() {
+  try { WG = { ...WG_DEF, ...(JSON.parse(localStorage.getItem(WG_KEY) || '{}') || {}) }; } catch (e) { WG = { ...WG_DEF }; }
+  wgShow();
+}
+function wgSentences(text) {
+  // split after । . ! ? and keep each piece under the robot's 200-character limit
+  const out = [];
+  for (const part of String(text).replace(/\s+/g, ' ').split(/(?<=[।.!?])\s+/)) {
+    let p = part.trim();
+    while (p.length > 190) { let cut = p.lastIndexOf(' ', 190); if (cut < 60) cut = 190; out.push(p.slice(0, cut)); p = p.slice(cut).trim(); }
+    if (p) out.push(p);
+  }
+  return out;
+}
+$$('[data-wg-lang]').forEach(b => b.onclick = () => { WG.lang = b.dataset.wgLang; WG.edited = false; wgSave(); wgShow(); });
+$('#wg-name-hi').oninput = e => { WG.hi = e.target.value; WG.edited = false; WG.text = wgCompose(); $('#wg-text').value = WG.text; wgSave(); };
+$('#wg-name-en').oninput = e => { WG.en = e.target.value; WG.edited = false; WG.text = wgCompose(); $('#wg-text').value = WG.text; wgSave(); };
+$('#wg-text').oninput = e => { WG.text = e.target.value; WG.edited = true; wgSave(); };
+$('#wg-reset').onclick = () => { WG.edited = false; wgSave(); wgShow(); };
+$('#wg-say').onclick = async () => {
+  const parts = wgSentences($('#wg-text').value);
+  if (!parts.length) { $('#wg-out').textContent = 'Write something for Pathik to say first.'; return; }
+  haptic(12);
+  const btn = $('#wg-say'); btn.disabled = true;
+  try {
+    for (const t of parts) await nav({ type: 'say', text: t });
+    $('#wg-out').textContent = `Speaking now (${parts.length} sentence${parts.length > 1 ? 's' : ''}). Tap again to repeat.`;
+  } catch (e) { $('#wg-out').textContent = 'Could not reach the robot: ' + (e.message || e); }
+  finally { setTimeout(() => { btn.disabled = false; }, 1500); }
+};
 $('#kn-cancel').onclick = () => knowEdit(null);
 $('#kn-form').onsubmit = async ev => {
   ev.preventDefault();
