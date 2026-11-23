@@ -433,6 +433,20 @@ button.g-row:active { background: var(--surface-2); }
 .readout small { color: var(--dim); margin-right: 8px; }
 .readout small:last-child { margin-right: 0; }
 .speed { position: absolute; right: 22px; bottom: 30px; width: 58px; height: 196px; border-radius: 20px; display: grid; justify-items: center; align-content: space-between; padding: 10px 0; }
+/* Drive tab: the tool rail, the joystick, the speed readout and the speed slider never cover each other.
+   Upright: the rail stops (and scrolls) above the readout. Sideways: the rail runs down the left edge and scrolls,
+   the joystick sits to its right, the readout beside the joystick and above the raised STOP, the slider shrinks. */
+body.tab-drive .rail { max-height: calc(100% - var(--top-h) - var(--alerts-h) - var(--bottom-h) - 20px - 164px - 52px);
+                       overflow-y: auto; scrollbar-width: none; }
+body.tab-drive .rail::-webkit-scrollbar { display: none; }
+@media (orientation: landscape) and (max-height: 600px) {
+  body.tab-drive .rail { max-height: calc(100% - var(--top-h) - var(--alerts-h) - var(--bottom-h) - 16px); }
+  body.tab-drive .joy-wrap { left: 96px; }
+  body.tab-drive .m-hint { display: none; }          /* map-tool tip: no room for it next to the joystick */
+  body.tab-drive .readout { left: 272px; bottom: 96px; }
+  body.tab-drive .speed { height: min(196px, calc(100vh - var(--top-h) - var(--alerts-h) - var(--bottom-h) - 64px)); }
+  body.tab-drive .speed input[type=range] { width: calc(min(196px, calc(100vh - var(--top-h) - var(--alerts-h) - var(--bottom-h) - 64px)) - 64px); }
+}
 .speed-v { font: 650 13px/1 var(--display); }
 .speed-l { font-size: 11px; color: var(--dim); }
 .speed input[type=range] { position: absolute; left: 50%; top: 50%; width: 132px; transform: translate(-50%, -50%) rotate(-90deg); margin: 0; min-height: 30px; }

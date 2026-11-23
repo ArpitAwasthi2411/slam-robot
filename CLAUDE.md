@@ -136,6 +136,12 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-23 (layout): STOP on the kiosk covered other buttons (the PIN pad's ✓ on a sideways phone, Speak, Close,
+  the Go sheet's last row upright) and the Drive joystick covered the map-tool rail on a sideways phone. head.html: `--stop`
+  size (80 px when <= 430 px tall), sheets keep a strip free for STOP (right sideways, bottom upright), Ask/Speak shrink
+  to end above it. app.css: in Drive the rail scrolls and ends above the readout (upright); sideways the joystick sits
+  right of the rail, readout beside it above the raised STOP, slider shrinks, map-tool tip hidden. test/overlap_check.js +
+  test_no_overlap.py: 8 sizes, every sheet, 0 overlaps (old layout: 24).
 - 2026-11-23: **Guide mode for visitors** (the PIN meant nobody could use Pathik as a guide): operator switches it on
   in Me → Robot (1/2/4/8 h or until off, wait at the place, allowed places); while on, the face screen Go / Ask start a
   trip to an allowed place with no PIN: "Please follow me", wait `wait_s`, back home; one at a time; other places,
