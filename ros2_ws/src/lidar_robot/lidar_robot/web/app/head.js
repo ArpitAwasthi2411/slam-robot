@@ -261,8 +261,12 @@
     $('k-guide').hidden = !g;
     $('k-places').replaceChildren(...(pl.places || []).map(p => tile(p.name, p.note || '', { type: 'goto_place', name: p.name })));
     $('k-rooms').replaceChildren(...(pl.rooms || []).map(r => tile(r.name, (r.contents || []).slice(0, 3).join(', '), { type: 'goto_room', name: r.name })));
-    if (!(pl.places || []).length) $('k-places').innerHTML = '<p class="h-muted">No places saved yet.</p>';
-    if (!(pl.rooms || []).length) $('k-rooms').innerHTML = '<p class="h-muted">No rooms saved yet.</p>';
+    const np = (pl.places || []).length, nr = (pl.rooms || []).length;
+    // an empty section is hidden when the other one has entries (a map with only rooms shows no empty "Places")
+    $('k-places-h').hidden = $('k-places').hidden = !np && nr > 0;
+    $('k-rooms-h').hidden = $('k-rooms').hidden = !nr && np > 0;
+    if (!np) $('k-places').innerHTML = '<p class="h-muted">No places saved yet.</p>';
+    if (!nr) $('k-rooms').innerHTML = '<p class="h-muted">No rooms saved yet.</p>';
     $('k-msg').textContent = '';
     $('kiosk').hidden = false; kioskIdle();
   }
