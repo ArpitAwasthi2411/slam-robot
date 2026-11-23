@@ -136,6 +136,10 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-23 (start position): operator fixes where the robot starts on a saved map (Map mode card: Robot's spot =
+  start / Pick start on map / Clear; magenta ring). ~/maps/start_poses.json (per map, atomic), map_mode.get/set_start_pose,
+  dashboard applies it after every restart in localization via relocalize (a fresh Freeze pose wins), POST /api/slam
+  set_start / clear_start, state `start_pose`, demo, APP_FEATURES B15, test_start_pose.py (4). Not run on the robot.
 - 2026-11-23 (narrow places, multi-user): narrow corridors: follower shuffles forward / back / turn (footprint.plan_manoeuvre)
   up to `max_manoeuvres` 6 per route (2 before; a U-turn in an 85 cm corridor reported BLOCKED), also when a bend is too
   tight for the body (was 'body' blocked); test_narrow_turns.py. Recovery times 15-30 s: us_memory_s 25 (60), app answer

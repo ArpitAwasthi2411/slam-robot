@@ -158,6 +158,13 @@ class DashboardNode(Node):
         self.slam_error = None             # {'t', 'msg'} when the last Freeze could not save
         saved = map_mode.read_mode(self.map_mode_file) if self.map_mode_file else None
         self._start_pose = map_mode.startup_pose(saved, self.slam_mode, self.map_file, time.time())
+        self._start_kind = 'freeze'
+        # the operator's fixed start position of this map (Map tab -> Start position): used on every restart
+        self.fixed_start = (map_mode.get_start_pose(self.map_dir, self.map_file)
+                            if self.slam_mode == 'localization' else None)
+        if not self._start_pose and self.fixed_start:
+            self._start_pose = {k: self.fixed_start[k] for k in ('x', 'y', 'yaw')}
+            self._start_kind = 'fixed'
         self._start_pose_t0 = time.monotonic()
         if self._start_pose:
             # in its own thread, NOT a timer: a timer callback that waits for a Cartographer service answer
@@ -266,7 +273,7 @@ class DashboardNode(Node):
         if not self._start_pose:
             return
         if time.monotonic() - self._start_pose_t0 > 90.0:
-            self.get_logger().warn('could not set the start position after Freeze: use Set position in the app')
+            self.get_logger().warn('could not set the start position: use Locate (Set position) in the app')
             self._start_pose = None
             return
         try:
@@ -275,8 +282,11 @@ class DashboardNode(Node):
             self.get_logger().info(f'start position after Freeze: waiting for Cartographer ({e})',
                                    throttle_duration_sec=15.0)
             return
-        self.get_logger().info('robot placed where the map was frozen')
         self._start_pose = None
+        if self._start_kind == 'fixed':
+            self.get_logger().info('robot placed at the start position fixed for this map')
+            return
+        self.get_logger().info('robot placed where the map was frozen')
         try:                                # used once: a later restart must not jump back to this spot
             map_mode.write_mode(self.map_mode_file, self.slam_mode, self.map_file)
         except OSError:
@@ -454,6 +464,7 @@ class DashboardNode(Node):
             'autosave': self.autosave.info,
             'map_autosave': self.map_saver.info if self.slam_mode == 'mapping' else None,
             'slam_mode': self.slam_mode,
+            'start_pose': self.fixed_start,
             'map_name': os.path.basename(self.map_file)[:-9] if self.map_file.endswith('.pbstream') else '',
             'switching': self.switching,
             'slam_error': self.slam_error,
@@ -652,7 +663,30 @@ class DashboardNode(Node):
                          for m in map_mode.list_maps(self.map_dir)],
                 'can_switch': bool(self.map_mode_file) and self.slam_mode in map_mode.MODES,
                 'auto_restart': bool(os.environ.get('INVOCATION_ID')),     # started by systemd (robot.service)
-                'switching': self.switching}
+                'switching': self.switching, 'start_pose': self.fixed_start}
+
+    def _set_start(self, body):
+        """Fix (or clear) where the robot starts on this saved map after every restart."""
+        if self.slam_mode != 'localization' or not self.map_file.endswith('.pbstream'):
+            raise ValueError('The start position is set on a saved map: Map -> Use a saved map (or Freeze) first.')
+        if body.get('action') == 'clear_start':
+            self.fixed_start = map_mode.set_start_pose(self.map_dir, self.map_file, None)
+            return {'ok': True, 'say': 'Start position removed: after a restart the robot starts where the map began.',
+                    'start_pose': None}
+        if body.get('here'):
+            pose = self._pose()
+            if not pose or pose.get('frame') != self.global_frame:
+                raise ValueError('The robot does not know where it is on the map yet: use Locate first.')
+        else:
+            pose = {k: body.get(k) for k in ('x', 'y', 'yaw')}
+            try:
+                pose = {k: float(v if v is not None else 0.0) for k, v in pose.items()}
+            except (TypeError, ValueError):
+                raise ValueError('x, y and yaw must be numbers')
+        self.fixed_start = map_mode.set_start_pose(self.map_dir, self.map_file, pose, by=str(body.get('by', '')))
+        return {'ok': True, 'start_pose': self.fixed_start,
+                'say': 'Start position saved. After every restart the robot starts there on this map: park it '
+                       'there before switching it on.'}
 
     def _busy(self):
         n = self.nav_status if time.monotonic() - self.nav_status_t < 2.0 else {}
@@ -664,6 +698,8 @@ class DashboardNode(Node):
 
     def slam_switch(self, body):
         """Freeze the map / continue mapping / new map / drive on a saved map, then restart."""
+        if str(body.get('action', '')) in ('set_start', 'clear_start'):
+            return self._set_start(body)
         if not self.map_mode_file or self.slam_mode not in map_mode.MODES:
             raise ValueError('Map mode switching needs SLAM running from bringup (map_mode_file set).')
         if self.switching:

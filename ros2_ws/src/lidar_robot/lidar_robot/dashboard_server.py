@@ -340,7 +340,7 @@ def make_handler(backend, index_path, app_dir=None, users=None, public=None):
                 if users is not None and url.path.startswith(('/api/auth/', '/api/users/')):
                     r = self._auth_post(url.path, body)
                     return self._send(200, r) if r is not None else self._send(404, {'error': 'not found'})
-                if self.user and url.path == '/api/nav':
+                if self.user and url.path in ('/api/nav', '/api/slam'):
                     body['by'] = self.user['username']
                 if url.path == '/api/cmd':
                     backend.command(_num(body, 'v', 0.0), _num(body, 'w', 0.0))

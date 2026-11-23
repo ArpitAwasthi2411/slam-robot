@@ -79,6 +79,64 @@ def startup_pose(saved, slam_mode, map_file, now, max_age_s=900.0):
     return saved['pose']
 
 
+# ---------------------------------------------------------------- fixed start position (23 Nov)
+# An operator marks where the robot is parked when it is switched on (e.g. Home by the lab door). After every
+# restart on that saved map the dashboard starts localization there, so nobody has to use Set position by hand.
+START_FILE = 'start_poses.json'
+
+
+def _map_key(map_file):
+    b = os.path.basename(map_file or '')
+    return b[:-9] if b.endswith('.pbstream') else b
+
+
+def read_start_poses(map_dir):
+    try:
+        with open(os.path.join(os.path.expanduser(map_dir), START_FILE)) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def get_start_pose(map_dir, map_file):
+    """The fixed start position of this saved map ({'x','y','yaw', 'by', 't'}) or None."""
+    key = _map_key(map_file)
+    p = read_start_poses(map_dir).get(key) if key else None
+    if not isinstance(p, dict):
+        return None
+    try:
+        out = {k: float(p[k]) for k in ('x', 'y', 'yaw')}
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(v == v and abs(v) < 1e4 for v in out.values()):
+        return None
+    out.update(by=str(p.get('by', '')), t=p.get('t'))
+    return out
+
+
+def set_start_pose(map_dir, map_file, pose, by='', clock=time.time):
+    """pose {'x','y','yaw'} to fix the start position of this map, None to remove it. Atomic write."""
+    key = _map_key(map_file)
+    if not key:
+        raise ValueError('The start position belongs to a saved map: use a saved map first.')
+    d = read_start_poses(map_dir)
+    if pose is None:
+        d.pop(key, None)
+    else:
+        v = {k: round(float(pose[k]), 4) for k in ('x', 'y', 'yaw')}
+        if not all(x == x and abs(x) < 1e4 for x in v.values()):
+            raise ValueError('start position must be finite numbers')
+        d[key] = dict(v, by=str(by)[:40], t=int(clock()))
+    path = os.path.join(os.path.expanduser(map_dir), START_FILE)
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(d, f)
+    os.replace(tmp, path)
+    return get_start_pose(map_dir, map_file)
+
+
 def resolve(cli_mode, cli_map, path):
     """What the launch should run: the app's saved choice wins over ROBOT_ARGS.
 

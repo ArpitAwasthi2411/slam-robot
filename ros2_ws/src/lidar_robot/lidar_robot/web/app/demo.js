@@ -654,9 +654,15 @@ const MM = { mode: 'localization', map: 'demo_floor', maps: [{ name: 'demo_floor
 function mmTick() {
   if (MM.switching && now() > MM.until) { MM.mode = MM.switching.mode; MM.map = MM.switching.map; MM.switching = null; if (MM.mode === 'localization') N.localized = false; log(`Restarted: ${MM.mode === 'mapping' ? 'mapping' : 'frozen map ' + MM.map}`); }
 }
-function mmInfo() { mmTick(); return { mode: MM.mode, map: MM.map, map_name: MM.map, maps: MM.maps, can_switch: true, auto_restart: true, switching: MM.switching }; }
+function mmInfo() { mmTick(); return { mode: MM.mode, map: MM.map, map_name: MM.map, maps: MM.maps, can_switch: true, auto_restart: true, switching: MM.switching, start_pose: MM.start || null }; }
 function mmSwitch(b) {
   mmTick();
+  if (b.action === 'set_start' || b.action === 'clear_start') {
+    if (MM.mode !== 'localization') throw new Error('The start position is set on a saved map: Map -> Use a saved map (or Freeze) first.');
+    if (b.action === 'clear_start') { MM.start = null; return { ok: true, start_pose: null, say: 'Start position removed: after a restart the robot starts where the map began.' }; }
+    MM.start = b.here ? { x: R.x, y: R.y, yaw: R.yaw } : { x: +b.x, y: +b.y, yaw: +(b.yaw || 0) };
+    return { ok: true, start_pose: MM.start, say: 'Start position saved. After every restart the robot starts there on this map: park it there before switching it on.' };
+  }
   if (MM.switching) throw new Error('Already switching: the robot is restarting.');
   if (N.active || N.queue.length) throw new Error('Not now: it is busy: cancel the task first.');
   const a = b.action; let mode, map, say;
@@ -690,7 +696,7 @@ function state() {
     sensors: { us: [null, null, null], imu_ok: true, yaw_source: 'gyro', us_mounts: [[0.07, 0.12, 0.52], [0.07, 0, 0], [0.07, -0.12, -0.52]], bumper: false },
     pi: { temp_c: 58, cpu_pct: 46, load1: 1.9, cores: 4, throttled: '0x0', flags: [], level: 'ok', text: 'OK' },
     nav: navStatus(), places: { map: places.map, home: places.home, dock: places.dock, places: places.places, rooms: places.rooms, version: places.version },
-    tune: { ...tune }, fw: '2.4-demo', telemetry: false, turns: 0, sep: 0.3, test_running: false, autosave: {}, slam_mode: (mmTick(), MM.mode), map_name: MM.map, switching: MM.switching,
+    tune: { ...tune }, fw: '2.4-demo', telemetry: false, turns: 0, sep: 0.3, test_running: false, autosave: {}, slam_mode: (mmTick(), MM.mode), map_name: MM.map, switching: MM.switching, start_pose: MM.mode === 'localization' ? (MM.start || null) : null,
     vision: demoVision(), camera: true,
     voice: { ok: true, mic: true, button: true, stt: 'demo', listening: VO.listening, thinking: VO.thinking,
              last_heard: VO.heard, last_reply: VO.reply, message: 'Demo: hold the button, the demo robot "hears" a sample command.' },

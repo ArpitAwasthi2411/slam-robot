@@ -796,6 +796,13 @@ function drawMap() {
   }
   const home = st.places && st.places.home;
   if (home) { const [x, y] = W2S(home.x, home.y); diamond(x, y, 8 * DPR, PAL.orange); diamond(x, y, 3.5 * DPR, PAL.bg); }
+  const sp = st.start_pose;                       // fixed start position of this saved map: magenta ring + heading
+  if (sp && st.slam_mode === 'localization') {
+    const [x, y] = W2S(sp.x, sp.y);
+    cx.save(); cx.strokeStyle = PAL.magenta; cx.lineWidth = 2 * DPR; cx.setLineDash([4 * DPR, 3 * DPR]);
+    cx.beginPath(); cx.arc(x, y, 10 * DPR, 0, 7); cx.stroke(); cx.restore();
+    drawArrow(sp.x, sp.y, sp.yaw, Math.max(0.3, 20 / view.scale), PAL.magenta, 2);
+  }
   if (navs.goal) {
     const [x, y] = W2S(navs.goal.x, navs.goal.y);
     cx.save(); cx.strokeStyle = PAL.teal; cx.shadowColor = PAL.teal; cx.shadowBlur = 12 * DPR;
@@ -960,6 +967,8 @@ function renderMode() {
         ${kinds}${edits.length ? '<button class="btn ghost" data-m="plast">Remove last</button><button class="btn ghost" data-m="pclear">Clear all</button>' : ''}
         <button class="btn ghost" data-m="close">Done</button>`;
     }
+  } else if (T.tool === 'start') {
+    html = `<span class="grow"><b>Start position.</b> Press where the robot is parked when it is switched on, drag the way it faces.</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'locate') {
     html = `<span class="grow"><b>Set position.</b> Press where the robot really is, drag the way it faces.</span><button class="btn ghost" data-m="close">Done</button>`;
   } else if (T.tool === 'measure') {
@@ -1087,6 +1096,13 @@ async function toolRelease(d) {
     await saveRoom([[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(p => [+p[0].toFixed(2), +p[1].toFixed(2)]));
     return;
   }
+  if (T.tool === 'start') {
+    const yaw = headingOf(d) ?? 0, [x, y] = d.a;
+    if (!await confirmBox('Start here after every restart?', `The robot starts at ${fmt(x, 1)}, ${fmt(y, 1)} m facing ${deg(yaw)} on this map whenever it is switched on. Park it there before switching it on.`, 'Save start')) return;
+    try { const r = await post('/api/slam', { action: 'set_start', x, y, yaw }); toast(r.say || 'Start position saved'); haptic(25); setTool('start'); }
+    catch (e) { toast(e.message, true); }
+    return;
+  }
   if (T.tool === 'locate') {
     const pose = S.st && S.st.pose, yaw = headingOf(d) ?? (pose ? pose.yaw : 0), [x, y] = d.a;
     if (!await confirmBox('Robot is here?', `Set the robot's position to ${fmt(x, 1)}, ${fmt(y, 1)} m facing ${deg(yaw)}. The LiDAR then re-matches the map from there.`, 'Set position')) return;
@@ -1201,7 +1217,7 @@ function drawTools() {
     cx.fillText(`${fmt(Math.abs(d.b[0] - d.a[0]), 1)} × ${fmt(Math.abs(d.b[1] - d.a[1]), 1)} m`, (ax + bx) / 2, (ay + by) / 2);
     return;
   }
-  const color = T.tool === 'goal' ? PAL.teal : T.tool === 'locate' ? PAL.magenta : PAL.orange;
+  const color = T.tool === 'goal' ? PAL.teal : T.tool === 'locate' || T.tool === 'start' ? PAL.magenta : PAL.orange;
   cx.strokeStyle = color; cx.lineWidth = 2.5 * DPR; cx.beginPath(); cx.arc(ax, ay, 12 * DPR, 0, 7); cx.stroke();
   if (d.px > DRAG_PX) drawArrow(d.a[0], d.a[1], headingOf(d), Math.max(Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), 0.3), color, 3.5);
 }
@@ -1511,7 +1527,26 @@ function renderMapMode(st) {
   $('#mm-btns').hidden = !!sw;
   $('#mm-freeze').hidden = frozen;
   $('#mm-continue').hidden = !frozen;
+  const sp = st.start_pose;
+  $('#mm-start').hidden = !frozen || !!sw;
+  $('#mm-start-clear').hidden = !sp;
+  $('#mm-start-text').textContent = sp
+    ? `${fmt(sp.x, 1)}, ${fmt(sp.y, 1)} m facing ${deg(sp.yaw)} (magenta ring). After every restart the robot starts there: park it there before switching on.`
+    : 'Not set: after a restart the robot starts where the map began. Set it to the spot where the robot is parked.';
 }
+$('#mm-start-here').onclick = async () => {
+  const p = S.st && S.st.pose;
+  if (!p) return toast('The robot does not know where it is yet: use Locate first.', true);
+  if (!await confirmBox('Start here after every restart?', `Where the robot stands now (${fmt(p.x, 1)}, ${fmt(p.y, 1)} m facing ${deg(p.yaw)}) becomes its start position on this map. Check the orange dots sit on the walls first.`, 'Save start')) return;
+  try { const r = await post('/api/slam', { action: 'set_start', here: true }); toast(r.say || 'Start position saved'); haptic(25); }
+  catch (e) { toast(e.message, true); }
+};
+$('#mm-start-pick').onclick = () => { haptic(10); setTool('start'); };
+$('#mm-start-clear').onclick = async () => {
+  if (!await confirmBox('Remove the start position?', 'After a restart the robot starts where the map began again.', 'Remove')) return;
+  try { const r = await post('/api/slam', { action: 'clear_start' }); toast(r.say || 'Removed'); }
+  catch (e) { toast(e.message, true); }
+};
 
 function renderMapStats(st) {
   const box = $('#m-stats'), ex = (st.nav && st.nav.explore) || {};

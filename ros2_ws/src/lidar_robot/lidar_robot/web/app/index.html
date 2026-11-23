@@ -236,6 +236,15 @@
             <button id="mm-use" class="btn grow">Use a saved map</button>
             <button id="mm-new" class="btn ghost grow">New map</button>
           </div>
+          <div class="stack" id="mm-start" hidden>
+            <b class="title-s">Start position</b>
+            <small class="muted block" id="mm-start-text">No start position: after a restart the robot starts where the map began.</small>
+            <div class="row gap wrap">
+              <button id="mm-start-here" class="btn grow">Robot's spot = start</button>
+              <button id="mm-start-pick" class="btn ghost grow">Pick on map</button>
+              <button id="mm-start-clear" class="btn ghost grow" hidden>Clear</button>
+            </div>
+          </div>
           <p id="mm-switching" class="x-msg" role="status" hidden></p>
         </div>
         <div class="row gap" data-min="operator">
