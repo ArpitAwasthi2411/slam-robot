@@ -87,7 +87,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Next lab day: **`docs/STEPS_lab_19nov.md`** (laptop mapping of the department, encoder check, CPU report); INA226/dock in `docs/STEPS_lab_18nov.md`; before that `docs/STEPS_lab_16nov.md` (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-11-21**
+**Last updated: 2026-11-23**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -136,6 +136,11 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-23: **Guide mode for visitors** (the PIN meant nobody could use Pathik as a guide): operator switches it on
+  in Me → Robot (1/2/4/8 h or until off, wait at the place, allowed places); while on, the face screen Go / Ask start a
+  trip to an allowed place with no PIN: "Please follow me", wait `wait_s`, back home; one at a time; other places,
+  Deliver, settings keep the PIN. navigator_core guide_settings / guide_to (staff), ~/maps/guide.json, status `guide`,
+  demo, APP_FEATURES B14, docs/head_mode.md, browser check, test_guide_mode.py (5). Not run on the robot.
 - 2026-11-22 (expo): app Operate -> **Welcome a guest** (operator): guest in Hindi (Devanagari) and/or English, हिन्दी / English /
   Both, editable message, Say welcome sends each sentence as nav `say` (<= 200 chars each) to the robot's speaker;
   kept per phone (localStorage). Default: the Technical Education Minister, Shri Rajesh Dharmani ji. demo `say`,

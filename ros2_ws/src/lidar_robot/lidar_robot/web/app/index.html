@@ -393,6 +393,12 @@
         <h2 class="g-h" id="rb-h">Robot</h2>
         <div class="g-row"><span class="dot" id="me-dot"></span><span class="grow"><b id="me-robot">–</b><small id="me-net">–</small></span></div>
         <div class="g-row" id="me-btn-row"><span class="grow"><b>Voice button on the robot</b><small id="me-btn">Anyone at the robot can stop it or say OK; trips only start from the home spot</small></span><label class="switch" data-min="operator"><input id="me-btn-on" type="checkbox" aria-label="Allow the voice button on the robot"></label></div>
+        <div class="g-row" id="me-guide-row" hidden><span class="grow"><b>Guide mode for visitors</b><small id="me-guide">Off · visitors at the face screen need the PIN</small></span><label class="switch" data-min="operator"><input id="me-guide-on" type="checkbox" aria-label="Guide mode for visitors"></label></div>
+        <div class="g-sub" id="me-guide-opts" data-min="operator" hidden>
+          <label>For <select id="me-guide-h" aria-label="How long"><option value="1">1 hour</option><option value="2" selected>2 hours</option><option value="4">4 hours</option><option value="8">8 hours</option><option value="0">until I turn it off</option></select></label>
+          <label>Wait at the place <select id="me-guide-w" aria-label="Wait there"><option value="5">5 s</option><option value="15" selected>15 s</option><option value="30">30 s</option><option value="60">1 min</option></select></label>
+          <details><summary id="me-guide-pl-sum">Places visitors may pick: all</summary><div class="g-checks" id="me-guide-pl"></div></details>
+        </div>
         <button class="g-row" id="me-switch"><span class="grow"><b>Switch robot</b><small>Connect to another Pathik</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
       </section>
 

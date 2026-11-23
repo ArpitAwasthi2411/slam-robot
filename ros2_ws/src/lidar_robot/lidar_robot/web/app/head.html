@@ -138,6 +138,9 @@
   .h-steps i { flex: 1; height: 6px; border-radius: 3px; background: var(--line-2); }
   .h-steps i.done { background: var(--good); } .h-steps i.now { background: var(--orange); }
   .h-chip.err { color: var(--orange); }
+  .h-guide { display: inline-block; margin: 2px 0 6px; padding: 6px 12px; border-radius: var(--r-pill);
+             background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); font-weight: 600; }
+  .h-grid button.locked { opacity: .62; }
   .h-door { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
   .h-door b { font: 800 22px var(--display); } .h-door b.open { color: var(--good); } .h-door b.closed { color: var(--warn); }
 </style>
@@ -148,6 +151,7 @@
     <button class="h-corner" id="gear" aria-label="Head settings (PIN)">⚙</button>
     <span class="h-chip" id="c-bat">–</span>
     <span class="h-chip" id="c-net">–</span>
+    <span class="h-chip ok" id="c-guide" hidden>guide mode</span>
     <span class="h-chip err" id="c-err" hidden>errand</span>
     <span class="h-grow"></span>
     <span class="h-chip" id="c-det">detection –</span>
@@ -185,7 +189,8 @@
 
 <!-- Go: where to go (the PIN is asked after choosing, just before the robot starts) -->
 <div class="h-sheet" id="kiosk" hidden><div class="h-panel">
-  <h2>Where should I go?</h2><p>Tap a place or a room. I ask for the PIN before I start.</p>
+  <h2 id="k-title">Where should I go?</h2><p id="k-lead">Tap a place or a room. I ask for the PIN before I start.</p>
+  <p class="h-guide" id="k-guide" hidden>Guide mode is on: no PIN needed for these places.</p>
   <div class="h-h3">Places</div><div class="h-grid" id="k-places"></div>
   <div class="h-h3">Rooms</div><div class="h-grid" id="k-rooms"></div>
   <div class="h-row"><button class="h-b" id="k-home">Go home</button><button class="h-b" id="k-cancel">Cancel my trip</button>

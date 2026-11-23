@@ -144,6 +144,16 @@ function findThing(q) {
   return hits.sort((a, b) => b[0] - a[0]);
 }
 const summary = m => m && ({ id: m.id, priority: m.priority, source: m.source, text: m.text, state: m.state, message: m.message || '', stops: m.stops.map(s => s.label), next_stop: m.next, repeat: m.repeat, round: m.round, confirm: m.stops.map((s, i) => s.confirm ? i : -1).filter(i => i >= 0) });
+function guideStatus(m) {
+  const G = N.guide || { on: false, until: null, places: [], wait_s: 15 };
+  if (G.on && G.until && now() >= G.until) G.on = false;
+  const all = [...places.places.map(p => p.name), ...places.rooms.map(r => r.name)].filter((n, i, a) => !/^(home|dock)$/i.test(n) && a.indexOf(n) === i);
+  const list = G.places.length ? all.filter(n => G.places.some(x => norm(x) === norm(n))) : all;
+  const busy = !!(m || N.queue.length);
+  return { on: G.on, left_min: G.on && G.until ? Math.round((G.until - now()) / 60) : null, places: list, limited: !!G.places.length,
+           wait_s: G.wait_s, busy, ready: G.on && !busy && list.length > 0,
+           message: !G.on ? 'off: visitors need the PIN' : busy ? 'busy: guiding or on a task' : 'ready: visitors can pick a place' };
+}
 function enqueue(stops, priority = 1, source = 'dashboard', text = '', replace = false) {
   if (R.estop) throw new Error('release the e-stop first');
   if (replace) cancelAll('replaced');
@@ -467,6 +477,23 @@ function navReq(q) {
     case 'cancel': { const n = cancelAll('canceled'); log(`canceled ${n} mission(s)`); return { ok: true, canceled: n }; }
     case 'resume': if (R.estop) throw new Error('release the e-stop first'); R.hold = false; N.state = 'IDLE'; N.message = 'resumed'; log('missions resumed'); return { ok: true };
     case 'confirm_localization': return { ok: true };
+    case 'guide_settings': {
+      const G = N.guide || (N.guide = { on: false, until: null, places: [], wait_s: 15 });
+      if ('places' in q) G.places = q.places || [];
+      if ('wait_s' in q) G.wait_s = Math.max(0, Math.min(120, +q.wait_s || 0));
+      if ('on' in q) { G.on = !!q.on; G.until = G.on && +q.hours ? now() + q.hours * 3600 : null; log(`guide mode turned ${G.on ? 'on' : 'off'}`); }
+      return { ok: true, guide: navStatus().guide };
+    }
+    case 'guide_to': {
+      const g = navStatus().guide;
+      if (!g.on) return { ok: false, refused: true, error: 'Guide mode is off. Please ask a staff member.' };
+      if (g.busy) return { ok: false, refused: true, error: 'I am busy right now. Please wait a moment.' };
+      const pick = g.places.find(n => norm(n) === norm(q.name));
+      if (!pick) return { ok: false, refused: true, error: `I can not take you to "${q.name}". Please pick a place from the list.` };
+      const p = findPlace(pick), room = places.rooms.find(r => norm(r.name) === norm(pick));
+      const t = p ? { label: p.name, x: p.x, y: p.y, yaw: p.yaw } : roomTarget(room);
+      return enqueue([Object.assign({}, t, { wait_s: N.guide.wait_s }), { label: 'home', ...places.home }], 1, 'guide', `guide a visitor to ${pick}`);
+    }
     case 'button_settings': if ('enabled' in q) { N.buttonOn = !!q.enabled; log(`robot voice button turned ${N.buttonOn ? 'on' : 'off'}`); } return { ok: true, button: navStatus().button };
     case 'say': { const tx = String(q.text || '').trim(); if (!tx) return { ok: false, error: 'nothing to say' }; log('Robot says: ' + tx.slice(0, 80)); return { ok: true }; }
     case 'confirm': if (N.state !== 'CONFIRM') return { ok: false, error: 'nothing is waiting for OK' }; log('OK received'); advance(now()); return { ok: true };
@@ -586,6 +613,7 @@ function navStatus() {
     dock_direction: 'front',
     button: { enabled: N.buttonOn !== false, at_home: !m && !N.queue.length && Math.hypot(R.x - places.home.x, R.y - places.home.y) < 0.6,
               message: N.buttonOn === false ? 'turned off in the app' : (!m && !N.queue.length && Math.hypot(R.x - places.home.x, R.y - places.home.y) < 0.6) ? 'ready: takes trips from here' : 'stop and OK only (trips start from the home spot)' },
+    guide: guideStatus(m),
     network: { ok: true, down_s: null, went_home: false },
     docking: N.dockIn ? { phase: N.dockIn.phase, try: N.dockIn.try, tries: 3, message: N.message, marker: N.dockIn.marker || null }
       : (m && st && st.dock) ? { phase: 'predock', try: null, tries: 3, message: 'driving to the front of the dock', marker: null }

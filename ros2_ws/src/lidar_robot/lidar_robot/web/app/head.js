@@ -45,7 +45,7 @@
   const nav = req => api('POST', '/api/nav', req);
 
   // ------------------------------------------------------------------ demo robot (no connection)
-  const demo = { t0: performance.now(), goal: null, estop: false, step: -1 };
+  const demo = { t0: performance.now(), goal: null, estop: false, step: -1, guide: hash.get('guide') === '1' };
   const DEMO_PLACES = { places: [{ name: 'HOD office' }, { name: 'Lab 2' }, { name: 'Seminar hall' }, { name: 'Library' }],
                         rooms: [{ name: 'Lab 3', contents: ['3D printer'] }, { name: 'Store', contents: ['tools'] }] };
   const DEMO_STEPS = [['PLANNING', 2], ['DRIVING', 5], ['DRIVING-STOP', 3], ['DRIVING', 4], ['CONFIRM', 6]];
@@ -64,7 +64,9 @@
       }
     }
     return { estop: demo.estop, vision, places: DEMO_PLACES, pose: { x: 1.2, y: 0.4, yaw: 0 }, nav: Object.assign({ state, localized: true, message: '',
-      battery: { pct: 78, level: 'ok', charging: false } }, n), net: { kind: 'demo' } };
+      battery: { pct: 78, level: 'ok', charging: false },
+      guide: { on: demo.guide, ready: demo.guide && !demo.goal, busy: !!demo.goal, left_min: 90, wait_s: 15,
+               places: ['HOD office', 'Lab 2', 'Seminar hall', 'Lab 3'] } }, n), net: { kind: 'demo' } };
   }
   async function demoApi(method, path, body) {
     if (path === '/api/state') return demoState();
@@ -75,6 +77,12 @@
       if (['goto_place', 'goto_room'].includes(t)) { demo.goal = body.name; demo.t0 = performance.now(); }
       else if (t === 'goto_pose') { demo.goal = body.label || 'there'; demo.t0 = performance.now(); }
       else if (t === 'say') { /* the phone speaks it (say() below) */ }
+      else if (t === 'guide_to') {
+        if (!demo.guide) throw new Error('Guide mode is off. Please ask a staff member.');
+        if (demo.goal) throw new Error('I am busy right now. Please wait a moment.');
+        demo.steps = DEMO_TRIP; demo.goal = body.name; demo.t0 = performance.now();
+        return { ok: true, mission: { source: 'guide' } };
+      }
       else if (t === 'command') {
         const text = body.text.trim(), q = /\?$|^(what|when|who|why|which|how|kya|kaun|kab|hello|hi)\b/i.test(text) && !/\b(go|take|bring)\b/i.test(text);
         const place = text.replace(/^(please\s+)?(take me to|go to|bring me to)\s+(the\s+)?/i, '').replace(/[?.!]+$/, '') || 'there';
@@ -118,7 +126,11 @@
     else if (S.errand && !(st && st.estop) && !(st && st.nav && st.nav.recovery && st.nav.recovery.status === 'asking')) {
       f = Object.assign({}, f, { mood: 'happy', line: S.errand.line || 'On an errand', sub: `Errand ${S.errand.i + 1}/${S.errand.n}`, ok: false });
     }
+    const g = st && st.nav && st.nav.guide;
+    if (g && g.ready && !S.ov && !S.errand && !moving && !(st && st.estop) && !f.ok)
+      f = Object.assign({}, f, { sub: 'Need directions? Tap Go and I will walk you there.' });
     if (S.saying && !(st && st.estop)) f = Object.assign({}, f, { sub: `🔊 ${S.saying}` });
+    $('c-guide').hidden = !(g && g.on);
     S.face.set(f.mood);
     S.face.talk(!!S.saying);
     $('line').textContent = f.line;
@@ -227,15 +239,26 @@
                           (pl.rooms || []).map(r => ({ name: r.name, req: { type: 'goto_room', name: r.name } })));
     return pl;
   }
+  // Guide mode (switched on by staff in the app): a visitor picks a place with no PIN; the robot walks them
+  // there, waits a little and goes back home. Places outside the staff's list keep the PIN (🔒).
+  function guide() { const g = S.st && S.st.nav && S.st.nav.guide; return g && g.on ? g : null; }
+  function guideOk(name) { const g = guide(); return !!g && (g.places || []).some(n => n.toLowerCase() === String(name).toLowerCase()); }
   function openKiosk() {
     if (anySheet()) return;
-    const pl = targets();
+    const pl = targets(), g = guide();
     const tile = (name, sub, req) => {
       const b = document.createElement('button');
-      b.innerHTML = `${esc(name)}${sub ? `<small>${esc(sub)}</small>` : ''}`;
-      b.onclick = () => send(req, name);
+      const free = guideOk(name);
+      if (g && !free) b.classList.add('locked');
+      b.innerHTML = `${esc(name)}${g && !free ? ' 🔒' : ''}${sub ? `<small>${esc(sub)}</small>` : ''}`;
+      b.onclick = () => (free ? guideTo(name) : send(req, name));
       return b;
     };
+    $('k-title').textContent = g ? 'Where would you like to go?' : 'Where should I go?';
+    $('k-lead').textContent = g
+      ? `Tap a place and follow me. I will show you the way, wait ${Math.round(g.wait_s || 15)} s there and then go back.`
+      : 'Tap a place or a room. I ask for the PIN before I start.';
+    $('k-guide').hidden = !g;
     $('k-places').replaceChildren(...(pl.places || []).map(p => tile(p.name, p.note || '', { type: 'goto_place', name: p.name })));
     $('k-rooms').replaceChildren(...(pl.rooms || []).map(r => tile(r.name, (r.contents || []).slice(0, 3).join(', '), { type: 'goto_room', name: r.name })));
     if (!(pl.places || []).length) $('k-places').innerHTML = '<p class="h-muted">No places saved yet.</p>';
@@ -255,6 +278,18 @@
       $('k-msg').textContent = req.type === 'cancel' ? 'Trip cancelled.' : `On my way${label ? ' to ' + label : ''}!`;
       if (req.type === 'goto_place' || req.type === 'goto_room') say(`Okay, going to ${label}. Please follow me.`);
       else if (req.type === 'go_home') say('Okay, going home.');
+      setTimeout(closeSheets, 900);
+    } catch (e) { $('k-msg').textContent = e.message; }
+  }
+  async function guideTo(name) {
+    kioskIdle();
+    $('k-msg').textContent = 'Sending…';
+    try {
+      await nav({ type: 'guide_to', name, source: 'head' });
+      $('k-msg').textContent = `Please follow me to ${name}!`;
+      S.ov = { mood: 'happy', line: `Follow me to ${name}`, sub: 'I will show you the way', ok: false };
+      setTimeout(() => { S.ov = null; }, 6000);
+      if (DEMO) say(`Please follow me. I will take you to ${name}.`);   // on the robot it says this itself
       setTimeout(closeSheets, 900);
     } catch (e) { $('k-msg').textContent = e.message; }
   }
@@ -318,6 +353,11 @@
         const what = it.intent === 'return_home' ? 'Go home' : it.intent === 'dock' ? 'Go and charge'
           : it.intent === 'confirm' ? 'Continue' : stops.length ? `Go to ${stops.join(', then ')}`
             : (it.targets || []).length ? `Go to ${it.targets.join(', then ')}` : (it.reply || 'Do this');
+        const one = it.intent === 'navigate' && stops.length <= 1 && (it.targets || []).length === 1 ? it.targets[0] : null;
+        if (one && guideOk(one)) {                       // Guide mode: a visitor asking the way needs no PIN
+          bubble('a', `Please follow me to ${one}.`); $('a-msg').textContent = '';
+          await guideTo(one);
+        } else {
         bubble('a', `${what}. I need the PIN to start.`); $('a-msg').textContent = '';
         if (await needPin('Enter the PIN and I start.', `${what}?`)) {
           const done = await nav({ type: 'command', text, source: 'head', priority: 1 });
@@ -325,6 +365,7 @@
           bubble('a', reply); say(reply, di.reply ? di.speak : null);
           setTimeout(closeSheets, 1200);
         } else bubble('a', 'Okay, I stay here.');
+        }
       }
     } catch (e) { S.ov = null; $('a-msg').textContent = e.message || String(e); }
     answered = true; clearTimeout(filler);

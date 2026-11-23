@@ -2427,6 +2427,7 @@ function renderHome(st) {
   renderRecovery(n.recovery);
   renderDocking(n.docking, n.state);
   renderButton(n.button);
+  renderGuide(n.guide, st.places);
   const busy = !$('#g-mission').hidden;
   $('#h-idle').hidden = busy || offline;
   // camera summary (the card itself opens from the chip or the Camera button)
@@ -2532,6 +2533,42 @@ $('#me-btn-on').onchange = async e => {
   try { await nav({ type: 'button_settings', enabled: on }); toast(on ? 'Voice button on' : 'Voice button off'); }
   catch (err) { e.target.checked = !on; toast(err.message, true); }
 };
+// Guide mode: while it is on, a visitor at the face screen picks a place (from this list) without the PIN; the
+// robot walks them there, waits a little and goes home. Deliveries, settings and other places keep the PIN.
+let guideKey = '';
+function renderGuide(g, pl) {
+  const row = $('#me-guide-row'); if (!row) return;
+  row.hidden = !g;
+  $('#me-guide-opts').hidden = !g || !can('operator');
+  if (!g) return;
+  $('#me-guide').textContent = g.on
+    ? `On${g.left_min != null ? ` · ${g.left_min} min left` : ''} · ${g.message}` : 'Off · visitors at the face screen need the PIN';
+  const sw = $('#me-guide-on');
+  if (document.activeElement !== sw) sw.checked = !!g.on;
+  const all = [].concat(((pl && pl.places) || []).map(p => p.name), ((pl && pl.rooms) || []).map(r => r.name))
+    .filter((n, i, a) => !/^(home|dock)$/i.test(n) && a.indexOf(n) === i);
+  const chosen = g.limited ? g.places : all;
+  const key = JSON.stringify([all, chosen, g.limited]);
+  $('#me-guide-pl-sum').textContent = `Places visitors may pick: ${g.limited ? `${chosen.length} of ${all.length}` : 'all'}`;
+  if (key === guideKey) return;
+  guideKey = key;
+  $('#me-guide-pl').innerHTML = all.map(n => `<label><input type="checkbox" value="${esc(n)}" ${chosen.includes(n) ? 'checked' : ''}> ${esc(n)}</label>`).join('')
+    || '<small>No places on this map yet.</small>';
+  $$('input', $('#me-guide-pl')).forEach(cb => cb.onchange = async () => {
+    const picked = $$('input', $('#me-guide-pl')).filter(x => x.checked).map(x => x.value);
+    if (!picked.length) { cb.checked = true; toast('Keep at least one place', true); return; }
+    try { await nav({ type: 'guide_settings', places: picked.length === all.length ? [] : picked }); }
+    catch (err) { cb.checked = !cb.checked; toast(err.message, true); }
+  });
+}
+$('#me-guide-on').onchange = async e => {
+  const on = e.target.checked;
+  try {
+    await nav({ type: 'guide_settings', on, hours: +$('#me-guide-h').value, wait_s: +$('#me-guide-w').value });
+    toast(on ? 'Guide mode on: visitors can pick a place' : 'Guide mode off');
+  } catch (err) { e.target.checked = !on; toast(err.message, true); }
+};
+$('#me-guide-w').onchange = e => nav({ type: 'guide_settings', wait_s: +e.target.value }).catch(err => toast(err.message, true));
 // Funnel on: the robot answers on a public https URL. Logins protect it, but it should be off after use.
 function renderPublic(net) {
   const on = !!(net && net.public);

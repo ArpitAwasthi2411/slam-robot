@@ -266,6 +266,12 @@ button.chip { font-family: var(--ui); }
 .g-h + .g-row, .g-h + .seg { border-top: 0; }
 .g-row .grow { min-width: 0; }
 .g-row b { font-weight: 650; display: block; }
+.g-sub { display: flex; flex-wrap: wrap; gap: 10px 16px; padding: 4px 16px 14px; font-size: 13.5px; color: var(--dim); }
+.g-sub label { display: flex; align-items: center; gap: 8px; }
+.g-sub details { flex-basis: 100%; }
+.g-sub summary { cursor: pointer; min-height: var(--hit-s); display: flex; align-items: center; color: var(--text); font-weight: 600; }
+.g-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
+.g-checks label { min-height: 40px; color: var(--text); }
 .g-row small { color: var(--dim); font-size: 12.5px; display: block; overflow: hidden; text-overflow: ellipsis; }
 button.g-row { width: 100%; text-align: left; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: var(--text); }
 button.g-row:active { background: var(--surface-2); }

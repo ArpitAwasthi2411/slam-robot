@@ -141,6 +141,16 @@ async function run(browser, role, theme) {
     check(/Speaking now \(\d sentences\)/.test(await p.textContent('#wg-out')), `${tag}: Say welcome sends the sentences`);
     await p.click('#lab-welcome [data-back]'); await p.waitForTimeout(200);
   }
+  // Guide mode for visitors (B14): operators switch it on in Me -> Robot; staff only see the status
+  check(await visible(p, '#me-guide-row'), `${tag}: Guide mode row (B14)`);
+  check((await visible(p, '#me-guide-on')) === op, `${tag}: Guide switch role gating (B14)`);
+  if (op) {
+    await p.click('#me-guide-row .switch'); await p.waitForTimeout(900);
+    check(/^On/.test(await p.textContent('#me-guide')), `${tag}: Guide mode turns on (B14)`);
+    check((await p.locator('#me-guide-pl input').count()) >= 3, `${tag}: Guide place list (B14)`);
+    await p.click('#me-guide-row .switch'); await p.waitForTimeout(900);
+    check(/^Off/.test(await p.textContent('#me-guide')), `${tag}: Guide mode turns off (B14)`);
+  }
   check((await visible(p, '[data-sub=people]')) === admin, `${tag}: People role gating (E3)`);
   if (admin) {
     await p.click('[data-sub=people]'); await p.waitForTimeout(500);

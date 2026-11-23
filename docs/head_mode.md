@@ -97,3 +97,24 @@ colour) and the face eases from one to the next, so it never jumps. It blinks, g
 breathes slightly, moves its mouth while the robot speaks, and shows a pulsing ring when it needs attention
 (blocked, asking for help, listening). When an object blocks the way and no person is there, it shows
 "Something is in my way · finding another way" instead of asking to pass.
+
+## Guide mode: visitors without the PIN
+
+The PIN keeps strangers from sending the robot anywhere, but it also means a visitor can never use it as a
+guide. Guide mode is the middle way, switched on by staff:
+
+1. An operator opens the app → Me → Robot → **Guide mode for visitors**, picks how long (1, 2, 4, 8 hours or
+   until turned off), how long the robot waits at the place, and (optional) which places visitors may pick.
+2. The face screen shows a green **guide mode** chip and, when idle, "Need directions? Tap Go and I will walk
+   you there."
+3. A visitor taps **Go** (or asks "take me to the HOD office" in **Ask**). Allowed places start at once, no PIN:
+   the robot says "Please follow me. I will take you to …", drives there, says "This is …. I will go back now.
+   Goodbye!", waits, and drives home (or to the dock when no home is set).
+4. Only one guide trip at a time: while it is out, another visitor gets "I am busy right now".
+   Places outside the list show 🔒 and still ask for the PIN, as do Deliver, Go home, Cancel and Settings.
+   STOP never needs a PIN.
+
+Robot side: `guide_settings` (operator) and `guide_to` (staff) in `navigator_core.py`, saved in
+`~/maps/guide.json`; the time limit is wall-clock time, so it survives a restart and switches itself off.
+The robot refuses `guide_to` when Guide is off, busy, the place is not allowed or no home is set, whatever the
+screen shows. Tests: `test/test_guide_mode.py`.

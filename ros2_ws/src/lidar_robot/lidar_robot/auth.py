@@ -298,6 +298,7 @@ class UserStore:
 STAFF_NAV = {'goto_place', 'goto_room', 'command', 'preview', 'cancel', 'resume', 'go_home', 'go_dock',
              'confirm', 'explain', 'find', 'search', 'schedule_list', 'mission_log',
              'recovery_answer',           # the robot asks whoever is there ("ask a person")
+             'guide_to',                  # a visitor picks a place while staff have Guide mode on
              'knowledge', 'chat_forget'}  # read the robot's notebook; start a new conversation
 ADMIN_NAV = {'knowledge_add', 'knowledge_update', 'knowledge_remove'}   # what the robot tells people
 

@@ -206,6 +206,12 @@ class NavigatorCore:
         self._button_last = -1e9
         self._button_file = os.path.join(data_dir, 'button.json') if data_dir else None
         self._load_button()
+        # guide mode: while staff have switched it on, a visitor at the face screen may ask to be walked to
+        # a place without the PIN; the robot waits there a little and goes back home. Nothing else unlocks.
+        self.wall_clock = time.time                    # guide 'until' is wall time (kept across restarts)
+        self.guide = {'on': False, 'until': None, 'places': [], 'wait_s': 15.0, 'by': ''}
+        self._guide_file = os.path.join(data_dir, 'guide.json') if data_dir else None
+        self._load_guide()
         # network loss: finish what was accepted, then wait at home (where the button works)
         self.offline_home_s = offline_home_s          # 0 = never go home because of the network
         self.net_ok = None                            # None until the node reports
@@ -472,6 +478,10 @@ class NavigatorCore:
                     self._log(f'robot voice button turned {"on" if self.button_enabled else "off"}'
                               + (f' by {self._req_by}' if self._req_by else ''))
                 return {'ok': True, 'button': self._button_status(pose)}
+            if t == 'guide_settings':                  # operator: Guide mode on/off, how long, which places
+                return self._guide_settings(req, pose)
+            if t == 'guide_to':                        # visitor at the face screen (no PIN) while Guide is on
+                return self._guide_to(req.get('name', ''), pose)
             if t == 'preview':
                 return self._preview(req, pose)
             if t == 'cancel':
@@ -707,7 +717,7 @@ class NavigatorCore:
         self._log(f'mission #{m.id} queued: {" -> ".join(s.label for s in stops)} (priority {m.priority})')
         return {'ok': True, 'mission': m.summary()}
 
-    def _go_dock(self, priority, source):
+    def _dock_stop(self):
         d = self.places.dock
         if not d:
             raise ValueError('the dock is not set (put the robot on the dock → Set dock here)')
@@ -717,8 +727,10 @@ class NavigatorCore:
         else:                                     # v2.4: the approach point is ahead, then reverse in
             ax = d['x'] + self.dock_offset * math.cos(d['yaw'])
             ay = d['y'] + self.dock_offset * math.sin(d['yaw'])
-        st = Stop('dock', ax, ay, d['yaw'], dock=True)
-        return self._enqueue([st], priority, source, 'charge on the dock')
+        return Stop('dock', ax, ay, d['yaw'], dock=True)
+
+    def _go_dock(self, priority, source):
+        return self._enqueue([self._dock_stop()], priority, source, 'charge on the dock')
 
     def _find(self, q):
         hits = self.places.find_thing(q)
@@ -926,6 +938,141 @@ class NavigatorCore:
             self._button_last = now
             if self.net_ok is False:
                 self._offline_notes.append(f'took "{text}" from the robot button')
+        return res
+
+    # ---------------------------------------------------------------- guide mode
+    def _load_guide(self):
+        if self._guide_file and os.path.exists(self._guide_file):
+            try:
+                with open(self._guide_file) as f:
+                    d = json.load(f)
+                self.guide.update({k: d[k] for k in ('on', 'until', 'places', 'wait_s', 'by') if k in d})
+            except (OSError, ValueError, TypeError):
+                pass
+
+    def _save_guide(self):
+        if self._guide_file:
+            try:
+                tmp = self._guide_file + '.tmp'
+                with open(tmp, 'w') as f:
+                    json.dump(self.guide, f)
+                os.replace(tmp, self._guide_file)
+            except OSError:
+                pass
+
+    def _guide_active(self):
+        g = self.guide
+        if not g.get('on'):
+            return False
+        if g.get('until') is not None and self.wall_clock() >= float(g['until']):
+            g['on'] = False                            # time is up: switch off for good (and say so in the log)
+            self._save_guide()
+            self._log('guide mode ended (time up)')
+            return False
+        return True
+
+    def _guide_targets(self):
+        """Names a visitor may pick: the staff's list, or every place and room (never home/dock)."""
+        names = []
+        for n in [p['name'] for p in self.places.places] + [r['name'] for r in self.places.rooms]:
+            if n.lower() in ('home', 'dock') or n in names:
+                continue
+            names.append(n)
+        allowed = self.guide.get('places') or []
+        if allowed:
+            keep = {a.lower() for a in allowed}
+            names = [n for n in names if n.lower() in keep]
+        return names
+
+    def _guide_busy(self):
+        return bool(self.queue.active or self.queue.queue) or self.state in (RECOVERING, DOCKING, CONFIRM)
+
+    def _guide_status(self, pose=None):
+        active = self._guide_active()
+        g = self.guide
+        left = None
+        if active and g.get('until') is not None:
+            left = max(0, round((float(g['until']) - self.wall_clock()) / 60.0))
+        has_home = bool(self.places.home or self.places.dock)
+        if not active:
+            msg = 'off: visitors need the PIN'
+        elif not has_home:
+            msg = 'set Home first (the robot goes back there)'
+        elif self._guide_busy():
+            msg = 'busy: guiding or on a task'
+        else:
+            msg = 'ready: visitors can pick a place'
+        targets = self._guide_targets()
+        return {'on': active, 'left_min': left, 'until': g.get('until') if active else None,
+                'places': targets, 'limited': bool(g.get('places')), 'wait_s': g.get('wait_s', 15.0),
+                'ready': active and has_home and not self._guide_busy() and bool(targets),
+                'busy': self._guide_busy(), 'by': g.get('by', ''), 'message': msg}
+
+    def _guide_settings(self, req, pose):
+        g = self.guide
+        if 'places' in req:
+            pl = req['places'] or []
+            if not isinstance(pl, list):
+                raise ValueError('places must be a list of names')
+            known = {n.lower(): n for n in [p['name'] for p in self.places.places] +
+                     [r['name'] for r in self.places.rooms]}
+            bad = [str(n) for n in pl if str(n).lower() not in known]
+            if bad:
+                raise ValueError(f'not on this map: {", ".join(bad[:5])}')
+            g['places'] = [known[str(n).lower()] for n in pl][:60]
+        if 'wait_s' in req:
+            w = float(req['wait_s'])
+            if not math.isfinite(w):
+                raise ValueError('wait_s must be a number')
+            g['wait_s'] = max(0.0, min(120.0, w))
+        if 'on' in req:
+            on = bool(req['on'])
+            hours = req.get('hours')
+            if on:
+                h = None if hours in (None, 0, '0', '') else float(hours)
+                if h is not None and not (math.isfinite(h) and 0 < h <= 24):
+                    raise ValueError('hours must be between 0 and 24 (0 = until turned off)')
+                g['until'] = None if h is None else self.wall_clock() + h * 3600.0
+            else:
+                g['until'] = None
+            g['on'] = on
+            g['by'] = self._req_by
+            self._log(f'guide mode turned {"on" if on else "off"}'
+                      + (f' for {hours} h' if on and g['until'] else '')
+                      + (f' by {self._req_by}' if self._req_by else ''))
+        self._save_guide()
+        return {'ok': True, 'guide': self._guide_status(pose)}
+
+    def _guide_to(self, name, pose):
+        """One visitor trip: the place, a short wait there, then back home. Refused (with a reason a
+        visitor can read) unless staff switched Guide on, the robot is free and the place is allowed."""
+        def no(reason):
+            return {'ok': False, 'refused': True, 'error': reason}
+        if not self._guide_active():
+            return no('Guide mode is off. Please ask a staff member.')
+        if self._guide_busy():
+            return no('I am busy right now. Please wait a moment.')
+        allowed = self._guide_targets()
+        name = str(name or '').strip()
+        pick = next((n for n in allowed if n.lower() == name.lower()), None)
+        if pick is None:
+            hits = self.places.search(name, limit=1, min_score=0.6) if name else []
+            if hits and hits[0][1]['name'] in allowed:
+                pick = hits[0][1]['name']
+        if pick is None:
+            return no(f'I can not take you to "{name}". Please pick a place from the list.')
+        tgt = self.places.target(pick)
+        if self.places.home:
+            h = self.places.home
+            back = Stop('home', h['x'], h['y'], h.get('yaw'))
+        elif self.places.dock:
+            back = self._dock_stop()
+        else:
+            return no('My home spot is not set. Please ask a staff member.')
+        wait = float(self.guide.get('wait_s', 15.0))
+        stops = [Stop(tgt['name'], tgt['x'], tgt['y'], tgt.get('yaw'), wait_s=wait), back]
+        res = self._enqueue(stops, 1, 'guide', f'guide a visitor to {tgt["name"]}')
+        self.say_queue.append(('guide', f'Please follow me. I will take you to {tgt["name"]}.'))
         return res
 
     def _load_button(self):
@@ -1229,7 +1376,9 @@ class NavigatorCore:
                     self._set(DOCKING, 'reversing onto the dock')
                     self._log('at the dock: reversing onto the contacts')
                 return 0.0, 0.0
-            if m.source not in ('explore',) and m.current.label not in ('map goal', 'drawn path') \
+            if m.source == 'guide' and m.next_stop < len(m.stops) - 1:
+                self.say_queue.append(('arrived', f'This is {m.current.label}. I will go back now. Goodbye!'))
+            elif m.source not in ('explore',) and m.current.label not in ('map goal', 'drawn path') \
                     and not m.current.label.startswith('point '):
                 self.say_queue.append(('arrived', f'I am {m.current.label}.' if m.current.label.startswith('outside ')
                                        else f'Arrived at {m.current.label}.'))
@@ -2017,6 +2166,7 @@ class NavigatorCore:
             'recovery': self.rec.public(), 'recovery_mode': self.rec.mode,
             'docking': self._docking_status(m), 'dock_direction': 'front' if self.dock_front else 'reverse',
             'button': self._button_status(pose),
+            'guide': self._guide_status(pose),
             'network': {'ok': self.net_ok,
                         'down_s': (None if self._net_down_since is None or self.net_ok is not False
                                    else round(self.clock() - self._net_down_since)),
