@@ -177,7 +177,7 @@ function cancelAll(why) {
 // ---------------------------------------------------------------- error recovery (same menu and card as recovery.py)
 const REC_WHAT = { BLOCKED: 'The way to {p} stayed blocked.', NO_PATH: "I couldn't find a free route to {p}.",
   GOAL_IN_OBSTACLE: '{p} is inside or too close to an obstacle on the map.' };
-const REC_OPTS = { retry: 'Try again', wait: 'Wait 1 min, then try', skip: 'Skip this stop', home: 'Go home', dock: 'Go and charge', cancel: 'Cancel the mission' };
+const REC_OPTS = { retry: 'Try again', wait: 'Wait 20 s, then try', skip: 'Skip this stop', home: 'Go home', dock: 'Go and charge', cancel: 'Cancel the mission' };
 let recId = 0;
 N.rec = null; N.recHist = [];
 function startRecovery(code, text) {

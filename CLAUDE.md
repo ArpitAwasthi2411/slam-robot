@@ -136,6 +136,11 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-23 (narrow places, multi-user): narrow corridors: follower shuffles forward / back / turn (footprint.plan_manoeuvre)
+  up to `max_manoeuvres` 6 per route (2 before; a U-turn in an 85 cm corridor reported BLOCKED), also when a bend is too
+  tight for the body (was 'body' blocked); test_narrow_turns.py. Recovery times 15-30 s: us_memory_s 25 (60), app answer
+  "Wait 20 s" (60), wait_retry max 30 s (120), recovery_ask_timeout_s 30 (120). Several phones at once: dashboard HTTP
+  listen backlog 128 (default 5 dropped connections on a busy Pi -> 'robot did not answer in time'). Not run on the robot.
 - 2026-11-23 (layout): STOP on the kiosk covered other buttons (the PIN pad's ✓ on a sideways phone, Speak, Close,
   the Go sheet's last row upright) and the Drive joystick covered the map-tool rail on a sideways phone. head.html: `--stop`
   size (80 px when <= 430 px tall), sheets keep a strip free for STOP (right sideways, bottom upright), Ask/Speak shrink

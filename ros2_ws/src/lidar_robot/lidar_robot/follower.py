@@ -46,6 +46,9 @@ class FollowerParams:
     # a wall or door frame straight ahead while the route bends away from it (beyond the front cone): turn on the
     # spot towards the route instead of standing there "blocked" (20 Nov: waits at walls)
     bend_turn_alpha: float = 0.45
+    # narrow places: when the body cannot turn on the spot or follow a bend (the back would swing into a wall),
+    # shuffle forward / back / turn like a car in a tight spot. Up to this many shuffles per route (2 until 23 Nov).
+    max_manoeuvres: int = 6
 
 
 def _clamp(v, lo, hi):
@@ -109,16 +112,9 @@ class PathFollower:
                 self._rot_dir = 0
                 # boxed in: no room for the back to swing round. Plan a short 3-point turn
                 # (pull ahead / back out / turn) that ends facing the way we need to go.
-                if pose is not None and target is not None and self._man_tries < 2:
-                    self._man_tries += 1
-                    x, y, yaw = pose
-                    c, s = math.cos(yaw), math.sin(yaw)
-                    tb = (c * (target[0] - x) + s * (target[1] - y), -s * (target[0] - x) + c * (target[1] - y))
-                    steps = plan_manoeuvre(guard, tb)
-                    if steps:
-                        self._man = {'steps': steps, 'i': 0, 'ref': pose}
-                        self.manoeuvres += 1
-                        return self._run_manoeuvre(guard, pose)
+                started = self._start_manoeuvre(guard, pose, target)
+                if started is not None:
+                    return started
                 self.why_blocked = 'turn'
                 return 0.0, 0.0, True
             err = err if (err > 0) == (self._rot_dir > 0) else err - math.copysign(2 * math.pi, err)
@@ -126,6 +122,21 @@ class PathFollower:
         if abs(w_t) < p.min_angular:
             w_t = math.copysign(p.min_angular, err)
         return 0.0, w_t, False
+
+    def _start_manoeuvre(self, guard, pose, target):
+        """Plan forward / back / turn moves that end facing `target` (map frame). -> (v, w, blocked) or None."""
+        if guard is None or pose is None or target is None or self._man_tries >= self.p.max_manoeuvres:
+            return None
+        self._man_tries += 1
+        x, y, yaw = pose
+        c, s = math.cos(yaw), math.sin(yaw)
+        tb = (c * (target[0] - x) + s * (target[1] - y), -s * (target[0] - x) + c * (target[1] - y))
+        steps = plan_manoeuvre(guard, tb)
+        if not steps:
+            return None
+        self._man = {'steps': steps, 'i': 0, 'ref': pose}
+        self.manoeuvres += 1
+        return self._run_manoeuvre(guard, pose)
 
     def _run_manoeuvre(self, guard, pose):
         man = self._man
@@ -253,7 +264,13 @@ class PathFollower:
                 if front_clearance < p.stop_distance and abs(alpha) > p.bend_turn_alpha:
                     self.rotating = True        # the route bends away from the thing ahead: turn to it, don't wait
                     self._v = min(self._v, 0.0)
-                if self.rotating:
+                if self._man is not None and guard is not None:
+                    v_t, w_t, self.blocked = self._run_manoeuvre(guard, pose)   # finish a shuffle first
+                    self._v, self._w = v_t, w_t
+                    if not self.blocked:
+                        self._blocked_for = 0.0
+                        return v_t, w_t, None
+                elif self.rotating:
                     v_t, w_t, self.blocked = self._turn(alpha, guard, front_clearance, dt, pose, (lx, ly))
                 else:
                     self._rot_dir = 0
@@ -280,6 +297,12 @@ class PathFollower:
                         elif guard.motion_clear(p.min_linear, 0.0):
                             v_t, w_t = p.min_linear, 0.0
                         else:
+                            # the bend is too tight for the body here: shuffle round it (forward / back / turn)
+                            started = self._start_manoeuvre(guard, pose, (lx, ly))
+                            if started is not None and not started[2]:
+                                self._v, self._w = started[0], started[1]
+                                self._blocked_for = 0.0
+                                return started[0], started[1], None
                             self.blocked = True
                             self.why_blocked = 'body'
                     if self.blocked:

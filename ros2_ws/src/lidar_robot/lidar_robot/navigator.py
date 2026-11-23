@@ -88,7 +88,7 @@ class NavigatorNode(Node):
         d('stop_distance', 0.38)
         d('slow_distance', 0.80)
         d('blocked_after', 2.5)            # s stopped by an obstacle before planning around it
-        d('us_memory_s', 60.0)             # s an ultrasonic-only blocker stays on the plan
+        d('us_memory_s', 25.0)             # s an ultrasonic-only blocker stays on the plan
         d('robot_half_width', 0.25)
         # the body: a rectangle around the drive axle (base_link). MEASURE YOUR ROBOT:
         d('footprint_front', 0.07)         # axle -> front bumper (m)
@@ -132,6 +132,7 @@ class NavigatorNode(Node):
         d('offline_home_s', 120.0)         # no network this long and nothing to do -> wait at home (0 = never)
         d('network_check_s', 10.0)
         d('max_replans', 3)
+        d('max_manoeuvres', 6)             # forward/back/turn shuffles per route in narrow places
         d('pose_timeout', 1.0)          # wheel odometry (odom->base_link) older than this = position lost
         d('map_tf_timeout', 10.0)
         d('us_wall_tol', 0.12)          # m: an ultrasonic echo this close to a mapped wall is the wall (door frames)       # SLAM's map->odom correction may lag this much (it changes slowly)
@@ -153,7 +154,7 @@ class NavigatorNode(Node):
         d('chat_model', 'openai/gpt-oss-120b')   # the bigger model converses and follows the rules better
         d('knowledge_file', '')         # '' = knowledge.json next to places.json
         d('recovery_max_per_mission', 4)
-        d('recovery_ask_timeout_s', 120.0)
+        d('recovery_ask_timeout_s', 30.0)
         d('use_vision', True)           # camera people detection may slow / stop autonomous driving
         d('vision_timeout', 1.0)        # s: an older camera decision is ignored
         g = lambda n: self.get_parameter(n).value  # noqa: E731
@@ -205,7 +206,7 @@ class NavigatorNode(Node):
                            rotate_in_place_above=float(g('rotate_in_place_above')),
                            rotate_exit_below=float(g('rotate_exit_below')),
                            stop_distance=float(g('stop_distance')), slow_distance=float(g('slow_distance')),
-                           blocked_after=float(g('blocked_after'))),
+                           blocked_after=float(g('blocked_after')), max_manoeuvres=int(g('max_manoeuvres'))),
             parser=parser, dwell_s=float(g('dwell_s')), auto_return_s=float(g('auto_return_s')),
             max_replans=int(g('max_replans')),
             tuning_path=os.path.join(os.path.dirname(g('places_file')), 'tuning.json'),

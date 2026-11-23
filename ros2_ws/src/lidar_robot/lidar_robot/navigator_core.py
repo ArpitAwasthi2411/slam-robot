@@ -71,7 +71,7 @@ CONFIRM = 'CONFIRM'            # at a stop, waiting for someone to press OK
 DOCKING, UNDOCKING, CHARGING = 'DOCKING', 'UNDOCKING', 'CHARGING'
 RECOVERING = 'RECOVERING'      # a step failed: stopped while the recovery planner decides / acts
 BATTERY_SOURCES = ('battery', 'auto-home', 'explore-return', 'recovery')
-ANSWERS = {'retry': ('wait_retry', {'wait_s': 3}, 'Try again'), 'wait': ('wait_retry', {'wait_s': 60}, 'Wait 1 min, then try'),
+ANSWERS = {'retry': ('wait_retry', {'wait_s': 3}, 'Try again'), 'wait': ('wait_retry', {'wait_s': 20}, 'Wait 20 s, then try'),
            'skip': ('skip_stop', {}, 'Skip this stop'), 'home': ('go_home', {}, 'Go home'),
            'dock': ('go_dock', {}, 'Go and charge'), 'cancel': (None, {}, 'Cancel the mission')}
 
@@ -131,7 +131,7 @@ class NavigatorCore:
         self.us_watch_s = 15.0             # after a block, keep adding what the sensors see while going round
         self._us_watch_until = 0.0
         self._us_next = 0.0
-        self.us_memory_s = 60.0
+        self.us_memory_s = 25.0           # 60 until 23 Nov: recovering took too long
         self.us_depth_m = 0.3              # assumed depth of an ultrasonic-only blocker
         self.us_margin_m = 0.15            # extra berth around it (on top of the robot radius)
         self.person_memory_s = 10.0        # a person who did not step aside: routed round for this long only
@@ -260,7 +260,7 @@ class NavigatorCore:
         mapped = self.planner.has_map()
         for arc in self.us_world:
             # an HC-SR04 reports the NEAREST surface anywhere in its ~30 deg cone: when a mapped wall (a door frame)
-            # lies on this echo's arc, the map explains the echo. Keeping the rest of the arc closed doors for 60 s
+            # lies on this echo's arc, the map explains the echo. Keeping the rest of the arc closed doors for the whole memory time
             # (18 Nov: "space on the map but no path" after a stop at a door).
             if mapped and any(self.planner.near_wall(x, y, self.us_wall_skip_m) for x, y in arc):
                 continue

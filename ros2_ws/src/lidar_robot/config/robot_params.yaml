@@ -65,7 +65,7 @@ navigator:
     stop_distance: 0.38
     slow_distance: 0.80
     blocked_after: 2.5           # s stopped by an obstacle before planning a route around it (5.0 until 20 Nov: too slow)
-    us_memory_s: 60.0            # s an obstacle seen only by the ultrasonics stays on the plan (LiDAR can't see low boxes)
+    us_memory_s: 25.0            # s an obstacle seen only by the ultrasonics stays on the plan (LiDAR can't see low boxes); 60 until 23 Nov
     backup_m: 0.25               # after an object stops the robot: back up this far (only if the LiDAR sees the
                                  # rear clear) so it has room to turn and go round the side; 0 = off
     us_wall_tol: 0.12            # m: ultrasonic echoes this close to a mapped wall (door frames) never stop or block the robot
@@ -107,6 +107,7 @@ navigator:
     offline_home_s: 120.0        # s without network and nothing to do -> go home (0 = never)
     network_check_s: 10.0        # how often the Wi-Fi/hotspot gateway is pinged
     max_replans: 3
+    max_manoeuvres: 6            # narrow places: forward/back/turn shuffles per route when the body can't turn (2 until 23 Nov)
     pose_timeout: 1.5            # s: odometry older than this = position lost (1.0 tripped on short CPU stalls)
     llm_model: openai/gpt-oss-20b     # used only if GROQ_API_KEY is set and there is internet (Groq retired llama-3.x on 16 Aug 2026)
     llm_policy: smart                 # smart: offline rules first, LLM only when they are unsure | always | off
@@ -123,7 +124,7 @@ navigator:
     recovery_mode: llm                # llm (rules if no key / no internet) | rules | off
     recovery_llm_model: openai/gpt-oss-120b
     recovery_max_per_mission: 4
-    recovery_ask_timeout_s: 120.0     # "ask a person": the rules decide if nobody answers in the app
+    recovery_ask_timeout_s: 30.0      # "ask a person": the rules decide if nobody answers in the app (120 until 23 Nov)
     # robot voice (docs/STEPS_voice.md): Piper offline TTS (scripts/setup_voice.sh), espeak-ng as fallback
     speech: true
     speech_engine: auto               # auto | piper | espeak

@@ -19,7 +19,7 @@ from lidar_robot.llm import RECOVERY_MODEL, GroqClient
 
 MENU = {
     'wait_retry': {'help': 'stop, wait wait_s seconds (a person or a trolley may move), then plan again',
-                   'params': {'wait_s': (3.0, 120.0, 15.0)}},
+                   'params': {'wait_s': (3.0, 30.0, 15.0)}},
     'replan_wide': {'help': 'plan again keeping margin_m more distance from walls and obstacles',
                     'params': {'margin_m': (0.03, 0.25, 0.10)}},
     'alt_route': {'help': 'drive via one of the listed alternative waypoints first, then to the stop',
@@ -47,7 +47,7 @@ WHAT = {
 }
 RECOVERABLE = set(WHAT)
 
-ASK_OPTIONS = [('retry', 'Try again', True), ('wait', 'Wait 1 min, then try'), ('skip', 'Skip this stop'),
+ASK_OPTIONS = [('retry', 'Try again', True), ('wait', 'Wait 20 s, then try'), ('skip', 'Skip this stop'),
                ('home', 'Go home'), ('dock', 'Go and charge'), ('cancel', 'Cancel the mission')]
 
 SYSTEM = (
@@ -224,7 +224,7 @@ class Recovery:
     """One decision at a time. mode: 'llm' (LLM first, rules as fallback), 'rules', or 'off'."""
 
     def __init__(self, llm=None, mode='llm', clock=time.monotonic, wall=time.time, threaded=True,
-                 max_per_mission=4, ask_timeout_s=120.0):
+                 max_per_mission=4, ask_timeout_s=30.0):
         self.llm = llm
         self.mode = mode if mode in ('llm', 'rules', 'off') else 'llm'
         self.clock, self.wall = clock, wall

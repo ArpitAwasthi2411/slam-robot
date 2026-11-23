@@ -381,9 +381,16 @@ def make_handler(backend, index_path, app_dir=None, users=None, public=None):
     return Handler
 
 
+class _Server(ThreadingHTTPServer):
+    # Several phones open many connections at once (state, map, camera, telemetry). The default listen
+    # backlog of 5 drops the extra ones on a busy Pi; the phone then waits 1-3 s for TCP to retry and the
+    # app reports 'robot did not answer in time'.
+    request_queue_size = 128
+
+
 class DashboardServer:
     def __init__(self, backend, host='0.0.0.0', port=8080, users=None, public_flag=None):
-        self.httpd = ThreadingHTTPServer((host, port),
+        self.httpd = _Server((host, port),
                                          make_handler(backend, _find_index_html(), _find_app_dir(), users,
                                                       PublicLink(public_flag)))
         self.httpd.daemon_threads = True

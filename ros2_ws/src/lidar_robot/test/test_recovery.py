@@ -47,7 +47,7 @@ def test_validate_rejects_invented_or_impossible_actions_and_clamps():
         validate({'action': 'skip_stop'}, c)              # one stop only: nothing to skip to
     with pytest.raises(ValueError):
         validate('wait', c)
-    assert validate({'action': 'wait_retry', 'params': {'wait_s': 999}}, c)['params'] == {'wait_s': 120.0}
+    assert validate({'action': 'wait_retry', 'params': {'wait_s': 999}}, c)['params'] == {'wait_s': 30.0}
     assert validate({'action': 'wait_retry', 'params': {'wait_s': 'nan'}}, c)['params'] == {'wait_s': 15.0}
     assert validate({'action': 'wait_retry', 'params': {'wait_s': -4}}, c)['params'] == {'wait_s': 3.0}
     assert validate({'action': 'replan_wide', 'params': {'margin_m': 5}}, c)['params'] == {'margin_m': 0.25}
