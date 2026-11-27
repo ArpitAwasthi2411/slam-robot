@@ -24,6 +24,7 @@ import json
 import re
 import time
 
+from lidar_robot.lang import reply_language
 from lidar_robot.llm import CHAT_URL, DEFAULT_MODEL, GroqClient, LLMError, LLMLog, http_json
 from lidar_robot.places import normalize
 
@@ -317,6 +318,9 @@ class CommandParser:
             'A target can be a room; if the user names a thing, pick the room whose room_contains has it. '
             'Never invent places. If a requested place is not in the list, leave it out and say so in reply. '
             'If the command is not about the robot, use intent unknown. '
+            + ('Write reply in Hinglish (Hindi in Latin letters). ' if reply_language(text) == 'hi'
+               else 'Write reply in plain English. ')
+            + 
             'Known places: ' + json.dumps(catalog, separators=(',', ':')))
         d = self.client.chat_json('command', [{'role': 'system', 'content': system},
                                               {'role': 'user', 'content': text}],

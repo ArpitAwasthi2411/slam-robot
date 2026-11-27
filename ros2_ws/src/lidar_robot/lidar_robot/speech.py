@@ -116,19 +116,31 @@ HINDI_WORDS = {
     'bahar': 'बाहर', 'paas': 'पास', 'saamne': 'सामने', 'andar': 'अंदर', 'upar': 'ऊपर', 'neeche': 'नीचे',
     'ek': 'एक', 'teen': 'तीन', 'mil': 'मिल', 'milega': 'मिलेगा', 'milegi': 'मिलेगी', 'dijiye': 'दीजिए',
     'de': 'दे', 'diya': 'दिया', 'lijiye': 'लीजिए', 'intezaar': 'इंतज़ार', 'samay': 'समय', 'aaj': 'आज', 'kal': 'कल',
+    'kisne': 'किसने', 'banaya': 'बनाया', 'kidhar': 'किधर', 'tumhe': 'तुम्हें', 'tumhara': 'तुम्हारा',
+    'tumhari': 'तुम्हारी', 'tumko': 'तुमको', 'aapne': 'आपने', 'kaunsa': 'कौनसा', 'kaunsi': 'कौनसी',
+    'konsa': 'कौनसा', 'kaisa': 'कैसा', 'kaisi': 'कैसी', 'kyon': 'क्यों', 'lao': 'लाओ', 'lekar': 'लेकर',
+    'dena': 'देना', 'bolo': 'बोलो', 'boliye': 'बोलिए', 'suno': 'सुनो', 'dekho': 'देखो', 'jana': 'जाना',
+    'jaana': 'जाना', 'aana': 'आना', 'aao': 'आओ', 'wapas': 'वापस', 'vapas': 'वापस', 'madad': 'मदद',
+    'poochiye': 'पूछिए', 'naam': 'नाम', 'kahin': 'कहीं', 'koi': 'कोई', 'sab': 'सब', 'bahut': 'बहुत',
 }
 # Also ordinary English words: they never decide on their own that a sentence is Hinglish.
 AMBIGUOUS = {'main', 'mai', 'me', 'hu', 'ho', 'tha', 'thi', 'ya', 'par', 'de', 'mil', 'ji', 'kal', 'ek', 'teen'}
 LATIN_WORD = re.compile(r"[A-Za-z]+")
 
 
-def is_hinglish(text):
-    """Hindi written in Latin letters: at least 2 clearly Hindi words making up a quarter of the words."""
+def hindi_hits(text):
+    """(clearly Hindi words, all words) in Latin-letter text."""
+    words = [w.lower() for w in LATIN_WORD.findall(text or '')]
+    return sum(1 for w in words if w in HINDI_WORDS and w not in AMBIGUOUS), len(words)
+
+
+def is_hinglish(text, min_hits=2):
+    """Hindi written in Latin letters: at least `min_hits` clearly Hindi words making up a quarter of the words.
+    The voice needs 2 (an English reply with one Hindi name stays English); what a person said needs 1."""
     if DEVANAGARI.search(text or ''):
         return False
-    words = [w.lower() for w in LATIN_WORD.findall(text or '')]
-    hits = sum(1 for w in words if w in HINDI_WORDS and w not in AMBIGUOUS)
-    return hits >= 2 and hits >= 0.25 * len(words)
+    hits, n = hindi_hits(text)
+    return hits >= min_hits and hits >= 0.25 * n
 
 
 def to_devanagari(text):

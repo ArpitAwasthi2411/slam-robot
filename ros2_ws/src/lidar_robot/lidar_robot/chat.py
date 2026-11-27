@@ -30,6 +30,7 @@ import threading
 import time
 
 from lidar_robot.commands import NAV_VERB, URGENT
+from lidar_robot.lang import instruction, reply_language
 from lidar_robot.llm import LLMError
 from lidar_robot.places import normalize
 
@@ -45,14 +46,25 @@ DONT_KNOW = ("I don't know that yet. Someone from the robot team can add it to m
 NOT_SURE = "I am not sure about that, and I don't want to guess. Please check with the department office."
 OFFLINE_NOTE = "I can't reach my language model right now, so I can only answer from my notebook."
 
+# (pattern, English reply, Hindi reply in Latin letters, the same in Devanagari for the Hindi voice).
+# Hindi only when the person spoke Hindi (lang.reply_language), so the same words always get the same language.
 SMALL_TALK = [
     (re.compile(r'^(hi+|hello+|hey+|namaste|namaskar|hii+|good (morning|afternoon|evening))\b'),
-     'Hello! I am Pathik. Ask me about the college, or tell me where to go.'),
-    (re.compile(r'\b(thank you|thanks|thankyou|shukriya|dhanyavaad|dhanyawad)\b'), "You're welcome."),
-    (re.compile(r'^(bye|goodbye|see you|alvida|tata)\b'), 'Goodbye! Have a good day.'),
-    (re.compile(r'\b(how are you|kaise ho|kaisa hai|how r u)\b'), 'I am doing well, thank you. How can I help?'),
+     'Hello! I am Pathik. Ask me about the college, or tell me where to go.',
+     'Namaste! Main Pathik hoon. College ke baare mein poochiye, ya bataiye kahan jaana hai.',
+     'नमस्ते! मैं पथिक हूँ। कॉलेज के बारे में पूछिए, या बताइए कहाँ जाना है।'),
+    (re.compile(r'\b(thank you|thanks|thankyou|shukriya|dhanyavaad|dhanyawad)\b'), "You're welcome.",
+     'Koi baat nahi.', 'कोई बात नहीं।'),
+    (re.compile(r'^(bye|goodbye|see you|alvida|tata)\b'), 'Goodbye! Have a good day.',
+     'Alvida! Aapka din achha ho.', 'अलविदा! आपका दिन अच्छा हो।'),
+    (re.compile(r'\b(how are you|kaise ho|kaisa hai|how r u)\b'), 'I am doing well, thank you. How can I help?',
+     'Main theek hoon, dhanyavaad. Bataiye, main kya madad kar sakti hoon?',
+     'मैं ठीक हूँ, धन्यवाद। बताइए, मैं क्या मदद कर सकती हूँ?'),
     (re.compile(r'\b(your name|who are you|tum kaun ho|aap kaun|kaun ho|naam kya)\b'),
-     'I am Pathik, the campus service robot. I can guide you to rooms and answer questions about the college.'),
+     'I am Pathik, the campus service robot. I can guide you to rooms and answer questions about the college.',
+     'Main Pathik hoon, campus ki service robot. Main aapko kamron tak le ja sakti hoon aur college ke baare '
+     'mein bata sakti hoon.',
+     'मैं पथिक हूँ, कैंपस की सर्विस रोबोट। मैं आपको कमरों तक ले जा सकती हूँ और कॉलेज के बारे में बता सकती हूँ।'),
 ]
 # A question that happens to name a place ("library timings?", "who sits in the HOD office") is a question,
 # not a trip: without this the rules would drive to the place they spotted in the sentence.
@@ -195,9 +207,12 @@ class ChatAgent:
         t = normalize(text)
         if len(t.split()) > 7:
             return None                      # a longer sentence that merely starts with "hi": let the model read it
-        for pat, reply in SMALL_TALK:
+        hindi = reply_language(text) == 'hi'
+        for pat, reply, hi, hi_dev in SMALL_TALK:
             if pat.search(t):
                 self.stats['offline'] += 1
+                if hindi:
+                    return self._result(self._gendered(hi), 'robot', offline=False, speak=self._gendered(hi_dev))
                 return self._result(reply, 'robot', offline=False)
         if ABILITIES.search(t):
             self.stats['offline'] += 1
@@ -206,10 +221,16 @@ class ChatAgent:
         lt = time.localtime(self.wall())
         if TIME_Q.search(t):
             self.stats['offline'] += 1
-            return self._result('It is ' + time.strftime('%I:%M %p', lt).lstrip('0') + '.', 'robot')
+            clock = time.strftime('%I:%M %p', lt).lstrip('0')
+            if hindi:
+                return self._result(f'Abhi {clock} hue hain.', 'robot', speak=f'अभी {clock} हुए हैं।')
+            return self._result('It is ' + clock + '.', 'robot')
         if DATE_Q.search(t):
             self.stats['offline'] += 1
-            return self._result('Today is ' + time.strftime('%A, %d %B %Y', lt) + '.', 'robot')
+            day = time.strftime('%A, %d %B %Y', lt)
+            if hindi:
+                return self._result(f'Aaj {day} hai.', 'robot', speak=f'आज {day} है।')
+            return self._result('Today is ' + day + '.', 'robot')
         return None
 
     def _offline(self, text, err=None):
@@ -266,6 +287,12 @@ class ChatAgent:
                     'shortest_order': {'type': 'boolean'},
                     'priority': {'type': 'integer', 'enum': [0, 1, 2, 3]}}}
 
+    def _gendered(self, text):
+        """Fixed Hindi replies are written for the female voice; the male voice says sakta / सकता."""
+        if self.voice_gender != 'male':
+            return text
+        return text.replace('sakti', 'sakta').replace('सकती', 'सकता')
+
     @staticmethod
     def gender_rule(gender):
         """Hindi verbs follow the speaker: the robot's Hindi voice is a woman (priyamvada) or a man (pratham)."""
@@ -277,7 +304,7 @@ class ChatAgent:
 
     SYSTEM = (
         'You are Pathik, a friendly indoor service robot in an engineering college. People talk to you by voice '
-        'or in an app, in English, Hindi or Hinglish. Answer in the SAME language the person used: English, or Hindi / Hinglish written in Latin letters ("HOD Dr. Shashi Gurung hain"). Never write Urdu or Arabic script: a question in Urdu or Devanagari script is spoken Hindi, so answer it in Hinglish in Latin letters. '
+        'or in an app, in English, Hindi or Hinglish. Answer in the language the LANGUAGE line names: English, or Hindi / Hinglish written in Latin letters ("HOD Dr. Shashi Gurung hain"). Never write Urdu or Arabic script. '
         'Your reply is spoken aloud: plain sentences, no lists, no markdown, at most 3 short sentences.\n'
         'You get: ROBOT (your own state right now), PLACES (every place on your map; "has" = things kept there, '
         '"m" = metres from you in a straight line), NOTEBOOK (facts the staff wrote for you), and the talk so far.\n'
@@ -312,7 +339,8 @@ class ChatAgent:
         facts = ('ROBOT: ' + json.dumps(robot, separators=(',', ':'), ensure_ascii=False)
                  + '\nPLACES: ' + json.dumps(catalog, separators=(',', ':'), ensure_ascii=False)
                  + '\nNOTEBOOK: ' + json.dumps(notebook, separators=(',', ':'), ensure_ascii=False))
-        msgs = [{'role': 'system', 'content': self.SYSTEM + self.gender_rule(self.voice_gender) + '\n' + facts}]
+        msgs = [{'role': 'system', 'content': self.SYSTEM + self.gender_rule(self.voice_gender) + '\n'
+                 + instruction(reply_language(text)) + '\n' + facts}]
         for _, role, said in self.history(user):
             msgs.append({'role': role, 'content': said})
         msgs.append({'role': 'user', 'content': text})
@@ -392,8 +420,12 @@ class ChatAgent:
                       'then_home': bool(d.get('then_home')), 'priority': prio, 'query': None}
         info = {'used': True, 'model': self.client.model, 'ms': ms, 'error': None,
                 'why': 'conversation' + (' (2 lookups)' if rounds > 1 else '')}
-        return self._result(reply, basis, used, action, rounds, info, flags=flags,
-                            speak=self._speak(d.get('speak'), reply, _plain(d.get('reply'))))
+        speak = self._speak(d.get('speak'), reply, _plain(d.get('reply')))
+        if reply_language(text) == 'en':
+            speak = None                     # an English question gets the English voice, whatever the model wrote
+            if re.search('[\u0900-\u097f]', reply):
+                flags.append('answered an English question in Hindi')
+        return self._result(reply, basis, used, action, rounds, info, flags=flags, speak=speak)
 
     @staticmethod
     def _speak(speak, reply, model_reply):
