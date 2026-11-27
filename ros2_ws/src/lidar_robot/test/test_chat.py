@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lidar_robot.auth import required_role  # noqa: E402
-from lidar_robot.chat import DONT_KNOW, NOT_SURE, ChatAgent  # noqa: E402
+from lidar_robot.chat import DONT_KNOW, MAX_REPLY, NOT_SURE, ChatAgent  # noqa: E402
 from lidar_robot.commands import CommandParser  # noqa: E402
 from lidar_robot.knowledge import Knowledge  # noqa: E402
 from lidar_robot.llm import GroqClient, LLMError  # noqa: E402
@@ -159,7 +159,7 @@ def test_number_that_is_not_in_the_notes_replaces_the_answer(tmp_path):
 def test_reply_is_plain_and_short(tmp_path):
     agent, parser, _, _ = make(tmp_path, say('**SLAM** means:\n- mapping\n- localising. ' + 'More words. ' * 80))
     r = agent.handle('what is slam', parser)['reply']
-    assert '*' not in r and '\n' not in r and len(r) <= 421
+    assert '*' not in r and '\n' not in r and len(r) <= MAX_REPLY + 1
 
 
 # ------------------------------------------------------------------ memory + planning
