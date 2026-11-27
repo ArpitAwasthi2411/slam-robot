@@ -50,11 +50,19 @@ class Recorder:
         self.device = device
         self.proc = None
         self.path = None
-        self.error = None if shutil.which('arecord') else 'arecord missing (sudo apt install alsa-utils)'
+        self.missing = None if shutil.which('arecord') else 'arecord missing (sudo apt install alsa-utils)'
+        self.error = self.missing
 
     def start(self):
-        if self.error:
+        # Only a missing arecord blocks recording. The error of the LAST recording (e.g. an app tap that
+        # stopped before any audio) must not: it used to stick, so after one empty phone tap every later
+        # press said "My microphone isn't working" until the robot restarted (27 Nov).
+        if self.missing:
+            self.error = self.missing
             return False
+        if self.proc:                       # a recording that was never stopped: end it first
+            self.stop()
+        self.error = None
         fd, self.path = tempfile.mkstemp(suffix='.wav', prefix='ptt_')
         os.close(fd)
         cmd = ['arecord', '-q'] + (['-D', self.device] if self.device else []) + \

@@ -87,7 +87,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Next lab day: **`docs/STEPS_lab_tests.md`** (find where it lags: wheels, drift, CPU while driving, loop rates, 10 trips, recovery); before that **`docs/STEPS_lab_19nov.md`** (laptop mapping of the department, encoder check, CPU report); INA226/dock in `docs/STEPS_lab_18nov.md`; before that `docs/STEPS_lab_16nov.md` (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-11-25**
+**Last updated: 2026-11-27**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -136,6 +136,7 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-27: (1) voice: after ONE app Speak tap that recorded nothing, every later push-to-talk said "My microphone isn't working" until restart: Recorder.start refused on the LAST recording's error; now only a missing arecord blocks (test_voice_recorder.py). (2) speech: Roman-letter Hinglish ("Main Lab 2 ja rahi hoon") went to the English voice and sounded wrong: speech.is_hinglish/to_devanagari send it to the Hindi voice with common Hindi words in Devanagari, names kept (test_speech.py +2). Robot's "about my creators / handover / who can take over" facts go in ~/maps/info.txt on the Pi (not in the repo). Not run on the robot yet.
 - 2026-11-25 (lab): robot pulled to one side: serial_probe --pwm/--vel showed the LEFT wheel reading 0.0 in some runs (intermittent loose wire), re-seated -> smooth again. cpu_report: 186/400 standing, 356/400 driving (Cartographer 125 %, vision 50 %, navigator ~55, bridge ~50, dashboard ~40). Recovery asks the app often because one-stop trips only allow wait/ask. docs/STEPS_lab_tests.md: test sheet to find where it lags. Not changed in code.
 - 2026-11-23 (start position): operator fixes where the robot starts on a saved map (Map mode card: Robot's spot =
   start / Pick start on map / Clear; magenta ring). ~/maps/start_poses.json (per map, atomic), map_mode.get/set_start_pose,

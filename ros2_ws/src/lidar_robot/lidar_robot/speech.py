@@ -8,8 +8,9 @@
 * Rate-limited: the same key not again within gap_s (8 s), and at most max_per_min phrases a minute
   (important keys like a question to a person or a low battery always get through).
 * Volume 0..1.5 (piper: samples scaled before aplay; espeak: amplitude).
-* Text with Devanagari letters uses the Hindi voice; everything else (also Hinglish in Latin letters)
-  the English one. The conversation agent sends Hindi/Hinglish answers in Devanagari for this reason.
+* Text with Devanagari letters uses the Hindi voice, and so does Hinglish in Latin letters ("Main Lab 2 ja
+  rahi hoon"): its common Hindi words are turned into Devanagari first (HINDI_WORDS), names stay as they are.
+  Everything else uses the English voice. The conversation agent also sends a Devanagari `speak` version.
 * Speed: Piper length_scale (rate, 1.0 = the voice's own speed, 1.2 = 20 % slower) with a short pause
   between sentences; espeak words per minute (speed). Piper streams straight into aplay, so the first
   sentence plays while the rest is still being made (much less waiting on a Pi 4).
@@ -93,11 +94,60 @@ def scale_pcm(raw, volume):
     return a.tobytes()
 
 
+# Hinglish in Latin letters ("Main Lab 2 ja rahi hoon"): the English voice reads these words as English and
+# mangles them (27 Nov). Common Hindi words -> Devanagari for the Hindi voice; names (Lab 2, HOD office) stay.
+HINDI_WORDS = {
+    'main': 'मैं', 'mai': 'मैं', 'hoon': 'हूँ', 'hun': 'हूँ', 'hu': 'हूँ', 'hai': 'है', 'hain': 'हैं', 'ho': 'हो',
+    'tha': 'था', 'thi': 'थी', 'ja': 'जा', 'jaa': 'जा', 'jao': 'जाओ', 'jaiye': 'जाइए', 'rahi': 'रही', 'raha': 'रहा',
+    'rahe': 'रहे', 'kar': 'कर', 'karo': 'करो', 'karna': 'करना', 'karke': 'करके', 'karein': 'करें', 'kijiye': 'कीजिए',
+    'sakti': 'सकती', 'sakta': 'सकता', 'sakte': 'सकते', 'aap': 'आप', 'aapka': 'आपका', 'aapki': 'आपकी',
+    'aapko': 'आपको', 'tum': 'तुम', 'mera': 'मेरा', 'meri': 'मेरी', 'mere': 'मेरे', 'mujhe': 'मुझे', 'hum': 'हम',
+    'hamara': 'हमारा', 'hamare': 'हमारे', 'kya': 'क्या', 'kaun': 'कौन', 'kab': 'कब', 'kahan': 'कहाँ',
+    'kaise': 'कैसे', 'kyun': 'क्यों', 'kyu': 'क्यों', 'kitna': 'कितना', 'kitne': 'कितने', 'kitni': 'कितनी',
+    'ka': 'का', 'ki': 'की', 'ke': 'के', 'ko': 'को', 'se': 'से', 'mein': 'में', 'me': 'में', 'par': 'पर',
+    'tak': 'तक', 'aur': 'और', 'ya': 'या', 'bhi': 'भी', 'nahi': 'नहीं', 'nahin': 'नहीं', 'haan': 'हाँ',
+    'ji': 'जी', 'yahan': 'यहाँ', 'wahan': 'वहाँ', 'idhar': 'इधर', 'udhar': 'उधर', 'abhi': 'अभी', 'phir': 'फिर',
+    'pehle': 'पहले', 'baad': 'बाद', 'saath': 'साथ', 'liye': 'लिए', 'theek': 'ठीक', 'thik': 'ठीक',
+    'accha': 'अच्छा', 'achha': 'अच्छा', 'chalo': 'चलो', 'chaliye': 'चलिए', 'aaiye': 'आइए', 'gaya': 'गया',
+    'gayi': 'गई', 'gaye': 'गए', 'pahunch': 'पहुँच', 'pahunchi': 'पहुँची', 'pahuncha': 'पहुँचा', 'ruko': 'रुको',
+    'rukiye': 'रुकिए', 'rasta': 'रास्ता', 'raasta': 'रास्ता', 'kamra': 'कमरा', 'kripya': 'कृपया',
+    'dhanyavaad': 'धन्यवाद', 'dhanyawad': 'धन्यवाद', 'shukriya': 'शुक्रिया', 'namaste': 'नमस्ते', 'maaf': 'माफ़',
+    'bataiye': 'बताइए', 'batao': 'बताओ', 'bata': 'बता', 'chahiye': 'चाहिए', 'wala': 'वाला', 'wali': 'वाली',
+    'bahar': 'बाहर', 'paas': 'पास', 'saamne': 'सामने', 'andar': 'अंदर', 'upar': 'ऊपर', 'neeche': 'नीचे',
+    'ek': 'एक', 'teen': 'तीन', 'mil': 'मिल', 'milega': 'मिलेगा', 'milegi': 'मिलेगी', 'dijiye': 'दीजिए',
+    'de': 'दे', 'diya': 'दिया', 'lijiye': 'लीजिए', 'intezaar': 'इंतज़ार', 'samay': 'समय', 'aaj': 'आज', 'kal': 'कल',
+}
+# Also ordinary English words: they never decide on their own that a sentence is Hinglish.
+AMBIGUOUS = {'main', 'mai', 'me', 'hu', 'ho', 'tha', 'thi', 'ya', 'par', 'de', 'mil', 'ji', 'kal', 'ek', 'teen'}
+LATIN_WORD = re.compile(r"[A-Za-z]+")
+
+
+def is_hinglish(text):
+    """Hindi written in Latin letters: at least 2 clearly Hindi words making up a quarter of the words."""
+    if DEVANAGARI.search(text or ''):
+        return False
+    words = [w.lower() for w in LATIN_WORD.findall(text or '')]
+    hits = sum(1 for w in words if w in HINDI_WORDS and w not in AMBIGUOUS)
+    return hits >= 2 and hits >= 0.25 * len(words)
+
+
+def to_devanagari(text):
+    """Known Hindi words -> Devanagari so the Hindi voice says them right; other words (names) unchanged."""
+    return LATIN_WORD.sub(lambda m: HINDI_WORDS.get(m.group(0).lower(), m.group(0)), text)
+
+
+def prepare_text(text, voices, one_voice=''):
+    """-> (voice, text to speak). Hinglish goes to the Hindi voice, with its Hindi words in Devanagari."""
+    if voices.get('hi') and is_hinglish(text):
+        return 'hi', to_devanagari(text)
+    return pick_lang(text, voices, one_voice), text
+
+
 def pick_lang(text, voices, one_voice='hi'):
-    """Which voice reads this text. Devanagari needs the Hindi voice. With one_voice='hi' the Hindi voice reads
-    English too (Indian-accented English), so the robot is always the SAME person; '' = English voice for
-    Latin text, Hindi voice for Devanagari (two different people: 17 Nov kiosk complaint)."""
-    if DEVANAGARI.search(text) and voices.get('hi'):
+    """Which voice reads this text. Devanagari (and Hinglish in Latin letters) needs the Hindi voice. With
+    one_voice='hi' the Hindi voice reads English too (Indian-accented English), so the robot is always the SAME
+    person; '' = English voice for English, Hindi voice for Hindi (two different people: 17 Nov kiosk complaint)."""
+    if (DEVANAGARI.search(text) or is_hinglish(text)) and voices.get('hi'):
         return 'hi'
     if one_voice in ('hi', 'en') and voices.get(one_voice):
         return one_voice
@@ -147,7 +197,7 @@ class Speaker:
         return None
 
     def _run_piper(self, text):
-        lang = pick_lang(text, self.voices, self.one_voice)
+        lang, text = prepare_text(text, self.voices, self.one_voice)
         model = self.voices.get(lang) or self.voices.get('en') or self.voices.get('hi')
         rate = 22050
         cfg = model + '.json'
@@ -179,6 +229,8 @@ class Speaker:
                     proc.kill()
 
     def _run_espeak(self, text):
+        if is_hinglish(text):
+            text = to_devanagari(text)
         v = 'hi' if DEVANAGARI.search(text) or self.one_voice == 'hi' else self.voice
         subprocess.run([self._espeak, '-v', v, '-s', str(int(self.speed / self.rate)), '-a', str(int(100 * self.volume)), text],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)

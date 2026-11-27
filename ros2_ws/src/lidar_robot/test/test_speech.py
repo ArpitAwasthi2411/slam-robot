@@ -78,3 +78,25 @@ def test_voice_chosen_by_name(tmp_path, monkeypatch):
     assert speech.find_voice('hi').endswith('hi_IN-pratham-medium.onnx')                 # first one by default
     assert speech.find_voice('hi', 'hi_IN-priyamvada-medium').endswith('priyamvada-medium.onnx')
     assert speech.find_voice('hi', 'missing-voice').endswith('pratham-medium.onnx')      # unknown name: default
+
+
+def test_hinglish_in_latin_letters_uses_hindi_voice():
+    """27 Nov: the English voice read Roman Hinglish replies ("Main Lab 2 ja rahi hoon") as English words."""
+    from lidar_robot.speech import is_hinglish, pick_lang, prepare_text, to_devanagari
+    v = {'en': '/v/en.onnx', 'hi': '/v/hi.onnx'}
+    s = 'Main Lab 2 ja rahi hoon, aap yahan intezaar kijiye.'
+    assert is_hinglish(s)
+    assert pick_lang(s, v, '') == 'hi'
+    lang, text = prepare_text(s, v, '')
+    assert lang == 'hi' and 'Lab 2' in text and 'मैं' in text and 'रही' in text and 'हूँ' in text
+    assert to_devanagari('HOD office ke bahar') == 'HOD office के बाहर'
+
+
+def test_english_stays_with_english_voice():
+    from lidar_robot.speech import is_hinglish, prepare_text
+    v = {'en': '/v/en.onnx', 'hi': '/v/hi.onnx'}
+    for s in ('Going to Lab 2.', 'The main gate is to the left of the library.', 'Excuse me, may I pass?',
+              'I am Pathik. Ask me about the college.', 'Hello, who are you?'):
+        assert not is_hinglish(s), s
+        assert prepare_text(s, v, '') == ('en', s)
+    assert prepare_text('Main Lab 2 ja rahi hoon', {'en': '/v/en.onnx'}, '')[0] == 'en'   # no Hindi voice installed
