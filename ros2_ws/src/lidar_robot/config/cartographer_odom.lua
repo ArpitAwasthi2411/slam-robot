@@ -60,7 +60,15 @@ TRAJECTORY_BUILDER_2D.submaps.num_range_data = 90     -- bigger submaps = more w
 --    "best" can be 10 cm further along -> corridors come out short / long / kinked
 --  * a strong pull towards the odometry prediction for translation, a medium one for rotation (gyro)
 -- This needs good odometry: encoders counting, ticks_per_rev measured over 5 m, gyro working + gyro_scale.
-TRAJECTORY_BUILDER_2D.use_online_correlative_scan_matching = false
+-- 28 Nov: with the search off, ONE bad moment (a dropped scan / odometry burst, a wheel slip in a turn) put
+-- the robot "somewhere else" and the rest of the drive was drawn there (map bent, old walls painted over).
+-- So a SMALL correlative search is back on: +-8 cm / +-6 deg around the odometry guess (too small to slide
+-- along a corridor), and moving away from the guess is expensive. It catches the jumps, not the corridor.
+TRAJECTORY_BUILDER_2D.use_online_correlative_scan_matching = true
+TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.linear_search_window = 0.08
+TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.angular_search_window = math.rad(6.)
+TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.translation_delta_cost_weight = 10.
+TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.rotation_delta_cost_weight = 1.
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.occupied_space_weight = 1.
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.translation_weight = 20.
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.rotation_weight = 40.
@@ -81,7 +89,8 @@ POSE_GRAPH.optimize_every_n_nodes = 60          -- with 20 cm nodes = every ~12 
 POSE_GRAPH.optimization_problem.ceres_solver_options.num_threads = 2   -- leave cores for the Python nodes (all 4 busy = stale odometry = "position lost")
 -- loop closures: corridors with identical doors look alike. A wrong closure folds the map, a missed one only
 -- leaves a little drift, so be strict.
-POSE_GRAPH.constraint_builder.min_score = 0.72   -- labs with identical bench rows: 0.65 snapped one lab onto another
+POSE_GRAPH.constraint_builder.min_score = 0.76   -- labs with identical bench rows: 0.65 snapped one lab onto another,
+                                                 -- 0.72 still "put it somewhere else" now and then (28 Nov)
 POSE_GRAPH.constraint_builder.sampling_ratio = 0.15           -- fewer loop-closure tries per node (default 0.3): half the CPU
 POSE_GRAPH.global_sampling_ratio = 0.001
 POSE_GRAPH.constraint_builder.global_localization_min_score = 0.75

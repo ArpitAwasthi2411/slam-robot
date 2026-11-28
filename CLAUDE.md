@@ -87,7 +87,7 @@ MCP server so AI assistants can drive it, Docker + CI/CD deployment.
 Next lab day: **`docs/STEPS_lab_tests.md`** (find where it lags: wheels, drift, CPU while driving, loop rates, 10 trips, recovery); before that **`docs/STEPS_lab_19nov.md`** (laptop mapping of the department, encoder check, CPU report); INA226/dock in `docs/STEPS_lab_18nov.md`; before that `docs/STEPS_lab_16nov.md` (everything since 2 Nov, with a results table). Full task list with owners and ready-to-paste prompts: **`docs/WORK_LEFT.md`**. Keys/accounts and where they go
 in `~/robot.env`: **`docs/KEYS.md`**. Robot test steps for phases 0-6: **`docs/STEPS_next_run.md`**.
 
-**Last updated: 2026-11-27**
+**Last updated: 2026-11-28**
 
 Verified on hardware (classic ESP32): LiDAR + Cartographer mapping (15.5 × 12.2 m map), ESP32 link ~50 Hz,
 odometry, ultrasonics, navigator driving, app.
@@ -136,6 +136,7 @@ Deadlines: ROSCon India proposal **8 Nov 2026**; IndiaAI Fellowship **30 Nov 202
 
 ## Session log (newest first, one line each)
 
+- 2026-11-28: mapping bent / "forgot" walls (robot drawn somewhere else after one bad moment: dropped scan, odometry burst, slip in a turn). cartographer_odom.lua: small online correlative search back on (+-8 cm / +-6 deg, translation_delta_cost 10, so it cannot slide along corridors), loop closure min_score 0.76 (0.72). Not run on the robot yet. Start position card needs APK Pathik-49+ and a frozen map.
 - 2026-11-27 (feelings): asked about its creators / team leaving, Pathik answered flatly (3-sentence cap, factual notes). Chat rule 8: warm, personal answers about its team, up to 5 sentences, feelings allowed, facts only from the notebook; MAX_REPLY 600 (420). Richer creator notes go in ~/maps/info.txt on the Pi (not in the repo). Rear ultrasonic planned: ECHO on the BSS138's free HV4/LV4 channel (no new shifter); pins + firmware not done yet.
 - 2026-11-27 (later): reply language is now a RULE, not the model's choice (it was unpredictable): lang.py reply_language() -> Hindi only when the person wrote/spoke Hindi (Devanagari or Hinglish, 1 clear Hindi word is enough for what people say) or asked for it ('hindi mein', 'in Hindi'); 'in English' forces English; else English. Chat + command prompts get a fixed LANGUAGE line; an English question never gets a Hindi `speak`; small talk / time / date have Hindi versions (Roman + Devanagari, sakti/sakta by voice gender). speech: more Hindi words, hindi_hits(). test_lang.py (4). Not run on the robot yet.
 - 2026-11-27: (1) voice: after ONE app Speak tap that recorded nothing, every later push-to-talk said "My microphone isn't working" until restart: Recorder.start refused on the LAST recording's error; now only a missing arecord blocks (test_voice_recorder.py). (2) speech: Roman-letter Hinglish ("Main Lab 2 ja rahi hoon") went to the English voice and sounded wrong: speech.is_hinglish/to_devanagari send it to the Hindi voice with common Hindi words in Devanagari, names kept (test_speech.py +2). Robot's "about my creators / handover / who can take over" facts go in ~/maps/info.txt on the Pi (not in the repo). Not run on the robot yet.
