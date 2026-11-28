@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="wool">#0d0d10</color>
+    <color name="pathik_icon_bg">#FFFFFF</color>
     <style name="PathikTheme" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/wool</item>
         <item name="android:statusBarColor">@color/wool</item>
